@@ -1,0 +1,63 @@
+[project]
+name = "tether"
+version = "0.1.0"
+description = "Tether — IM bridge for the go-agent-sdk HTTP/SSE API"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+  "httpx>=0.27",
+  "httpx-sse>=0.4",
+  "pydantic>=2.7",
+  "pydantic-settings>=2.3",
+  "PyYAML>=6",
+  "markdown-it-py>=3",
+  "aiosqlite>=0.20",
+  "tenacity>=8",
+  "structlog>=24",
+  "filetype>=1.2",
+]
+
+[project.optional-dependencies]
+wecom = ["wecom-aibot-python-sdk>=1.0.2"]
+feishu = ["feishu-bot-sdk>=0.13"]
+qq = ["qq-botpy>=1.2"]
+wechat = ["wechatbot-sdk"]
+media = ["Pillow>=10"]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+  "respx>=0.21",
+  "ruff>=0.5",
+  "mypy>=1.10",
+]
+
+[project.scripts]
+tether = "tether.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tether"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+ignore = ["B008"]
+
+[tool.mypy]
+python_version = "3.12"
+packages = ["tether"]
+mypy_path = "src"
+ignore_missing_imports = true
+warn_unused_ignores = true

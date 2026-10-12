@@ -1,0 +1,132 @@
+# Tether example configuration. Secrets are NOT placed here (see .env.example).
+# Values shown are the defaults unless noted otherwise.
+
+server:
+  base_url: http://127.0.0.1:8787
+  token_env: AGENTSERVE_TOKEN
+  request_timeout_s: 30
+  sse_reconnect_ms: 1000
+  pool: []                    # [{name, base_url, token_env, working_directory, default_agent}]
+
+agent:
+  default_agent: build
+  default_model: null
+  subagent_depth: null
+  writable: {}                # e.g. {build: true, plan: false}
+  switch_guard: reject        # reject | migrate
+
+model:
+  context_limit: null         # tokens; single value takes the conservative (minimum) across the pool
+
+projects:
+  isolation: auto             # auto | shared | per_conversation
+  provider: pool              # shared | pool | worktree | overlay | container | remote
+  on_conflict: isolate        # isolate | reject
+  base_dir: /var/lib/tether/workspaces
+  ttl_s: 3600
+  max_leases: 32
+  git_base_ref: origin/HEAD
+  supervisor_command: null
+  cow:
+    mode: auto                # auto | overlayfs | reflink | clonefile
+    base_readonly: true
+  container:
+    runtime: docker           # docker | podman | k8s
+    image: ghcr.io/jiaweisky/agentserve:latest
+    network: none
+    cpus: "2"
+    memory: 2g
+    read_only_root: true
+
+sessions:
+  idle_reset_s: 0
+  busy_delivery: queue        # queue | steer
+  max_active_routes: 1000
+
+dedup:
+  ttl_s: 600
+
+group:
+  inject_speaker: true
+  speaker_format: "[{name}]: {text}"
+  mention_others: true
+  reply_with_mention: true
+  cross_user_delivery: queue  # queue | steer_same_user
+  admins: []
+  hitl_scope: initiator       # initiator | participants | admins
+  command_scope: initiator    # initiator | admins
+  queue_backup_hint: true
+
+identity:
+  inject: on_change           # once | always | on_change
+  source: im                  # im | agent | config
+  display_name: null
+  description: null
+  warn_on_mismatch: true
+  sync_participants: false
+  preamble_tag: bridge-context
+
+streaming:
+  mode: auto                  # auto | native | edit | chunk | final
+  min_interval_ms: 700
+  idle_progress_ms: 2000
+  boundary_flush: true
+  max_live_chars: 4000
+  rate_limit_backoff: 2.0
+  show_tools: true
+  show_reasoning: false
+  reasoning_style: collapsible  # collapsible | separate | inline
+  show_usage: true
+  max_chars_override: null
+
+media:
+  inline_limit_bytes: 10485760
+  max_bytes: 52428800
+  spool_dir: "{working_dir}/.tether/spool"
+  fetch_url_outbound: false
+  outbound:
+    sources: [tool_media]     # tool_media | changed_files
+    image_max_bytes: 10485760
+
+permissions:
+  auto:
+    read: once
+    glob: once
+    grep: once
+    webfetch: ask
+    bash: ask
+    write: ask
+    edit: ask
+    apply_patch: ask
+  default: ask
+  timeout_s: 300
+  fallback: reject            # reject | allow
+  poll_interval_s: 30
+
+commands:
+  prefix: "/"
+
+access:
+  allow_users: []
+  allow_groups: []
+
+channels:
+  wecom:
+    enabled: false
+    bot_id_env: WECOM_BOT_ID
+    secret_env: WECOM_BOT_SECRET
+  feishu:
+    enabled: false
+    app_id_env: FEISHU_APP_ID
+    app_secret_env: FEISHU_APP_SECRET
+  qq:
+    enabled: false
+    appid_env: QQ_BOT_APPID
+    secret_env: QQ_BOT_SECRET
+  wechat:
+    enabled: false
+    cred_path: ~/.wechatbot/credentials.json
+
+logging:
+  level: INFO
+  json: true

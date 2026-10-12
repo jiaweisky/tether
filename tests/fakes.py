@@ -1,0 +1,136 @@
+"""An in-memory stand-in for the agent client, used by the offline tests."""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+
+from tether.agent.events import (
+    AgentInfo,
+    ModelInfo,
+    PendingPermission,
+    PendingQuestion,
+    SessionInfo,
+    ToolInfo,
+)
+
+
+class FakeAgentClient:
+    def __init__(self, base_url: str = "http://fake", token: str | None = None) -> None:
+        self.base_url = base_url
+        self.token = token
+        self.sessions: dict[str, SessionInfo] = {}
+        self.prompts: list[dict[str, Any]] = []
+        self.interrupted: list[str] = []
+        self.permission_replies: list[tuple[str, str, str]] = []
+        self.question_replies: list[tuple[str, str, list[list[str]]]] = []
+        self.rejected_questions: list[tuple[str, str]] = []
+        self.uploaded: list[dict[str, Any]] = []
+        self._counter = 0
+        self._permissions: list[PendingPermission] = []
+        self._questions: list[PendingQuestion] = []
+        self._events: asyncio.Queue[Any] = asyncio.Queue()
+        self.tools: list[ToolInfo] = [ToolInfo("read"), ToolInfo("glob"), ToolInfo("grep")]
+        self.models: list[ModelInfo] = [ModelInfo("m", "openai", ["text", "image"], [])]
+        self.active: set[str] = set()
+        self.message_store: dict[str, list[dict[str, Any]]] = {}
+
+    async def aclose(self) -> None:
+        return None
+
+    # discovery
+    async def list_agents(self):
+        return [AgentInfo("build", description="Build agent")]
+
+    async def list_models(self):
+        return self.models
+
+    async def agent_tools(self, agent: str):
+        return self.tools
+
+    async def active_sessions(self):
+        return {sid: {"type": "running"} for sid in self.active}
+
+    # sessions
+    async def create_session(self, *, agent, model=None, title=None):
+        self._counter += 1
+        info = SessionInfo(id=f"ses_{self._counter}", agent=agent, model=model, title=title)
+        self.sessions[info.id] = info
+        return info
+
+    async def get_session(self, sid):
+        return self.sessions[sid]
+
+    async def set_agent(self, sid, agent): ...
+    async def set_model(self, sid, model_ref): ...
+    async def set_title(self, sid, title): ...
+    async def delete_session(self, sid): ...
+
+    # execution
+    async def prompt(self, sid, *, prompt, files=None, id=None, delivery="queue"):
+        self.prompts.append(
+            {"sid": sid, "prompt": prompt, "files": files or [], "id": id, "delivery": delivery}
+        )
+        return {"queued": True}
+
+    async def interrupt(self, sid):
+        self.interrupted.append(sid)
+
+    async def compact(self, sid):
+        return True
+
+    async def wait(self, sid, timeout_s):
+        return True
+
+    # read
+    async def messages(self, sid, *, limit=200):
+        return self.message_store.get(sid, [])
+
+    async def history(self, sid, *, after=0, limit=200):
+        return []
+
+    async def upload_file(self, sid, *, data, mime, name=None, provider_id=None):
+        fid = f"file_{len(self.uploaded)}"
+        self.uploaded.append({"sid": sid, "mime": mime, "name": name, "size": len(data)})
+        return {"fileId": fid}
+
+    # interaction
+    async def reply_permission(self, sid, rid, *, reply, message=None):
+        self.permission_replies.append((sid, rid, reply))
+        self._permissions = [p for p in self._permissions if p.id != rid]
+
+    async def reply_question(self, sid, rid, answers):
+        self.question_replies.append((sid, rid, answers))
+        self._questions = [q for q in self._questions if q.id != rid]
+
+    async def reject_question(self, sid, rid):
+        self.rejected_questions.append((sid, rid))
+        self._questions = [q for q in self._questions if q.id != rid]
+
+    async def list_permissions(self):
+        return list(self._permissions)
+
+    async def session_permissions(self, sid):
+        return [p for p in self._permissions if p.session_id == sid]
+
+    async def list_questions(self):
+        return list(self._questions)
+
+    async def session_questions(self, sid):
+        return [q for q in self._questions if q.session_id == sid]
+
+    def add_permission(self, perm: PendingPermission) -> None:
+        self._permissions.append(perm)
+
+    def add_question(self, question: PendingQuestion) -> None:
+        self._questions.append(question)
+
+    def push_event(self, event: Any) -> None:
+        self._events.put_nowait(event)
+
+    async def events(self):
+        while True:
+            event = await self._events.get()
+            if event is None:
+                return
+            yield event
