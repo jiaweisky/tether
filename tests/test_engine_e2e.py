@@ -6,6 +6,7 @@ import pytest
 from fakes import FakeAgentClient
 
 from tether.agent.events import (
+    ATTACHMENT_OMITTED,
     PERMISSION_ASKED,
     QUESTION_ASKED,
     SESSION_STATUS,
@@ -478,3 +479,18 @@ def test_route_normalizes_dict_model():
         model={"id": "deepseek-flash", "providerID": "", "variant": "default"},
     )
     assert route.model == "deepseek-flash"
+
+
+@pytest.mark.asyncio
+async def test_attachment_omitted_is_noticed(tmp_path):
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+    await app._route_event(
+        Event(
+            "a1",
+            ATTACHMENT_OMITTED,
+            {"sessionID": sid, "name": "big.zip", "reason": "too large"},
+        )
+    )
+    assert any(m["kind"] == "text" and "big.zip" in m["text"] for m in conn.messages)

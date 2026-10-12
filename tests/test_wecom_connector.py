@@ -332,3 +332,73 @@ async def test_acknowledge_updates_the_clicked_card():
     await connector.acknowledge(interaction, "✅ Allow once")
     assert sdk.card_updates and sdk.card_updates[0]["main_title"]["title"] == "✅ Allow once"
     assert sdk.card_updates[0]["task_id"] == "tether-x"
+
+
+@pytest.mark.asyncio
+async def test_outbound_media_falls_back_to_proactive_when_reply_fails():
+    connector, sdk, items = await start_connector()
+    await sdk.emit("message.text", text_frame("hi"))
+    conv = items[0].conversation
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("reply slot taken by the text stream")
+
+    sdk.reply_media = boom
+    plan = OutboundPlan(
+        segments=[
+            MediaSegment(media=RichMedia(kind="image", data=b"png", mime="image/png", name="a.png"))
+        ]
+    )
+    await connector.send(conv, plan)
+    assert sdk.sent_media == [("u1", "image", "media-1")]
+
+
+def voice_frame(*, content: str | None, url: str | None = "https://x/v") -> dict:
+    voice: dict = {}
+    if content is not None:
+        voice["content"] = content
+    if url is not None:
+        voice["url"] = url
+        voice["aeskey"] = "k"
+    return {
+        "cmd": "aibot_msg_callback",
+        "headers": {"req_id": "r1"},
+        "body": {
+            "msgtype": "voice",
+            "msgid": "v1",
+            "chatid": "u1",
+            "chattype": "single",
+            "from": {"userid": "u1"},
+            "voice": voice,
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_voice_with_recognized_text_skips_audio():
+    _, sdk, items = await start_connector()
+    await sdk.emit("message.voice", voice_frame(content="你好"))
+    message = items[0]
+    assert message.text == "你好"
+    assert message.attachments == []
+
+
+@pytest.mark.asyncio
+async def test_voice_without_text_attaches_audio():
+    _, sdk, items = await start_connector()
+    await sdk.emit("message.voice", voice_frame(content=None))
+    message = items[0]
+    assert message.text == ""
+    assert message.attachments and message.attachments[0].kind == "voice"
+
+
+@pytest.mark.asyncio
+async def test_outbound_media_derives_filename_from_mime():
+    connector, sdk, items = await start_connector()
+    await sdk.emit("message.text", text_frame("hi"))
+    conv = items[0].conversation
+    plan = OutboundPlan(
+        segments=[MediaSegment(media=RichMedia(kind="image", data=b"png", mime="image/png"))]
+    )
+    await connector.send(conv, plan)
+    assert sdk.uploads == [("image", "image.png", 3)]

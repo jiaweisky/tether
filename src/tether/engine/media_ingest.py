@@ -16,7 +16,7 @@ from ..agent.client import AgentClient
 from ..agent.errors import AgentError
 from ..config import Config, resolve_spool_dir
 from ..connector import IMConnector
-from ..models import Attachment, normalize_media_kind
+from ..models import Attachment, MediaBytes, normalize_media_kind
 from ..util.logging import get_logger
 from ..util.media import sniff_mime, spool_path
 
@@ -63,20 +63,28 @@ class MediaIngest:
     ) -> None:
         kind = normalize_media_kind(attachment.kind)
         label = attachment.name or kind
-        if kind not in inputs:
-            result.notes.append(
-                f"⚠️ Attachment `{label}` dropped: the model does not accept this modality."
-            )
+        max_bytes = self.config.media.max_bytes
+        if _declared_too_large(attachment.size, max_bytes):
+            _note_too_large(result, label)
             return
-        try:
-            media = await self.connector.download(attachment)
-        except Exception as exc:  # noqa: BLE001 - degrade, never drop silently
-            log.warning("media_download_failed", kind=kind, error=str(exc))
-            result.notes.append(f"⚠️ Failed to download attachment `{label}`.")
+        media = await self._download(attachment, label, result)
+        if media is None:
             return
         data = media.data
-        if len(data) > self.config.media.max_bytes:
-            result.notes.append(f"⚠️ Attachment `{label}` exceeds the size limit and was skipped.")
+        if len(data) > max_bytes:
+            _note_too_large(result, label)
+            return
+
+        if kind not in inputs:
+            # The model cannot consume this modality; keep the bytes on disk so a
+            # tool can still reach them instead of dropping the attachment.
+            self._spool(
+                attachment,
+                data,
+                result,
+                reason=f"{kind} is not supported by the model",
+                hint="kept on disk for a tool",
+            )
             return
 
         mime = sniff_mime(data, attachment.name, media.mime or attachment.mime)
@@ -86,6 +94,16 @@ class MediaIngest:
         if await self._try_provider_upload(sid, data, mime, attachment.name, result):
             return
         self._spool(attachment, data, result, reason="large media; no upload channel")
+
+    async def _download(
+        self, attachment: Attachment, label: str, result: IngestResult
+    ) -> MediaBytes | None:
+        try:
+            return await self.connector.download(attachment)
+        except Exception as exc:  # noqa: BLE001 - degrade, never drop silently
+            log.warning("media_download_failed", error=str(exc))
+            result.notes.append(f"⚠️ Failed to download attachment `{label}`.")
+            return None
 
     async def _try_provider_upload(
         self, sid: str, data: bytes, mime: str, name: str | None, result: IngestResult
@@ -110,13 +128,33 @@ class MediaIngest:
         return True
 
     def _spool(
-        self, attachment: Attachment, data: bytes, result: IngestResult, *, reason: str
+        self,
+        attachment: Attachment,
+        data: bytes,
+        result: IngestResult,
+        *,
+        reason: str,
+        hint: str = "read it with a tool",
     ) -> None:
-        root = resolve_spool_dir(self.config.media.spool_dir, self.working_dir)
-        path = spool_path(root, data, attachment.name)
-        path.write_bytes(data)
+        label = attachment.name or reason
+        try:
+            root = resolve_spool_dir(self.config.media.spool_dir, self.working_dir)
+            path = spool_path(root, data, attachment.name)
+            path.write_bytes(data)
+        except OSError as exc:  # noqa: BLE001 - a disk failure must not break the turn
+            log.warning("media_spool_failed", error=str(exc))
+            result.notes.append(f"⚠️ Could not save attachment `{label}` to disk.")
+            return
         result.spooled.append(str(path))
-        result.notes.append(f"📎 Attachment saved as `{path}` ({reason}); read it with a tool.")
+        result.notes.append(f"📎 Attachment saved as `{path}` ({reason}); {hint}.")
+
+
+def _declared_too_large(size: int | None, max_bytes: int) -> bool:
+    return size is not None and size > max_bytes
+
+
+def _note_too_large(result: IngestResult, label: str) -> None:
+    result.notes.append(f"⚠️ Attachment `{label}` exceeds the size limit and was skipped.")
 
 
 def _inline_file(data: bytes, mime: str, name: str | None) -> dict[str, Any]:

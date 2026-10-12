@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 
 from ..config import Config
-from ..models import BotIdentity, InboundMessage, Route, Sender
+from ..models import Attachment, BotIdentity, InboundMessage, Route, Sender, normalize_media_kind
 
 _SPEAKER_PREFIX_RE = re.compile(r"^\s*\[[^\]]{1,64}\]:\s*", re.MULTILINE)
 
@@ -77,6 +77,13 @@ def _identity_names(identity: BotIdentity) -> list[str]:
     return [name for name in {identity.name, *identity.aliases} if name]
 
 
+def _attachment_placeholder(attachments: list[Attachment]) -> str:
+    labels = [att.name or normalize_media_kind(att.kind) for att in attachments]
+    if len(labels) == 1:
+        return f"[{labels[0]}]"
+    return f"[{len(labels)} attachments: {', '.join(labels)}]"
+
+
 class PromptComposer:
     def __init__(self, config: Config) -> None:
         self.config = config
@@ -101,6 +108,11 @@ class PromptComposer:
     ) -> str:
         conversation = route.conversation
         text = self._compose_body(conversation.is_group, inbound, identity)
+        if not text.strip() and inbound.attachments:
+            # A caption-less attachment still needs non-empty prompt text: the
+            # agent service rejects an empty prompt, and the media itself is
+            # delivered out of band as a file part.
+            text = _attachment_placeholder(inbound.attachments)
         inject = include_identity if include_identity is not None else self.should_inject(route)
         if not inject:
             return text

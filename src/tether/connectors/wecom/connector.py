@@ -7,6 +7,8 @@ dicts shaped ``{"cmd": ..., "headers": {"req_id": ...}, "body": {...}}``.
 
 from __future__ import annotations
 
+import mimetypes
+import os
 import uuid
 from collections.abc import Callable
 from typing import Any, Protocol
@@ -223,6 +225,23 @@ def _media_body(media_type: str, media_id: str) -> dict:
     return {"msgtype": media_type, media_type: {"media_id": media_id}}
 
 
+def _wecom_media_type(kind: str) -> str:
+    """Map our normalized media kind to WeCom's msgtype."""
+    return _MEDIA_TYPES.get(normalize_media_kind(kind), "file")
+
+
+def _filename(name: str | None, mime: str | None, fallback: str) -> str:
+    """Ensure an upload has a filename with an extension.
+
+    WeCom expects a filename, and some types reject one without an extension; if
+    the source name lacks one, derive it from the MIME type.
+    """
+    if name and os.path.splitext(name)[1]:
+        return name
+    extension = mimetypes.guess_extension(mime) if mime else None
+    return f"{name or fallback}{extension or ''}"
+
+
 class WeComConnector(BaseConnector):
     name = "wecom"
     capabilities = wecom_capabilities
@@ -303,10 +322,13 @@ class WeComConnector(BaseConnector):
         conv = self._conversation(frame)
         self._frames[conv.key] = frame
         body = _body(frame)
-        # Voice messages may carry recognised text instead of (or alongside) audio.
+        # Voice messages usually carry platform-recognised text; if they do, that
+        # is the user's message and there is no need to fetch the audio (the
+        # model cannot consume it anyway). Only fall back to the audio when no
+        # text was recognised, so the ingest pipeline can spool it.
         text = str(_get(body, "voice", "content", default="") or "")
         attachments = []
-        if _get(body, "voice", "url"):
+        if not text and _get(body, "voice", "url"):
             attachments.append(self._attachment(body, "voice", "voice"))
         await self.emit(
             InboundMessage(
@@ -494,14 +516,19 @@ class WeComConnector(BaseConnector):
     async def _send_media(self, conv: Conversation, media: RichMedia) -> str:
         if media.data is None:
             raise Unsupported("wecom media send requires bytes")
-        media_type = _MEDIA_TYPES.get(media.kind, "file")
-        filename = media.name or media_type
+        media_type = _wecom_media_type(media.kind)
+        filename = _filename(media.name, media.mime, media_type)
         media_id = await self._sdk.upload_media(media.data, media_type, filename)
         frame = self._frames.get(conv.key)
         if frame is not None:
-            await self._sdk.reply_media(frame, media_type, media_id)
-        else:
-            await self._sdk.send_media_message(conv.id, media_type, media_id)
+            try:
+                await self._sdk.reply_media(frame, media_type, media_id)
+                return "media"
+            except Exception as exc:  # noqa: BLE001
+                # The reply slot may already hold the text stream or a card, so
+                # fall through to a proactive push instead of failing.
+                log.warning("wecom_reply_media_failed", conversation=conv.key, error=str(exc))
+        await self._sdk.send_media_message(conv.id, media_type, media_id)
         return "media"
 
     async def _typing(self, conv: Conversation) -> None:
@@ -517,8 +544,9 @@ class WeComConnector(BaseConnector):
         return MediaBytes(data=data, mime=att.mime, name=name or att.name)
 
     async def upload(self, data: MediaBytes, *, kind: str) -> MediaHandle:
-        media_type = _MEDIA_TYPES.get(normalize_media_kind(kind), "file")
-        media_id = await self._sdk.upload_media(data.data, media_type, data.name or media_type)
+        media_type = _wecom_media_type(kind)
+        filename = _filename(data.name, data.mime, media_type)
+        media_id = await self._sdk.upload_media(data.data, media_type, filename)
         return MediaHandle(handle=media_id, kind=normalize_media_kind(kind))
 
     async def identity(self, conv: Conversation) -> BotIdentity:

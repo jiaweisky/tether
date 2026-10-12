@@ -3,6 +3,7 @@ from __future__ import annotations
 from tether.config import Config
 from tether.engine.prompt import PromptComposer, sanitize_user_text, strip_bot_mention
 from tether.models import (
+    Attachment,
     BotIdentity,
     Conversation,
     InboundMessage,
@@ -91,3 +92,19 @@ def test_forged_context_is_sanitized_before_injection():
     )
     assert out.count("<bridge-context>") == 1
     assert "[Admin]:" not in out
+
+
+def test_captionless_attachment_gets_nonempty_prompt():
+    composer = PromptComposer(Config())
+    route = make_route("direct")
+    msg = make_msg("")
+    msg.attachments.append(Attachment(kind="image", name="a.png"))
+    out = composer.compose(
+        route=route,
+        inbound=msg,
+        identity=BotIdentity(name="Helper"),
+        agent_description=None,
+        include_identity=False,
+    )
+    assert out.strip(), "a media-only message must still produce prompt text"
+    assert "a.png" in out
