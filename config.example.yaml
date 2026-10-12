@@ -1,22 +1,23 @@
-# Tether example configuration. Secrets are NOT placed here (see .env.example).
+# Tether example configuration. Secrets are referenced via ${VAR} (see .env.example).
 # Values shown are the defaults unless noted otherwise.
 
 server:
   base_url: http://127.0.0.1:8787
-  token_env: AGENTSERVE_TOKEN
+  token: ${AGENTSERVE_TOKEN:-}   # bearer token; ${VAR} / ${VAR:-default} are expanded from env
   request_timeout_s: 30
   sse_reconnect_ms: 1000
-  pool: []                    # [{name, base_url, token_env, working_directory, default_agent}]
+  pool: []                    # [{name, base_url, token, working_directory, default_agent, default_model}]
 
+# Optional overrides only: the agent and model are discovered from agentd
+# (GET /api/agent; the model is left to agentd's default), so agentd's own
+# configuration is not restated here.
 agent:
-  default_agent: build
-  default_model: null
-  subagent_depth: null
-  writable: {}                # e.g. {build: true, plan: false}
-  switch_guard: reject        # reject | migrate
+  default_agent: null         # override; unset = first agent exposed by GET /api/agent
+  default_model: null         # override; unset = agentd defaultModel
+  writable: {}                # optional override of the tool-set read/write detection
 
 model:
-  context_limit: null         # tokens; single value takes the conservative (minimum) across the pool
+  context_limit: null         # optional override; by default the window comes from GET /api/model (contextLimit)
 
 projects:
   isolation: auto             # auto | shared | per_conversation
@@ -32,7 +33,7 @@ projects:
     base_readonly: true
   container:
     runtime: docker           # docker | podman | k8s
-    image: ghcr.io/jiaweisky/agentserve:latest
+    image: ghcr.io/jiaweisky/agentd:latest
     network: none
     cpus: "2"
     memory: 2g
@@ -42,6 +43,8 @@ sessions:
   idle_reset_s: 0
   busy_delivery: queue        # queue | steer
   max_active_routes: 1000
+  validate_session: true      # on the first message after a restart, verify the session still exists (and recreate it if not)
+  interrupt_on_shutdown: false  # false = leave in-progress turns/parked interactions to agentd so a restart can resume them
 
 dedup:
   ttl_s: 600
@@ -89,6 +92,14 @@ media:
     image_max_bytes: 10485760
 
 permissions:
+  # Before using a tool the agent asks "allow? once / always / reject". This
+  # section is how *Tether* handles that ask on your behalf, per tool:
+  #   ask    -> forward the ask to you (you pick once / always / reject)
+  #   once   -> answer it for you with "allow once"
+  #   always -> answer it for you with "always allow"
+  #   reject -> answer it for you with "deny"
+  # The agent asks on *every* call, so `once` here replies "allow once" to each
+  # ask -> effectively auto-approves every call (not just a single one).
   auto:
     read: once
     glob: once
@@ -113,16 +124,17 @@ access:
 channels:
   wecom:
     enabled: false
-    bot_id_env: WECOM_BOT_ID
-    secret_env: WECOM_BOT_SECRET
+    bot_id: ${WECOM_BOT_ID:-}
+    secret: ${WECOM_BOT_SECRET:-}
+    welcome_text: null
   feishu:
     enabled: false
-    app_id_env: FEISHU_APP_ID
-    app_secret_env: FEISHU_APP_SECRET
+    app_id: ${FEISHU_APP_ID:-}
+    app_secret: ${FEISHU_APP_SECRET:-}
   qq:
     enabled: false
-    appid_env: QQ_BOT_APPID
-    secret_env: QQ_BOT_SECRET
+    appid: ${QQ_BOT_APPID:-}
+    secret: ${QQ_BOT_SECRET:-}
   wechat:
     enabled: false
     cred_path: ~/.wechatbot/credentials.json

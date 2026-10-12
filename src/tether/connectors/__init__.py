@@ -22,10 +22,10 @@ def register_builtins() -> None:
     register_connector("fake", lambda **_: FakeConnector())
 
 
-def _make_wecom(*, bot_id: str, secret: str, **_):
+def _make_wecom(*, bot_id: str, secret: str, welcome_text: str | None = None, **_):
     from .wecom.connector import WeComConnector
 
-    return WeComConnector(bot_id=bot_id, secret=secret)
+    return WeComConnector(bot_id=bot_id, secret=secret, welcome_text=welcome_text)
 
 
 def _make_feishu(*, app_id: str, app_secret: str, **_):
@@ -46,31 +46,31 @@ def _make_wechat(*, cred_path: str, **_):
     return WeChatConnector(cred_path=cred_path)
 
 
-def _require_env(name: str, channel: str) -> str:
-    value = os.environ.get(name)
+def _require(value: str | None, field: str, channel: str) -> str:
     if not value:
-        raise ValueError(f"channel {channel!r} is enabled but env {name!r} is not set")
+        raise ValueError(f"channel {channel!r} is enabled but {field} is empty")
     return value
 
 
 def _build_wecom(channel: Any) -> IMConnector:
     return _make_wecom(
-        bot_id=_require_env(channel.bot_id_env, "wecom"),
-        secret=_require_env(channel.secret_env, "wecom"),
+        bot_id=_require(channel.bot_id, "bot_id", "wecom"),
+        secret=_require(channel.secret, "secret", "wecom"),
+        welcome_text=channel.welcome_text,
     )
 
 
 def _build_feishu(channel: Any) -> IMConnector:
     return _make_feishu(
-        app_id=_require_env(channel.app_id_env, "feishu"),
-        app_secret=_require_env(channel.app_secret_env, "feishu"),
+        app_id=_require(channel.app_id, "app_id", "feishu"),
+        app_secret=_require(channel.app_secret, "app_secret", "feishu"),
     )
 
 
 def _build_qq(channel: Any) -> IMConnector:
     return _make_qq(
-        appid=_require_env(channel.appid_env, "qq"),
-        secret=_require_env(channel.secret_env, "qq"),
+        appid=_require(channel.appid, "appid", "qq"),
+        secret=_require(channel.secret, "secret", "qq"),
     )
 
 

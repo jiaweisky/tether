@@ -7,7 +7,10 @@ through a provider, and tracks their lifetime.
 
 from __future__ import annotations
 
+import asyncio
 import itertools
+import json
+import shlex
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -126,28 +129,97 @@ class PoolProjectProvider:
 
 
 class SupervisorProjectProvider:
-    """A placeholder for host-managed provision of project instances.
+    """Provision project instances through a host-configured supervisor command.
 
-    Until a supervisor integration exists this refuses to acquire, so operators
-    must configure a static pool instead.
+    The bridge never starts Go processes itself; it delegates to a host
+    supervisor. The command is invoked with one JSON request on stdin and must
+    print one JSON response on stdout:
+
+    - acquire request: ``{"action":"acquire","project_id",...,"readonly",...}``
+      response: ``{"project_id","server_base","transport","working_directory",
+      "ephemeral"}``
+    - release request: ``{"action":"release","project_id","server_base"}``
+
+    With no ``projects.supervisor_command`` configured the provider refuses to
+    acquire, so an operator must configure a static ``server.pool`` instead.
     """
 
     def __init__(self, config: Config) -> None:
         self.config = config
+        self._command = config.projects.supervisor_command
 
     async def acquire(
         self, conv: Conversation, *, agent: str, readonly: bool, transport: str = "http"
     ) -> ProjectLease:
-        raise RuntimeError("no project supervisor is configured; use a static server pool instead")
+        if not self._command:
+            raise RuntimeError(
+                "projects.provider=supervisor requires projects.supervisor_command, "
+                "or configure a static server.pool"
+            )
+        response = await self._invoke(
+            {
+                "action": "acquire",
+                "project_id": conv.key,
+                "conversation": conv.id,
+                "kind": conv.kind,
+                "agent": agent,
+                "readonly": readonly,
+                "transport": transport,
+            }
+        )
+        server_base = response.get("server_base")
+        if not server_base:
+            raise RuntimeError(f"supervisor response has no server_base: {response!r}")
+        return ProjectLease(
+            project_id=str(response.get("project_id") or conv.key),
+            transport=str(response.get("transport", transport)),
+            server_base=str(server_base),
+            working_directory=response.get("working_directory"),
+            ephemeral=bool(response.get("ephemeral", True)),
+        )
 
     async def release(self, lease: ProjectLease) -> None:
-        return None
+        if not self._command:
+            return
+        await self._invoke(
+            {
+                "action": "release",
+                "project_id": lease.project_id,
+                "server_base": lease.server_base,
+                "transport": lease.transport,
+            }
+        )
 
     async def health(self, lease: ProjectLease) -> bool:
-        return False
+        return bool(lease.server_base)
 
     async def preflight(self) -> None:
-        raise RuntimeError("the supervisor provider is not configured")
+        if not self._command:
+            raise RuntimeError(
+                "projects.provider=supervisor is not configured; set projects.supervisor_command"
+            )
+
+    async def _invoke(self, request: dict) -> dict:
+        parts = shlex.split(self._command or "")
+        if not parts:
+            raise RuntimeError("projects.supervisor_command is empty")
+        proc = await asyncio.create_subprocess_exec(
+            *parts,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate(json.dumps(request).encode())
+        if proc.returncode != 0:
+            detail = stderr.decode(errors="replace").strip()
+            raise RuntimeError(f"supervisor command failed ({proc.returncode}): {detail}")
+        try:
+            response = json.loads(stdout.decode() or "{}")
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("supervisor command returned invalid JSON") from exc
+        if not isinstance(response, dict):
+            raise RuntimeError(f"supervisor command returned a non-object: {response!r}")
+        return response
 
 
 def build_provider(config: Config) -> ProjectProvider:

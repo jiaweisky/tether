@@ -7,6 +7,7 @@ produced, and finalises when the session returns to idle.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
@@ -23,11 +24,14 @@ from ..agent.events import (
     QUESTION_REPLIED,
     REASONING_DELTA,
     REASONING_ENDED,
+    REASONING_STARTED,
     SESSION_STATUS,
     STEP_ENDED,
     STEP_FAILED,
+    STEP_STARTED,
     TEXT_DELTA,
     TEXT_ENDED,
+    TEXT_STARTED,
     TOOL_CALLED,
     TOOL_FAILED,
     TOOL_PROGRESS,
@@ -36,9 +40,11 @@ from ..agent.events import (
     PendingPermission,
     PendingQuestion,
 )
+from ..agent.usage import UsageTokens, parse_usage
 from ..config import Config
-from ..connector import IMConnector, Unsupported
+from ..connector import IMConnector
 from ..models import (
+    Card,
     InboundMessage,
     OutboundPlan,
     RichDoc,
@@ -84,26 +90,29 @@ class TurnEngine:
         self.on_finish = on_finish
 
         self.conv = route.conversation
-        self.usage = Usage(context_limit=config.model.context_limit)
+        self.usage = Usage(context_limit=route.context_limit or config.model.context_limit)
         self.media: list[RichMedia] = []
         self._sent_ref: SentRef | None = None
         self._placeholder_sent = False
         self._ended = False
-        self._can_stream = bool(
-            connector.capabilities.native_stream or connector.capabilities.edit_message
-        )
+        self._timers: dict[str, asyncio.Task[None]] = {}
+        self._can_stream = connector.supports_streaming(route.conversation)
         self.controller = StreamingController(
             self._emit,
             interval_s=config.streaming.min_interval_ms / 1000.0,
             boundary_flush=config.streaming.boundary_flush,
             max_live_chars=config.streaming.max_live_chars,
             rate_limit_backoff=config.streaming.rate_limit_backoff,
+            idle_progress_s=config.streaming.idle_progress_ms / 1000.0,
         )
         self._handlers: dict[str, EventHandler] = {
+            TEXT_STARTED: self._on_activity,
             TEXT_DELTA: self._on_text_delta,
             TEXT_ENDED: self._on_text_ended,
+            REASONING_STARTED: self._on_activity,
             REASONING_DELTA: self._on_reasoning_delta,
             REASONING_ENDED: self._on_reasoning_ended,
+            STEP_STARTED: self._on_activity,
             TOOL_CALLED: self._on_tool_called,
             TOOL_PROGRESS: self._on_tool_progress,
             TOOL_SUCCESS: self._on_tool_success,
@@ -123,11 +132,26 @@ class TurnEngine:
 
     # -- lifecycle ---------------------------------------------------------
     async def start(self) -> None:
-        if self.connector.capabilities.typing:
+        cap = self.connector.capabilities
+        if self._can_stream:
+            # Open the message now with a placeholder so the user sees that work
+            # has started; later updates reuse this same message.
+            try:
+                self._sent_ref = await self.connector.send(
+                    self.conv,
+                    OutboundPlan(segments=[TextSegment(text="🤔 Thinking…")], final=False),
+                )
+                self._placeholder_sent = True
+            except Exception:  # noqa: BLE001 - placeholder is best-effort
+                log.warning("placeholder_failed", exc_info=True)
+        elif cap.typing:
             try:
                 await self.connector.send_typing(self.conv)
             except Exception:  # noqa: BLE001 - typing is best-effort
                 pass
+        else:
+            await self._send_notice("🤔 Thinking…")
+            self._placeholder_sent = True
 
     async def handle_event(self, event: Event) -> None:
         handler = self._handlers.get(event.type)
@@ -138,6 +162,7 @@ class TurnEngine:
         if self._ended:
             return
         self._ended = True
+        self._cancel_timers()
         try:
             await self.controller.finalize()
         except Exception:  # noqa: BLE001 - a send failure must not stop event consumption
@@ -151,12 +176,40 @@ class TurnEngine:
         await self.on_finish(self)
 
     async def cancel(self) -> None:
+        """Stop the turn (``/stop``): interrupt, reject pending, drop the stream."""
+        self._cancel_timers()
+        await self._interrupt()
+        await self.controller.close()
+
+    async def shutdown(self) -> None:
+        """Graceful shutdown: interrupt and flush the current snapshot as final."""
+        if self._ended:
+            return
+        self._ended = True
+        self._cancel_timers()
+        await self._interrupt()
+        if self._sent_ref is not None or self.controller.snapshot().strip():
+            try:
+                await self.controller.finalize()
+            except Exception:  # noqa: BLE001 - shutdown must not raise
+                log.exception("shutdown_flush_failed")
+        else:
+            await self.controller.close()
+
+    async def pause(self) -> None:
+        """Stop streaming without disturbing the agent (used on bridge shutdown).
+
+        The turn keeps running on agentd; a parked permission stays parked, so a
+        restart does not consume it and the conversation can resume.
+        """
+        await self.controller.close()
+
+    async def _interrupt(self) -> None:
         try:
             await self.client.interrupt(self.route.session_id)
         except AgentError as exc:
             log.warning("interrupt_failed", error=exc.code)
         await self._reject_pending_permissions()
-        await self.controller.close()
 
     async def _drain_media(self) -> None:
         for media in self.media:
@@ -178,6 +231,10 @@ class TurnEngine:
                 pass
 
     # -- event handlers ----------------------------------------------------
+    async def _on_activity(self, data: dict[str, Any]) -> None:
+        """A step or message part started: the agent is actively working."""
+        self.controller.mark_working()
+
     async def _on_text_delta(self, data: dict[str, Any]) -> None:
         self.controller.push_text(str(data.get("delta", "")))
 
@@ -234,6 +291,8 @@ class TurnEngine:
         stype = status.get("type") if isinstance(status, dict) else None
         if stype == "idle":
             await self.finish()
+        elif stype == "busy":
+            self.controller.mark_working()
         elif stype == "retry":
             attempt = status.get("attempt") or status.get("next") or 1
             await self._send_notice(f"⏳ Model busy, retrying (#{attempt})…")
@@ -247,11 +306,14 @@ class TurnEngine:
         self._register_pending("permission", perm.id)
         card = hitl.permission_card(perm)
         if self.connector.capabilities.buttons:
-            await self.connector.send_card(self.conv, card)
-        else:
-            options = [button.text for button in card.buttons]
-            self.route.pending_interactions[perm.id].options = options
-            await self._send_notice(_numbered_text(card.body, options))
+            try:
+                await self._send_card(card)
+                return
+            except Exception:  # noqa: BLE001 - fall back to a numbered text prompt
+                log.warning("permission_card_send_failed", exc_info=True)
+        options = [button.text for button in card.buttons]
+        self.route.pending_interactions[perm.id].options = options
+        await self._send_notice(_numbered_text(card.body, options))
 
     async def _on_question(self, data: dict[str, Any]) -> None:
         question = PendingQuestion.from_json(data)
@@ -259,12 +321,27 @@ class TurnEngine:
         self._register_pending("question", question.id, options=options)
         card = hitl.question_card(question)
         if card is not None and self.connector.capabilities.buttons:
-            await self.connector.send_card(self.conv, card)
-        else:
-            await self._send_notice(text)
+            try:
+                await self._send_card(card)
+                return
+            except Exception:  # noqa: BLE001 - fall back to a numbered text prompt
+                log.warning("question_card_send_failed", exc_info=True)
+        await self._send_notice(text)
 
-    async def _on_interaction_closed(self, data: dict[str, Any]) -> None:
-        self.route.pending_interactions.pop(str(data.get("requestID", "")), None)
+    async def _send_card(self, card: Card) -> None:
+        """Send an interaction card, attached to the active stream when possible.
+
+        On streaming channels the card shares the answer's message, so the reply
+        and the card are not reordered as two separate messages.
+        """
+        ref = await self.connector.send_card(
+            self.conv,
+            card,
+            stream_id=self._sent_ref.id if self._sent_ref else None,
+            text=self.controller.snapshot(),
+        )
+        if self._sent_ref is None and ref.id and self._can_stream:
+            self._sent_ref = ref
 
     async def _reply_permission(self, perm: PendingPermission, reply: str) -> None:
         try:
@@ -287,37 +364,105 @@ class TurnEngine:
             request_id=request_id,
             options=options,
         )
+        self._schedule_timeout(kind, request_id)
 
-    # -- emit / rendering --------------------------------------------------
+    def _schedule_timeout(self, kind: Literal["permission", "question"], request_id: str) -> None:
+        """Never let an unanswered interaction park the turn forever.
+
+        After ``permissions.timeout_s`` the bridge gives up by policy (``fallback``)
+        and tells the user, so queued messages are served instead of stalling.
+        """
+        timeout_s = self.config.permissions.timeout_s
+        if timeout_s <= 0 or request_id in self._timers:
+            return
+        self._timers[request_id] = asyncio.create_task(self._expire(kind, request_id, timeout_s))
+
+    async def _expire(
+        self, kind: Literal["permission", "question"], request_id: str, timeout_s: int
+    ) -> None:
+        try:
+            await asyncio.sleep(timeout_s)
+        except asyncio.CancelledError:
+            return
+        self._timers.pop(request_id, None)
+        if self.route.pending_interactions.pop(request_id, None) is None:
+            return
+        if kind == "permission":
+            fallback = self.config.permissions.fallback
+            try:
+                await self.client.reply_permission(
+                    self.route.session_id, request_id, reply=fallback
+                )
+            except AgentError as exc:
+                log.warning("permission_timeout_reply_failed", error=exc.code)
+            await self._send_notice(
+                f"⌛ 等待授权超时（{timeout_s}s），已按策略"
+                f"{'放行' if fallback == 'allow' else '拒绝'}。"
+            )
+        else:
+            try:
+                await self.client.reply_question(self.route.session_id, request_id, [[]])
+            except AgentError as exc:
+                log.warning("question_timeout_reply_failed", error=exc.code)
+            await self._send_notice(f"⌛ 等待回答超时（{timeout_s}s），已自动跳过。")
+
+    def _cancel_timers(self) -> None:
+        for task in self._timers.values():
+            task.cancel()
+        self._timers.clear()
+
+    async def _on_interaction_closed(self, data: dict[str, Any]) -> None:
+        request_id = str(data.get("requestID", ""))
+        self.route.pending_interactions.pop(request_id, None)
+        task = self._timers.pop(request_id, None)
+        if task is not None:
+            task.cancel()
+
     async def _emit(self, final: bool, snapshot: str) -> None:
         if not final and await self._maybe_placeholder(snapshot):
             return
         plan = self._render(final)
+        if final and not any(isinstance(segment, TextSegment) for segment in plan.segments):
+            # Never leave the "Thinking…" placeholder hanging: a final frame with
+            # no text still replaces it (with the last progress, or a check mark).
+            plan.segments.insert(0, TextSegment(text=self.controller.snapshot().strip() or "✅"))
         if self._sent_ref is None:
             self._sent_ref = await self.connector.send(self.conv, plan)
         else:
             await self._update_or_send(plan)
 
     async def _maybe_placeholder(self, snapshot: str) -> bool:
-        """Send a thinking placeholder for interim frames when nothing can stream."""
+        """Open a message for interim frames when the text is still empty.
+
+        On streaming channels the placeholder becomes the message later updates
+        replace; on non-streaming channels it is simply the initial frame.
+        """
         if not self._can_stream:
             if not self._placeholder_sent:
                 await self._send_notice("🤔 Thinking…")
                 self._placeholder_sent = True
             return True
         if not snapshot.strip() and self._sent_ref is None:
-            await self._send_notice("🤔 Thinking…")
+            self._sent_ref = await self.connector.send(
+                self.conv, OutboundPlan(segments=[TextSegment(text="🤔 Thinking…")], final=False)
+            )
             self._placeholder_sent = True
             return True
         return False
 
     def _render(self, final: bool) -> OutboundPlan:
+        markdown = self.controller.text
+        if not final:
+            status = self.controller.live_status()
+            if status:
+                markdown = f"{markdown}\n\n{status}" if markdown else status
         doc = RichDoc(
-            markdown=self.controller.text,
+            markdown=markdown,
             reasoning=self.controller.reasoning if self.config.streaming.show_reasoning else None,
             usage=self.usage if final and self.config.streaming.show_usage else None,
         )
         plan = self.renderer.render(doc, self.connector.capabilities)
+        plan.final = final
         if self.conv.is_group and self.config.group.reply_with_mention:
             plan.reply_to = self.inbound.message_id
         return plan
@@ -327,21 +472,26 @@ class TurnEngine:
         text_segments: list[Segment] = [s for s in plan.segments if isinstance(s, TextSegment)]
         other_segments: list[Segment] = [s for s in plan.segments if not isinstance(s, TextSegment)]
         if text_segments:
-            await self._replace_text(OutboundPlan(segments=text_segments))
+            await self._replace_text(
+                OutboundPlan(segments=text_segments, reply_to=plan.reply_to, final=plan.final)
+            )
         for segment in other_segments:
-            await self.connector.send(self.conv, OutboundPlan(segments=[segment]))
+            await self.connector.send(self.conv, OutboundPlan(segments=[segment], final=True))
 
     async def _replace_text(self, plan: OutboundPlan) -> None:
         assert self._sent_ref is not None
         try:
             await self.connector.update(self._sent_ref, plan)
-        except (Unsupported, AgentError):
-            self._sent_ref = await self.connector.send(self.conv, plan)
         except RateLimited:
             raise
+        except Exception:  # noqa: BLE001 - any update failure: send a fresh message
+            log.warning("stream_update_failed", exc_info=True)
+            self._sent_ref = await self.connector.send(self.conv, plan)
 
     async def _send_notice(self, text: str) -> None:
-        await self.connector.send(self.conv, OutboundPlan(segments=[TextSegment(text=text)]))
+        await self.connector.send(
+            self.conv, OutboundPlan(segments=[TextSegment(text=text)], final=True)
+        )
 
     # -- usage -------------------------------------------------------------
     def _record_usage(self, data: dict[str, Any]) -> None:
@@ -356,25 +506,23 @@ class TurnEngine:
                 pass
 
     def _record_tokens(self, tokens: dict[str, Any]) -> None:
-        self.usage.input_tokens = _as_int(tokens.get("input"), self.usage.input_tokens)
-        self.usage.output_tokens = _as_int(tokens.get("output"), self.usage.output_tokens)
-        self.usage.reasoning_tokens = _as_int(tokens.get("reasoning"), 0)
-        self.usage.cached_tokens = _as_int(tokens.get("cache"), 0)
-        if tokens.get("input") is not None:
-            self.usage.context_tokens = _as_int(tokens["input"], 0)
+        # agentd forwards the provider's usage verbatim, so interpret the
+        # provider-specific format here; fall back to agentd's normalized fields.
+        parsed = parse_usage(tokens.get("providerMetadata")) or UsageTokens.from_normalized(tokens)
+        self.usage.input_tokens = (self.usage.input_tokens or 0) + parsed.new_input
+        self.usage.output_tokens = (self.usage.output_tokens or 0) + parsed.visible_output
+        self.usage.reasoning_tokens = (self.usage.reasoning_tokens or 0) + parsed.reasoning
+        self.usage.cached_tokens = (
+            (self.usage.cached_tokens or 0) + parsed.cache_read + parsed.cache_write
+        )
+        if parsed.full_input:
+            self.usage.context_tokens = parsed.full_input
 
 
 def _numbered_text(body: str, options: list[str]) -> str:
     lines = [body, ""]
     lines.extend(f"{index + 1}. {text}" for index, text in enumerate(options))
     return "\n".join(lines)
-
-
-def _as_int(value: Any, default: int) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def _tool_name(data: dict[str, Any]) -> str | None:

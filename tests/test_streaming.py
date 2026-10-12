@@ -66,3 +66,35 @@ async def test_max_live_chars_disables_interim_but_final_kept():
     await controller.finalize()
     assert all(final for final, _ in emits)
     assert emits[-1][1] == "0123456789"
+
+
+@pytest.mark.asyncio
+async def test_emit_failure_disables_live_updates_but_final_sent():
+    calls: list[tuple[bool, str]] = []
+
+    async def emit(final: bool, snapshot: str) -> None:
+        if not final:
+            raise RuntimeError("invalid req_id")
+        calls.append((final, snapshot))
+
+    controller = StreamingController(emit, interval_s=0.01)
+    controller.push_text("a")
+    await asyncio.sleep(0.05)
+    await controller.finalize()
+    assert calls == [(True, "a")]
+
+
+@pytest.mark.asyncio
+async def test_idle_progress_sets_and_clears_status():
+    emits: list[tuple[bool, str]] = []
+
+    async def emit(final: bool, snapshot: str) -> None:
+        emits.append((final, snapshot))
+
+    controller = StreamingController(emit, interval_s=0.01, idle_progress_s=0.03)
+    controller.push_text("answer")
+    await asyncio.sleep(0.1)
+    assert "Thinking" in controller.live_status()
+    assert any(not final for final, _ in emits)
+    controller.push_text(" more")
+    assert controller.live_status() == ""

@@ -7,11 +7,12 @@ keeps the bot identity in sync with the platform.
 
 from __future__ import annotations
 
-import os
 import time
 from collections.abc import Callable
+from typing import Any
 
 from ..agent.client import HttpAgentClient
+from ..agent.errors import AgentError
 from ..config import Config
 from ..connector import IMConnector
 from ..models import BotIdentity, Conversation, Route
@@ -49,19 +50,83 @@ class Router:
         self._client_factory = client_factory or _default_client_factory
         self._clients: dict[str, HttpAgentClient] = {}
         self._writable_cache: dict[tuple[str, str], bool] = {}
+        self._agent_cache: dict[str, str] = {}
+        self._models_cache: dict[str, dict[str, Any]] = {}
+        # Session ids validated (or created) in this process, so the first-use
+        # check runs once per route per process rather than every message.
+        self._validated: set[str] = set()
         self._routes: dict[str, Route] = {}
         self._by_session: dict[str, Route] = {}
-        self._token_env: dict[str, str] = {}
-        for entry in config.server.pool:
-            self._token_env[entry.base_url.rstrip("/")] = entry.token_env
+
+    # -- discovery ---------------------------------------------------------
+    def _pool_entry(self, base_url: str) -> Any:
+        base = base_url.rstrip("/")
+        for entry in self.config.server.pool:
+            if entry.base_url.rstrip("/") == base:
+                return entry
+        return None
+
+    async def resolve_agent(self, base_url: str) -> str:
+        """The agent to use for a base: an explicit override, else agentd's first.
+
+        The override may come from the pool entry (per instance) or the top-level
+        config; otherwise the first exposed agent is chosen, matching agentd's own
+        default agent.
+        """
+        base = base_url.rstrip("/")
+        cached = self._agent_cache.get(base)
+        if cached is not None:
+            return cached
+        entry = self._pool_entry(base)
+        override = (entry.default_agent if entry else None) or self.config.agent.default_agent
+        agents = await self.client_for_base(base).list_agents()
+        ids = [agent.id for agent in agents if not agent.hidden]
+        if override:
+            if ids and override not in ids:
+                raise ValueError(f"agent {override!r} is not exposed by {base}")
+            chosen = override
+        elif ids:
+            chosen = ids[0]
+        else:
+            raise ValueError(f"no agents are exposed by {base}")
+        self._agent_cache[base] = chosen
+        return chosen
+
+    def resolve_model(self, base_url: str) -> str | None:
+        """The model override for a base, or None to use agentd's default."""
+        entry = self._pool_entry(base_url)
+        return (entry.default_model if entry else None) or self.config.agent.default_model
+
+    async def _model_map(self, base_url: str) -> dict[str, Any]:
+        base = base_url.rstrip("/")
+        cached = self._models_cache.get(base)
+        if cached is None:
+            models = await self.client_for_base(base).list_models()
+            cached = {model.id: model for model in models}
+            self._models_cache[base] = cached
+        return cached
+
+    async def resolve_context_limit(self, base_url: str, model_id: str | None) -> int | None:
+        """The model's context window as reported by agentd, for the usage line."""
+        if not model_id:
+            return None
+        try:
+            model = (await self._model_map(base_url)).get(model_id)
+        except Exception as exc:  # noqa: BLE001 - the limit is optional
+            log.warning("model_lookup_failed", model=model_id, error=str(exc))
+            return None
+        return model.context_limit if model is not None else None
+
+    async def warm_base(self, base_url: str) -> None:
+        """Best-effort discovery so the first message does not pay for it."""
+        await self.resolve_agent(base_url)
 
     # -- clients -----------------------------------------------------------
     def client_for_base(self, base_url: str) -> HttpAgentClient:
         base = base_url.rstrip("/")
         client = self._clients.get(base)
         if client is None:
-            token_env = self._token_env.get(base, self.config.server.token_env)
-            token = os.environ.get(token_env)
+            token = self.config.server_token(base)
             client = self._client_factory(base, token)
             self._clients[base] = client
         return client
@@ -131,35 +196,90 @@ class Router:
     ) -> Route:
         existing = await self.get(conv)
         if existing is not None:
+            await self._validate_session(existing)
+            if existing.context_limit is None:
+                # Backfill routes persisted before the limit was discovered, so
+                # the usage line can show "context used / max".
+                existing.context_limit = await self.resolve_context_limit(
+                    existing.server_base, existing.model
+                )
+                if existing.context_limit is not None:
+                    await self.store.put(existing)
             return existing
-        agent_id = agent or self.config.agent.default_agent
-        readonly = not await self.is_writable(self._primary_base(), agent_id)
+        primary = self._primary_base()
+        agent_id = agent or await self.resolve_agent(primary)
+        readonly = not await self.is_writable(primary, agent_id)
         lease = await self.provider.acquire(conv, agent=agent_id, readonly=readonly)
         await self.leases.register(conv.key, lease)
+        # Re-resolve against the leased base: pool entries may differ.
+        agent_id = agent or await self.resolve_agent(lease.server_base)
+        model = self.resolve_model(lease.server_base)
         client = self.client_for_base(lease.server_base)
-        info = await client.create_session(
-            agent=agent_id, model=self.config.agent.default_model, title=title
-        )
+        info = await client.create_session(agent=agent_id, model=model, title=title)
         now = time.time()
         route = Route(
             conversation=conv,
             session_id=info.id,
             server_base=lease.server_base,
             agent=info.agent or agent_id,
-            model=info.model or self.config.agent.default_model,
+            model=info.model or model,
             project_id=lease.project_id,
             created_at=now,
             last_active=now,
             context_dirty=True,
         )
         self._remember(route)
+        route.context_limit = await self.resolve_context_limit(lease.server_base, route.model)
+        self._validated.add(route.session_id)
         await self.store.put(route)
         log.info("route_created", conversation=conv.key, session=info.id, project=lease.project_id)
         return route
 
+    async def _validate_session(self, route: Route) -> None:
+        """Ensure a loaded route's session still exists, once per process.
+
+        Only the first message for a route pays for a GET; if the session is
+        gone (agentd restarted with a fresh root) it is recreated so the
+        conversation heals on the first message rather than failing.
+        """
+        if route.session_id in self._validated or not self.config.sessions.validate_session:
+            return
+        try:
+            await self.client_for(route).get_session(route.session_id)
+        except AgentError as exc:
+            if exc.code != "not_found":
+                return  # e.g. unreachable: let the prompt surface it
+            log.warning("session_missing", session=route.session_id, conversation=route.key)
+            await self.recreate_session(route)
+        self._validated.add(route.session_id)
+
     def _primary_base(self) -> str:
         bases = self.config.server_bases()
         return bases[0][1]
+
+    async def recreate_session(self, route: Route) -> None:
+        """Rebuild the agent session for an existing route.
+
+        Used when the stored session no longer exists (for example agentd was
+        restarted with a fresh state directory), so the conversation keeps
+        working instead of failing forever.
+        """
+        client = self.client_for(route)
+        model = self.resolve_model(route.server_base)
+        info = await client.create_session(agent=route.agent, model=model)
+        self._by_session.pop(route.session_id, None)
+        route.session_id = info.id
+        route.model = info.model or model
+        route.context_limit = await self.resolve_context_limit(route.server_base, route.model)
+        route.context_dirty = True
+        route.identity_injected = False
+        route.pending_interactions.clear()
+        route.active_turn_sender = None
+        route.queue_depth = 0
+        self._remember(route)
+        self._validated.add(route.session_id)
+        await self.store.put(route)
+        log.info("session_recreated", conversation=route.key, session=info.id)
 
     async def save(self, route: Route) -> None:
         route.last_active = time.time()

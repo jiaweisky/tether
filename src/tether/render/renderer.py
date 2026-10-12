@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from ..capabilities import Capabilities
 from ..models import (
-    Card,
-    CardSegment,
     MediaSegment,
     OutboundPlan,
     RichDoc,
@@ -41,13 +39,6 @@ class DefaultRenderer:
         body = self._decorate(body, doc)
         segments: list[Segment] = [TextSegment(text=c) for c in self._chunk(body, limit)]
         segments += [MediaSegment(media=media) for media in [*doc.media, *images]]
-        return OutboundPlan(segments=segments)
-
-    def render_card(self, card: Card, caps: Capabilities) -> OutboundPlan:
-        limit = self.max_chars_override or caps.max_text_chars
-        body, _ = render_markdown(card.body, caps.markdown)
-        segments: list[Segment] = [TextSegment(text=c) for c in self._chunk(body, limit)]
-        segments.extend(self._card_segments(card, caps))
         return OutboundPlan(segments=segments)
 
     # -- decoration --------------------------------------------------------
@@ -101,14 +92,6 @@ class DefaultRenderer:
     @staticmethod
     def _cost_part(usage: Usage) -> str:
         return f"${usage.cost:.4f}" if usage.cost else ""
-
-    def _card_segments(self, card: Card, caps: Capabilities) -> list[Segment]:
-        if not card.buttons:
-            return []
-        if caps.buttons:
-            return [CardSegment(card=card)]
-        numbered = "\n".join(f"{i + 1}. {b.text}" for i, b in enumerate(card.buttons))
-        return [TextSegment(text=numbered)]
 
     # -- chunking ----------------------------------------------------------
     def _chunk(self, text: str, limit: int) -> list[str]:

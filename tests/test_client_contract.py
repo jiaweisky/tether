@@ -126,3 +126,25 @@ def test_events_parse_sse():
     ]
     assert events[1].session_id == "ses_1"
     assert events[1].data["delta"] == "hi"
+
+
+def test_create_session_parses_model_reference():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/session":
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "id": "ses_1",
+                        "agent": "build",
+                        "model": {"id": "deepseek-flash", "providerID": "x", "variant": "default"},
+                    }
+                },
+            )
+        return httpx.Response(404)
+
+    client = make_client(handler)
+    import asyncio
+
+    info = asyncio.run(client.create_session(agent="build"))
+    assert info.model == "deepseek-flash"

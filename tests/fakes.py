@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from tether.agent.errors import AgentError
 from tether.agent.events import (
     AgentInfo,
     ModelInfo,
@@ -34,13 +35,16 @@ class FakeAgentClient:
         self.models: list[ModelInfo] = [ModelInfo("m", "openai", ["text", "image"], [])]
         self.active: set[str] = set()
         self.message_store: dict[str, list[dict[str, Any]]] = {}
+        self.agents: list[AgentInfo] = [AgentInfo("build", description="Build agent")]
+        self.fail_next_prompt_with: str | None = None
+        self.permission_reply_error: str | None = None
 
     async def aclose(self) -> None:
         return None
 
     # discovery
     async def list_agents(self):
-        return [AgentInfo("build", description="Build agent")]
+        return list(self.agents)
 
     async def list_models(self):
         return self.models
@@ -59,7 +63,10 @@ class FakeAgentClient:
         return info
 
     async def get_session(self, sid):
-        return self.sessions[sid]
+        info = self.sessions.get(sid)
+        if info is None:
+            raise AgentError("not_found")
+        return info
 
     async def set_agent(self, sid, agent): ...
     async def set_model(self, sid, model_ref): ...
@@ -68,6 +75,10 @@ class FakeAgentClient:
 
     # execution
     async def prompt(self, sid, *, prompt, files=None, id=None, delivery="queue"):
+        if self.fail_next_prompt_with is not None:
+            code = self.fail_next_prompt_with
+            self.fail_next_prompt_with = None
+            raise AgentError(code)
         self.prompts.append(
             {"sid": sid, "prompt": prompt, "files": files or [], "id": id, "delivery": delivery}
         )
@@ -96,6 +107,10 @@ class FakeAgentClient:
 
     # interaction
     async def reply_permission(self, sid, rid, *, reply, message=None):
+        if self.permission_reply_error is not None:
+            code = self.permission_reply_error
+            self.permission_reply_error = None
+            raise AgentError(code)
         self.permission_replies.append((sid, rid, reply))
         self._permissions = [p for p in self._permissions if p.id != rid]
 

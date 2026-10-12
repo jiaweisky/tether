@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from tether.capabilities import Capabilities, MarkdownLevel
-from tether.models import Button, Card, RichDoc, RichMedia, TextSegment, Usage
+from tether.models import RichDoc, RichMedia, TextSegment, Usage
 from tether.render.renderer import DefaultRenderer
 
 
@@ -51,13 +51,6 @@ def test_no_usage_when_disabled():
     doc = RichDoc(markdown="done", usage=Usage(input_tokens=10))
     plan = DefaultRenderer(show_usage=False).render(doc, caps())
     assert "📊" not in plan.segments[-1].text
-
-
-def test_card_buttons_degrade_without_button_capability():
-    card = Card(title="t", body="body", buttons=[Button(text="Yes", value="v1")])
-    no_buttons = Capabilities(markdown=MarkdownLevel.NONE, buttons=False)
-    plan = DefaultRenderer().render_card(card, no_buttons)
-    assert "1. Yes" in plan.segments[-1].text
 
 
 def test_media_segment_carries_richmedia():

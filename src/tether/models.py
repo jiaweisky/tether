@@ -246,6 +246,7 @@ class Route:
     server_base: str
     agent: str
     model: str | None = None
+    context_limit: int | None = None
     project_id: str | None = None
     # Multi-user group-chat state.
     participants: dict[str, str] = field(default_factory=dict)
@@ -261,6 +262,13 @@ class Route:
     # Ordered map of request id -> pending interaction.
     pending_interactions: dict[str, PendingInteraction] = field(default_factory=dict)
     stream_ref: dict | None = None
+
+    def __post_init__(self) -> None:
+        # agentd reports a session's model as a reference object; older persisted
+        # routes may still hold that dict — keep the field a plain id.
+        if isinstance(self.model, dict):
+            value = self.model.get("id")
+            self.model = str(value) if value is not None else None
 
     @property
     def key(self) -> str:

@@ -58,9 +58,12 @@ class HttpAgentClient:
         return {"Authorization": f"Bearer {self.token}"} if self.token else {}
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
-        resp = await self._client.request(
-            method, self._url(path), headers=self._headers(), **kwargs
-        )
+        try:
+            resp = await self._client.request(
+                method, self._url(path), headers=self._headers(), **kwargs
+            )
+        except httpx.HTTPError as exc:
+            raise AgentError("unavailable", str(exc)) from exc
         if resp.status_code >= 400:
             raise _error_from_response(resp)
         return _data_from_response(resp)
@@ -101,6 +104,8 @@ class HttpAgentClient:
                     protocol=m.get("protocol"),
                     inputs=inputs,
                     sources=[str(s) for s in (m.get("sources") or [])],
+                    context_limit=_as_int(m.get("contextLimit")),
+                    output_limit=_as_int(m.get("outputLimit")),
                 )
             )
         return out
@@ -253,21 +258,24 @@ class HttpAgentClient:
         Live-only deltas and interaction events are included. The generator
         raises on disconnect; the caller reconnects and reconciles.
         """
-        async with aconnect_sse(
-            self._client,
-            "GET",
-            self._url("/api/event"),
-            headers={**self._headers(), "Accept": "text/event-stream"},
-            timeout=None,
-        ) as source:
-            if source.response.status_code >= 400:
-                raise AgentError("unavailable", status=source.response.status_code)
-            async for sse in source.aiter_sse():
-                if sse.event == "error":
-                    raise AgentError("unavailable", sse.data)
-                event = _event_from_sse(sse.data)
-                if event is not None:
-                    yield event
+        try:
+            async with aconnect_sse(
+                self._client,
+                "GET",
+                self._url("/api/event"),
+                headers={**self._headers(), "Accept": "text/event-stream"},
+                timeout=None,
+            ) as source:
+                if source.response.status_code >= 400:
+                    raise AgentError("unavailable", status=source.response.status_code)
+                async for sse in source.aiter_sse():
+                    if sse.event == "error":
+                        raise AgentError("unavailable", sse.data)
+                    event = _event_from_sse(sse.data)
+                    if event is not None:
+                        yield event
+        except httpx.HTTPError as exc:
+            raise AgentError("unavailable", str(exc)) from exc
 
 
 def _event_from_sse(payload: str | None) -> Event | None:
@@ -318,9 +326,26 @@ def _session_info(data: dict[str, Any]) -> SessionInfo:
     return SessionInfo(
         id=str(data.get("id", "")),
         agent=data.get("agent"),
-        model=data.get("model"),
+        model=_model_id(data.get("model")),
         title=data.get("title"),
     )
+
+
+def _model_id(model: Any) -> str | None:
+    """agentd reports a session's model as a reference object; take its id."""
+    if isinstance(model, dict):
+        value = model.get("id")
+        return str(value) if value is not None else None
+    if model is None:
+        return None
+    return str(model)
+
+
+def _as_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_json(text: str | None) -> dict[str, Any] | None:

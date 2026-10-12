@@ -14,6 +14,7 @@ htmlcov/
 
 # Secrets / local state
 .env
+config.yaml
 *.local.yaml
 *.sqlite3
 *.db

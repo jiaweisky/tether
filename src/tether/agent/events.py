@@ -70,6 +70,8 @@ class ModelInfo:
     protocol: str | None = None
     inputs: list[str] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
+    context_limit: int | None = None
+    output_limit: int | None = None
 
 
 @dataclass

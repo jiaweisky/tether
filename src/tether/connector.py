@@ -18,6 +18,7 @@ from .models import (
     Conversation,
     ConversationInfo,
     InboundMessage,
+    IncomingInteraction,
     IncomingItem,
     MediaBytes,
     MediaHandle,
@@ -46,7 +47,20 @@ class IMConnector(Protocol):
     async def reply(self, in_reply_to: InboundMessage, plan: OutboundPlan) -> SentRef: ...
     async def send_typing(self, conv: Conversation) -> None: ...
     async def react(self, ref: SentRef, emoji: str) -> None: ...
-    async def send_card(self, conv: Conversation, card: Card) -> SentRef: ...
+    async def send_card(
+        self,
+        conv: Conversation,
+        card: Card,
+        *,
+        stream_id: str | None = None,
+        text: str | None = None,
+    ) -> SentRef: ...
+
+    async def acknowledge(self, interaction: IncomingInteraction, text: str) -> None:
+        """Reflect a handled card interaction back onto the card, if supported."""
+        ...
+
+    def supports_streaming(self, conv: Conversation) -> bool: ...
 
     # Media
     async def download(self, att: Attachment) -> MediaBytes: ...

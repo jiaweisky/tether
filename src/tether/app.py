@@ -11,7 +11,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
-from typing import Literal
+import time
+from typing import Any, Literal
 
 from .agent.client import HttpAgentClient
 from .agent.errors import AgentError, user_message
@@ -42,6 +43,7 @@ from .models import (
     OutboundPlan,
     RichMedia,
     Route,
+    Sender,
     TextSegment,
 )
 from .render.renderer import DefaultRenderer
@@ -82,12 +84,14 @@ class TetherApp:
         self._janitor_task: asyncio.Task[None] | None = None
         self._running = False
         self._stopped = False
+        self._accepting = True
         self._stop_event: asyncio.Event | None = None
         self.metrics: dict[str, int] = {}
 
     # -- lifecycle ---------------------------------------------------------
     async def start(self) -> None:
         validate_startup(self.config)
+        await self.provider.preflight()
         await self.store.connect()
         built = self._connectors_override
         if built is None:
@@ -99,7 +103,12 @@ class TetherApp:
         for connector in self.connectors.values():
             await connector.start(self._on_item)
         self._running = True
-        for base_url, _token_env in self._bases():
+        for base_url in self._base_urls():
+            try:
+                await self.router.warm_base(base_url)
+            except Exception as exc:  # noqa: BLE001 - discovery retries on first message
+                log.warning("agent_discovery_failed", base=base_url, error=str(exc))
+        for base_url in self._base_urls():
             client = self.router.client_for_base(base_url)
             self._clients.append((base_url, client))
             self._sse_tasks.append(asyncio.ensure_future(self._consume_events(base_url, client)))
@@ -111,27 +120,42 @@ class TetherApp:
             return
         self._stopped = True
         self._running = False
+        self._accepting = False  # stop admitting new inbound messages
         if self._stop_event is not None:
             self._stop_event.set()
+        started = time.monotonic()
         for task in self._sse_tasks:
             task.cancel()
         if self._janitor_task is not None:
             self._janitor_task.cancel()
         for task in self._sse_tasks:
-            with contextlib.suppress(asyncio.CancelledError):
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
         if self._janitor_task is not None:
-            with contextlib.suppress(asyncio.CancelledError):
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._janitor_task
+        log.info("stop_streams_closed", elapsed_ms=_ms_since(started))
         for engine in list(self._turns.values()):
-            await engine.cancel()
+            # Default: just stop streaming and leave the turn on agentd so a
+            # restart can resume it. `interrupt_on_shutdown` opts into stopping
+            # it (interrupt + reject pending interactions).
+            with contextlib.suppress(Exception):
+                if self.config.sessions.interrupt_on_shutdown:
+                    await asyncio.wait_for(engine.shutdown(), timeout=2)
+                else:
+                    await engine.pause()
+        log.info("stop_turns_closed", elapsed_ms=_ms_since(started))
         for connector in self.connectors.values():
             with contextlib.suppress(Exception):
                 await connector.stop()
-        await self.store.flush()
-        await self.router.close()
-        await self.store.close()
-        log.info("tether_stopped")
+        log.info("stop_connectors_closed", elapsed_ms=_ms_since(started))
+        with contextlib.suppress(Exception):
+            await self.store.flush()
+        with contextlib.suppress(Exception):
+            await self.router.close()
+        with contextlib.suppress(Exception):
+            await self.store.close()
+        log.info("tether_stopped", elapsed_ms=_ms_since(started))
 
     async def serve_forever(self) -> None:
         await self.start()
@@ -141,13 +165,16 @@ class TetherApp:
         finally:
             await self.stop()
 
-    def _bases(self) -> list[tuple[str, str]]:
-        return [(e.base_url, e.token_env) for e in self.config.server.pool] or [
-            (self.config.server.base_url, self.config.server.token_env)
-        ]
+    def _base_urls(self) -> list[str]:
+        pool = self.config.server.pool
+        if pool:
+            return [entry.base_url for entry in pool]
+        return [self.config.server.base_url]
 
     # -- inbound -----------------------------------------------------------
     async def _on_item(self, item: IncomingItem) -> None:
+        if not self._accepting:
+            return
         try:
             if isinstance(item, InboundMessage):
                 await self._on_message(item)
@@ -208,16 +235,62 @@ class TetherApp:
             )
             return
         client = self.router.client_for(route)
-        if value.get("kind") == "permission":
+        if engine is None:
+            # The turn is running on agentd but this process has no engine for it
+            # (e.g. the bridge restarted mid-turn). Attach one so the resumed turn
+            # renders; answering the interaction resumes it.
+            self._attach_resumed_engine(sid, route)
+        label = _interaction_label(value)
+        try:
+            await self._reply_interaction(client, sid, rid, value)
+        except AgentError as exc:
+            if exc.code == "not_found":  # already answered/expired on agentd
+                log.info("interaction_stale", rid=rid, session=sid)
+                label = "⌛ Already handled"
+            else:
+                log.warning("interaction_reply_failed", rid=rid, error=exc.code)
+                label = "⚠️ Could not process"
+        route.pending_interactions.pop(rid, None)
+        await self.router.save(route)
+        with contextlib.suppress(Exception):
+            await connector.acknowledge(item, label)
+
+    async def _reply_interaction(
+        self, client: HttpAgentClient, sid: str, rid: str, value: dict[str, Any]
+    ) -> None:
+        kind = value.get("kind")
+        if kind == "permission":
             await client.reply_permission(sid, rid, reply=str(value.get("reply", "reject")))
-        elif value.get("kind") == "question":
+        elif kind == "question":
             if value.get("reject"):
                 await client.reject_question(sid, rid)
             else:
-                answer = value.get("answer") or []
-                await client.reply_question(sid, rid, [list(answer)])
-        route.pending_interactions.pop(rid, None)
-        await self.router.save(route)
+                await client.reply_question(sid, rid, [list(value.get("answer") or [])])
+
+    def _attach_resumed_engine(self, sid: str, route: Route) -> None:
+        connector = self.connectors.get(route.conversation.channel)
+        if connector is None:
+            return
+        inbound = InboundMessage(
+            channel=route.conversation.channel,
+            message_id="",
+            conversation=route.conversation,
+            sender=Sender(id=route.active_turn_sender or "unknown"),
+            text="",
+        )
+        engine = TurnEngine(
+            route=route,
+            inbound=inbound,
+            connector=connector,
+            client=self.router.client_for(route),
+            config=self.config,
+            renderer=self.renderer,
+            media_egress=MediaEgress(self.config, connector),
+            on_finish=self._on_turn_finished,
+        )
+        self._turns[sid] = engine
+        self._turn_queue[sid] = [engine]
+        log.info("turn_resumed", session=sid, conversation=route.key)
 
     async def _on_event(self, event: ConnectorEvent) -> None:
         log.info("connector_event", kind=event.kind, conversation=event.conversation.key)
@@ -242,42 +315,50 @@ class TetherApp:
         if result.notes:
             prompt = f"{result.note_text()}\n\n{prompt}"
 
-        engine = TurnEngine(
-            route=route,
-            inbound=msg,
-            connector=connector,
-            client=self.router.client_for(route),
-            config=self.config,
-            renderer=self.renderer,
-            media_egress=MediaEgress(self.config, connector),
-            on_finish=self._on_turn_finished,
-        )
-        sid = route.session_id
-        had_active = sid in self._turns
-        queue = self._turn_queue.setdefault(sid, [])
-        queue.append(engine)
-        route.queue_depth += 1
-        route.participants[msg.sender.id] = msg.sender.name or msg.sender.id
-        route.context_dirty = False
-        route.identity_injected = True
-        if not had_active:
-            await self._activate(engine)
-        await self.router.save(route)
-
-        delivery = self._delivery_for(route, msg, had_active=had_active)
-        try:
-            await self.router.client_for(route).prompt(
-                sid,
-                prompt=prompt,
-                files=result.files,
-                id=f"{route.key}:{msg.message_id}",
-                delivery=delivery,
+        # Two attempts: if the agent session was deleted (e.g. agentd restarted
+        # with a fresh root), recreate it once and retry.
+        for attempt in range(2):
+            engine = TurnEngine(
+                route=route,
+                inbound=msg,
+                connector=connector,
+                client=self.router.client_for(route),
+                config=self.config,
+                renderer=self.renderer,
+                media_egress=MediaEgress(self.config, connector),
+                on_finish=self._on_turn_finished,
             )
-            self._bump("prompts")
-        except AgentError as exc:
-            log.warning("prompt_failed", error=exc.code)
-            await self._notice(connector, route.conversation, user_message(exc.code))
-            await self._discard(engine)
+            sid = route.session_id
+            had_active = sid in self._turns
+            self._turn_queue.setdefault(sid, []).append(engine)
+            route.queue_depth += 1
+            route.participants[msg.sender.id] = msg.sender.name or msg.sender.id
+            route.context_dirty = False
+            route.identity_injected = True
+            if not had_active:
+                await self._activate(engine)
+            await self.router.save(route)
+
+            try:
+                await self.router.client_for(route).prompt(
+                    sid,
+                    prompt=prompt,
+                    files=result.files,
+                    id=f"{route.key}:{msg.message_id}",
+                    delivery=self._delivery_for(route, msg, had_active=had_active),
+                )
+                self._bump("prompts")
+                return
+            except AgentError as exc:
+                if exc.code == "not_found" and attempt == 0:
+                    log.warning("session_missing", session=sid, conversation=route.key)
+                    await self._discard(engine)
+                    await self.router.recreate_session(route)
+                    continue
+                log.warning("prompt_failed", error=exc.code)
+                await self._notice(connector, route.conversation, user_message(exc.code))
+                await self._discard(engine)
+                return
 
     async def _activate(self, engine: TurnEngine) -> None:
         sid = engine.route.session_id
@@ -558,6 +639,27 @@ class TetherApp:
 
     def _bump(self, name: str, amount: int = 1) -> None:
         self.metrics[name] = self.metrics.get(name, 0) + amount
+
+
+def _ms_since(started: float) -> int:
+    return int((time.monotonic() - started) * 1000)
+
+
+def _interaction_label(value: dict[str, Any]) -> str:
+    """A short outcome label to write back onto a clicked card."""
+    kind = value.get("kind")
+    if kind == "permission":
+        return {
+            "once": "✅ Allow once",
+            "always": "✅ Always allow",
+            "reject": "⛔ Deny",
+        }.get(str(value.get("reply")), "✅ Handled")
+    if kind == "question":
+        if value.get("reject"):
+            return "⛔ Cancelled"
+        answer = value.get("answer") or []
+        return "✅ " + (", ".join(str(a) for a in answer) if answer else "Answered")
+    return "✅ Handled"
 
 
 def _command(text: str, prefix: str) -> str | None:

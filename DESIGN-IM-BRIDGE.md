@@ -1,9 +1,9 @@
 # Tether — go-agent-sdk IM bridge service design
 
 > Project name: **Tether** (independent repository; Python 3.12+ / uv). This document is its design doc.
-> Status: **draft (design only, not implemented)**
+> Status: **implemented** (the bridge lives in `src/tether/`, Python 3.12+/uv); this document is its design reference.
 > Scope: an independent Python service that bridges the bots of IM platforms such as WeCom / Feishu / QQ / WeChat with
-> the **HTTP/SSE API** of `go-agent-sdk` (`cmd/agentserve`, see `docs/DESIGN-HTTP.md`),
+> the **HTTP/SSE (and A2A) API** of `go-agent-sdk` (`cmd/agentd`, see `docs/DESIGN-HTTP.md`),
 > letting users converse with the Agent in IM conversations (direct chat / group chat).
 > Relationship: this document is the downstream consumer design for `docs/DESIGN.md` / `docs/DESIGN-HTTP.md`. The Go-side contract is defined by
 > `docs/DESIGN-HTTP.md` and `pkg/server/*`; this document does not modify it; it only describes how the Python side consumes it.
@@ -79,6 +79,8 @@
 | 2026-10-11 | Title/terminology consistency pass: title line → sentence case; `Status:` unified to `draft (design only, not implemented)` (incl. `DESIGN-AGENTD.md`); `Project runner` → `project runner` (prose); `isolation view` → `isolated view`; `to be integration-tested` → `pending integration testing`; `## Change Log` → `## Change log` |
 | 2026-10-11 | §17.5 clarified: the `buildClient` drift is only the `ClientOptions` **config plumbing** (MCP/references/auto-title/`SubagentDepth` limit) — agents/subagents/skills still load from `configDirs` in both commands; not an A2A limitation. |
 | 2026-10-11 | §17.5 pointer updated to name the agentd config list **`servers[]`** (each entry = one `Client` + adapter; may share a `listen`). |
+| 2026-10-12 | §8.3 session recovery: the IM↔session mapping is persisted by the bridge keyed by `Conversation.key` (agentd knows only session ids); added `sessions.validate_session` (verify a loaded route's session on first use, recreate if gone) plus reactive recovery on `prompt not_found`; config §9 updated |
+| 2026-10-12 | §8.5 shutdown: default is now to **leave in-progress turns/parked interactions on agentd** (`sessions.interrupt_on_shutdown: false`) so a restart resumes them; `true` restores interrupt+reject. Stale card clicks (already answered/expired) are ignored; answering an interaction after a restart attaches a resumed turn engine. §9 updated |
 
 ---
 
@@ -93,7 +95,7 @@ only provide Python/Node implementations, with no Go version. Therefore the corr
 WeCom / Feishu / QQ / WeChat platforms
         │  (platform -> connector)
         ▼
-   Tether (Python)   ──HTTP/SSE──►  cmd/agentserve (go-agent-sdk agent loop)
+   Tether (Python)   ──HTTP/SSE──►  cmd/agentd (go-agent-sdk agent loop)
         ▲                                   │
         └──────────── outbound message / media ◄──────┘
 ```
@@ -112,8 +114,8 @@ The bridge service itself **does not implement the agent loop**, nor does it cop
 
 - This document **is not A2A**: A2A (`docs/DESIGN-A2A.md`) is "agent calling agent"; this document is "IM user ↔ a
   hosted agent".
-- This document is the **trusted host** of `cmd/agentserve`: the bridge service calls it with a Bearer token,
-  while the IM end users are **untrusted**. Therefore agentserve must run with **restricted** `inboundPermissions`
+- This document is the **trusted host** of `cmd/agentd`: the bridge service calls it with a Bearer token,
+  while the IM end users are **untrusted**. Therefore agentd must run with **restricted** `inboundPermissions`
   (dangerous tools `ask` or `deny`, see §9.2), and dangerous permission requests are exposed to IM users through HITL (human-in-the-loop confirmation)
   (see §4.6, §10).
 - The bridge service **only integrates IM Python SDKs** (a user requirement); the Agent loop is always on the Go side.
@@ -135,7 +137,7 @@ is the former — it wants to render the agent's **real-time behavior** into IM,
 
 - **Counterexample (where A2A is right)**: if Tether wanted to **be called by other agents**, to drive any A2A agent **implementation-agnostically**, or to expose
   an agent as a **standard public service** — that would be another product (Tether is **a host for this SDK**, already defined in §8).
-- **Not mutually exclusive**: the SDK's same core provides `cmd/agentserve` (HTTP) and `cmd/a2aserve` (A2A); the runner of §17.3 parameterizes
+- **Not mutually exclusive**: the SDK's same core provides `cmd/agentd` (HTTP and A2A); the runner of §17.3 parameterizes
   `Transport`. The choice is just "**which face this consumer needs**".
 
 ### 1.3 Two design priorities (explicitly required by the user)
@@ -173,7 +175,7 @@ There are also several requirement-driven **supporting designs**: bot identity s
 | **Agent Session** | go-agent-sdk's `session`, created by `POST /api/session`, with an `id` (`ses_…`). |
 | **Turn** | The complete process of one prompt → model/tool execution → idle. |
 | **Route** | The mapping of Conversation ↔ Agent Session, maintained and persisted by the `Router`. |
-| **Project (project instance)** | One agentserve instance = one `agent.Client` = one working directory; the unit of isolation (§2.8/§2.9). |
+| **Project (project instance)** | One agentd instance = one `agent.Client` = one working directory; the unit of isolation (§2.8/§2.9). |
 | **ProjectProvider / Lease** | The abstraction and lease for acquiring/returning a project instance (isolation) (§3.7). |
 | **Capabilities** | The platform capabilities declared by a connector (degree of Markdown support, whether messages are editable, buttons, emoji, media types, message length limit, ...), which drive rendering and degradation. |
 | **Renderer** | Renders the canonical payload (Markdown + media + interactions) into a given Connector's native outbound message. |
@@ -185,7 +187,7 @@ There are also several requirement-driven **supporting designs**: bot identity s
   WeCom / Feishu / QQ / WeChat platform
         │  Platform SDK events
         ▼
-  [Connector] ─► [Router] ─► [TurnEngine] ─► [AgentClient] ─HTTP/SSE─► cmd/agentserve
+  [Connector] ─► [Router] ─► [TurnEngine] ─► [AgentClient] ─HTTP/SSE─► cmd/agentd
     §3.1          §3.6          §4             §4.1                     (go-agent-sdk)
       ▲                                                                  │
       └── [Renderer] ◄── [StreamingController] ◄── event stream (global SSE) ◄────┘
@@ -220,12 +222,12 @@ AgentClient's global SSE (/api/event)
 ### 2.4 Deployment Form
 
 - Process: a single bridge process can enable multiple Connectors at the same time; each Connector corresponds to one upstream platform connection.
-- Relationship with agentserve: the bridge service calls one (or more)
-  agentserve instances via `server.base_url` + `server.token_env`. **One agentserve instance = one `agent.Client` = one project/working directory**.
+- Relationship with agentd: the bridge service calls one (or more)
+  agentd instances via `server.base_url` + `server.token`. **One agentd instance = one `agent.Client` = one project/working directory**.
 - When the bridge needs "different IM/different groups use different agent projects", use `server.pool` (multiple base_urls),
   selected by the Router (§3.6).
 - **Three media source options + spool fallback**: small media uses `inline` (data URL); media with a publicly reachable URL uses `url`; **large media
-  (video/audio/large images) uses `file`**. The `file` source requires Go-side configuration of `MediaUploader` (`cmd/agentserve`)
+  (video/audio/large images) uses `file`**. The `file` source requires Go-side configuration of `MediaUploader` (`cmd/agentd`)
   to enable its upload endpoint `POST /api/session/{id}/file` (see `pkg/server/media.go`); if none of the three is suitable, then
   spool into the working directory and note the path in the prompt (§4.4).
 
@@ -290,7 +292,7 @@ and by default does not know who said it. The bridge therefore injects a speaker
 
 **(4) Context and cost**
 
-- Group conversations grow fast: it is recommended to enable auto-compaction on the agentserve side (its `ContextLimit` config, which belongs to the **host**) and configure the bridge's
+- Group conversations grow fast: it is recommended to enable auto-compaction on the agentd side (its `ContextLimit` config, which belongs to the **host**) and configure the bridge's
   `sessions.idle_reset_s`; note that this is different from the bridge's `model.context_limit` in §6.7 (**used only for usage display**).
 - When multiple people in a group ask at the same time, they queue serially, and response latency grows with the queue; when the queue backs up, the bridge gives a "N messages ahead" hint.
 
@@ -384,7 +386,7 @@ participants: Alice, Bob            # optional, only when sync_participants
 
 ### 2.8 Project isolation: shared read-only, isolated writable
 
-**Background**: For `go-agent-sdk`, **one `Client` (one agentserve instance) = one project/working directory**
+**Background**: For `go-agent-sdk`, **one `Client` (one agentd instance) = one project/working directory**
 (`ClientOptions.WorkingDirectory` / `Root`). The HTTP API **does not provide per-session directory or location routing**
 (`DESIGN-HTTP.md` §5.5 explicitly discards the location scope); a session's inline `directory` is fixed to the instance's
 workingDirectory. One bot can join **multiple IM groups**, each group corresponding to one agent session (§2.5); whether these sessions share
@@ -394,7 +396,7 @@ workingDirectory. One bot can join **multiple IM groups**, each group correspond
   project has **no side effects**—each group's session context remains isolated (one session per group), they merely read the same code/files.
   **No project isolation needed.**
 - **Writable agent** (allowed `write`/`edit`/`apply_patch`/`bash`, or can spawn writable sub-agents): multiple groups sharing one
-  project will **modify each other's files and contaminate each other**. **Projects must be isolated per group**—each group binds to an independent agentserve project instance
+  project will **modify each other's files and contaminate each other**. **Projects must be isolated per group**—each group binds to an independent agentd project instance
   (an independent working directory).
 
 **Determination: based on the actual tool set, not the agent name**
@@ -421,11 +423,11 @@ Isolation = **leasing an independent project instance** from `server.pool` (each
 
 ```
 read-only agent:  group A ─┐
-                  group B ─┼─► same agentserve project (shared files, safe for reading; each group still has its own session)
+                  group B ─┼─► same agentd project (shared files, safe for reading; each group still has its own session)
                   group C ─┘
-writable agent:   group A ──► agentserve project P_A (working directory A)
-                  group B ──► agentserve project P_B (working directory B)
-                  group C ──► agentserve project P_C (working directory C)
+writable agent:   group A ──► agentd project P_A (working directory A)
+                  group B ──► agentd project P_B (working directory B)
+                  group C ──► agentd project P_C (working directory C)
 ```
 
 - **Startup validation**: `isolation: shared` and a writable agent detected → **fail-fast**.
@@ -434,12 +436,12 @@ writable agent:   group A ──► agentserve project P_A (working directory A)
 - **Agent switching** (operations via `POST …/agent`): when going read-only→writable while currently on a shared project, `agent.switch_guard: reject | migrate`
   (`migrate` = create a new session on an isolated project, the old context is not carried over automatically; default `reject` with a prompt).
 - **Providers**: `pool` has independent instances pre-provisioned by the host; `worktree` (`git worktree` per group into an independent directory) requires the host to pair it with an
-  agentserve process supervisor; the bridge is only responsible for acquiring/releasing (clear boundary, the bridge does not spawn Go processes itself).
+  agentd process supervisor; the bridge is only responsible for acquiring/releasing (clear boundary, the bridge does not spawn Go processes itself).
 - **Snapshots/revert**: a writable project should enable snapshots if undo is needed; a read-only shared project needs no snapshots.
 
 ### 2.9 Implementation approaches to isolation (shared / worktree / container / others)
 
-**Premise**: an agentserve instance is permanently bound to one directory (no per-session location routing; `session.next.moved`
+**Premise**: an agentd instance is permanently bound to one directory (no per-session location routing; `session.next.moved`
 is defined but has no producer/public API), so "isolated project" = **multiple instances**. Isolation has multiple dimensions:
 
 | Dimension | Description |
@@ -454,12 +456,12 @@ is defined but has no producer/public API), so "isolated project" = **multiple i
 Four (and more) implementations, in increasing order of isolation strength and cost:
 
 **(1) Shared (none / shared)**
-- one agentserve instance, one directory, reused by multiple groups.
+- one agentd instance, one directory, reused by multiple groups.
 - **Safe only for read-only agents** (§2.8 determination). Lowest cost, zero orchestration.
 
 **(2) git worktree (suitable for git repositories)**
 - Each writable group `git worktree add <dir> [<commit>|im/<group>]`, each working tree independent, **sharing the `.git` object store**.
-- Each worktree needs one agentserve instance (working directory = worktree).
+- Each worktree needs one agentd instance (working directory = worktree).
 - Advantages: saves disk (shared object store), fast (checkout-level), naturally allows independent commit/rollback per group.
 - Usage: `detached` (start from a baseline commit, no branch, simplest) or `im/<group>` branch (traceable).
 - Limitations/risks:
@@ -473,14 +475,14 @@ Four (and more) implementations, in increasing order of isolation strength and c
 > Containers provide **both** a **sandbox** (agent → host: FS/process/network/resources) and **isolation** (session ↔ session: separate mounts/
 > state)—see §2.9.2 for the difference between the two and their "convergence".
 
-- One container per group, running agentserve inside the container + mounting that group's worktree/directory; the container provides filesystem, process, user,
+- One container per group, running agentd inside the container + mounting that group's worktree/directory; the container provides filesystem, process, user,
   network, and resource (cgroup) isolation.
-- The bridge requests/destroys via a container orchestration interface (Docker/Podman/K8s); the in-container agentserve exposes HTTP and registers as a project instance.
+- The bridge requests/destroys via a container orchestration interface (Docker/Podman/K8s); the in-container agentd exposes HTTP and registers as a project instance.
 - Advantages: strongest isolation (including egress allowlists, resource quotas), suitable for mixing multiple sources / executing untrusted code.
 - Cost: heavy (images, startup latency, orchestration complexity). Hardening: non-root, read-only root + writable mounts, minimal capabilities,
-  `tmpfs`, no network or allowlisted egress, CPU/mem/pids quotas; image pre-provisioned with the agentserve binary, credentials injected via secrets.
-- Variant: one container, one agentserve + one project (recommended); sandboxing only `bash` in containers requires the SDK to support out-of-process tools (currently tools and
-  the agent loop are in the same process, so the entire agentserve must be wrapped).
+  `tmpfs`, no network or allowlisted egress, CPU/mem/pids quotas; image pre-provisioned with the agentd binary, credentials injected via secrets.
+- Variant: one container, one agentd + one project (recommended); sandboxing only `bash` in containers requires the SDK to support out-of-process tools (currently tools and
+  the agent loop are in the same process, so the entire agentd must be wrapped).
 
 **(4) Others**
 - **Directory copy (copy/rsync)**: a general approach for non-git; simple but consumes space linearly with repository size.
@@ -505,7 +507,7 @@ Four (and more) implementations, in increasing order of isolation strength and c
     write interception", and it must guarantee "materialize before write".
 - **Relationship to git worktree**: worktree is git's "**object-store reference sharing**" version of CoW—the least hassle, but requires a git repository.
 - **Namespace sandbox (bubblewrap/nsjail/chroot)**: lighter than containers, isolates filesystem/process/network; still requires one instance per group.
-- **Separate machine/VM/remote instance**: one remote agentserve per group (cross-host), physical-level isolation, suitable for the strongest isolation needs.
+- **Separate machine/VM/remote instance**: one remote agentd per group (cross-host), physical-level isolation, suitable for the strongest isolation needs.
 - **Orchestrator-managed (systemd-run/Nomad/K8s Job)**: hand the "per-group instance" lifecycle to an orchestrator.
 
 > Combination recommendation (echoing §2.9.2): **per group = one isolated view (overlay/reflink/clonefile) + one layer of namespace/container sandbox**,
@@ -562,9 +564,9 @@ The "sandbox mode" of mainstream coding agents is all **two orthogonal layers of
 **Mapping to the bridge (§2.8/§2.9/§3.7)**:
 
 - These products are "**single-machine, single-session, in-process**" sandboxes; the bridge faces "**multi-user, multi-group, multi-session**" and wants
-  **process-level/project-level** isolation (one agentserve instance per group, §2.8), but can **reuse the same set of primitives**.
+  **process-level/project-level** isolation (one agentd instance per group, §2.8), but can **reuse the same set of primitives**.
 - `sandbox-center` (centralized policy/leases) ≈ the bridge's `ProjectProvider` + policy service (§3.7).
-- Wrapping **each agentserve instance** in `bubblewrap`/Landlock+netns or an OCI container (§2.9(3)/(4)) =
+- Wrapping **each agentd instance** in `bubblewrap`/Landlock+netns or an OCI container (§2.9(3)/(4)) =
   `sandbox-cli`+Seatbelt for CodeBuddy.
 - "read-only agent" = a filesystem **read-only sandbox** (exactly realizing the safe premise for shared projects in §2.8).
 - LocalProxy/egress allowlist = **SSRF protection** for `webfetch`; env scrub/read-only mounts = **credential isolation**;
@@ -594,7 +596,7 @@ The two solve problems at **different layers** and cannot substitute for each ot
 - **Landing point**: `ProjectProvider` (§3.7) is the combination point of the two; the recommended providers converge to `container` / `worktree`
   (one sandbox instance per group), rather than the two-part assembly of "shared instance + separate file/network sandbox".
 
-> **Cross-transport shared isolation** (`agentserve` HTTP ↔ `a2aserve` A2A): the "mechanism" of isolation goes in the command layer, shared by the two commands;
+> **Cross-transport shared isolation** (`agentd`'s HTTP ↔ A2A transports): the "mechanism" of isolation goes in the command layer, shared across transports;
 > "policy/hook" goes in the SDK; "decision/lease" goes in the host. The constraint is to **share the mechanism, not the instance** (a writable project has a single owner).
 > This is a discussion of responsibility boundaries, see **§17.3** for details.
 
@@ -971,7 +973,7 @@ class PendingInteraction:
   one agent session**; direct chat is likewise one conversation one session (no per-user splitting).
 - Storage: SQLite (`aiosqlite`), table `routes` (primary key `Conversation.key`), with a **unique index** on `session_id`
   — SSE events and HITL reconciliation are both looked up in reverse by `sessionID` (§4.3/§8.3); this guarantees conversations are not lost after a bridge restart.
-- One Route corresponds to one agentserve session; on the SDK side this is naturally "serial within the same conversation" — this is exactly the basis for queueing
+- One Route corresponds to one agentd session; on the SDK side this is naturally "serial within the same conversation" — this is exactly the basis for queueing
   multi-user messages in a group chat in arrival order (§2.5(2)).
 - **Project ownership** (§2.8): `project_id`/`server_base` are assigned by the Router according to the agent's read-write capability — a read-only agent can
   reuse the same project; a writable agent exclusively holds one project instance leased from `server.pool` per group.
@@ -1008,9 +1010,9 @@ Built-in implementations (selected by the `projects.provider` config):
 |---|---|---|
 | `shared` | (1) | Single-instance reuse (read-only) |
 | `pool` | — | Static `server.pool` leasing |
-| `worktree` | (2) | `git worktree` + host supervisor launches the corresponding agentserve (§17.3) |
+| `worktree` | (2) | `git worktree` + host supervisor launches the corresponding agentd (§17.3) |
 | `overlay` | (4) | **CoW isolated view**: overlayfs / reflink / clonefile generates a per-group writable layer (§2.9(4)) |
-| `container` | (3) | Docker/Podman/K8s API requests a containerized agentserve |
+| `container` | (3) | Docker/Podman/K8s API requests a containerized agentd |
 | `remote` | (4) | An existing remote instance |
 
 - The `readonly` of `acquire` comes from the §2.8 determination; `shared`/`pool` reject `readonly=False` by default (unless
@@ -1019,7 +1021,7 @@ Built-in implementations (selected by the `projects.provider` config):
   (corresponding to §17.3's `ProjectSpec`/`IsolationSpec`) to the host supervisor (or first checks the static `server.pool`),
   which calls the transport-agnostic project runner under `cmd/` to launch the instance and return `server_base`; **a writable project at any one time
   is leased to only one `(project, transport)`**, while read-only can be shared (§17).
-- `supervisor.command` is the entry point in the **host configuration** for "launching agentserve per project" (interpreted and executed by the host); **if unconfigured
+- `supervisor.command` is the entry point in the **host configuration** for "launching agentd per project" (interpreted and executed by the host); **if unconfigured
   it degrades to an external registry mode** (the host pre-provisions instances and the bridge only looks up the table to lease).
 - Leases are released with the group's idle TTL (§2.9), with `projects.max_leases` as the limit.
 
@@ -1075,7 +1077,7 @@ Responses are uniformly `{"data": …}`; errors are uniformly `{"error":code,"me
 
 ### 4.3 Event consumption: **one global SSE + routing**
 
-Choose **one** persistent SSE connection to `/api/event` (one per agentserve base), for the following reasons:
+Choose **one** persistent SSE connection to `/api/event` (one per agentd base), for the following reasons:
 
 - `/api/event` is the SDK's **main push-stream channel**, carrying **all** events, including the live-only
   `session.next.text.delta`, `session.status`, and all HITL events (`permission.v2.asked`
@@ -1152,7 +1154,7 @@ download bytes → obtain (mime, size, bytes/or URL only)
   ├─ target model modality unsupported (the input of GET /api/model)? → do not put into files[],
   │     instead spool into the working directory and note the path in the prompt text (the agent can read it with the read tool)
   ├─ size ≤ inline_limit and modality supported → files[{uri:"data:<mime>;base64,…", mediaSource:"inline"}]
-  ├─ agentserve is configured with a MediaUploader and the source supports file
+  ├─ agentd is configured with a MediaUploader and the source supports file
   │     → POST /api/session/{sid}/file → files[{mediaSource:"file", fileId}]
   ├─ the bridge can provide a publicly reachable URL (a public download address is configured) → files[{uri, mediaSource:"url"}]
   └─ otherwise → spool into the working directory + note the path in the prompt (the agent reads it with a tool), and notify the user
@@ -1209,7 +1211,7 @@ Question card: Please select a deployment environment:
 - Two uses of cards: **interaction** (this section: buttons) and **updatable** (§6.1/§6.7: stream-refresh the same card).
 - Channels without cards (WeChat personal) degrade to **numbered options + text** (see "channels without button capability" below).
 
-agentserve is in hold mode (`server.New` calls `HoldInteractions(true)`), and dangerous tools park waiting for a
+agentd is in hold mode (`server.New` calls `HoldInteractions(true)`), and dangerous tools park waiting for a
 reply. The bridge must close the loop, otherwise the turn blocks forever (`docs/DESIGN-HTTP.md` §9).
 
 **Permission `permission.v2.asked`** (live-only) data:
@@ -1239,7 +1241,7 @@ permission.v2.asked
 - **In-group authorization (§2.5(3))**: the card takes effect only when the **authorization rule** of `pending_interactions[rid]` allows it —
   `scope=initiator`→only `owner`; `participants`→group members; `admins`→`group.admins`. Clicks by other members are
   **ignored with a one-line notice**, and never release a dangerous operation on behalf of the initiator. Direct chats are always the person themself.
-- **Timeout**: agentserve's `interactionTimeout`/`interactionFallback` is the last line of defense; the bridge itself also sets
+- **Timeout**: agentd's `interactionTimeout`/`interactionFallback` is the last line of defense; the bridge itself also sets
   `permissions.timeout_s`, and on timeout gives up by default (reject) and notifies the user.
 - **Interrupt coordination**: `/interrupt` does not release an already-parked permission (it can only release a question), so
   `/stop` on the bridge side should: `POST /interrupt` **and**, for each pending permission,
@@ -1251,7 +1253,7 @@ permission.v2.asked
   `not_found(404)`, `conflict(409)` (e.g. compact while a turn is running), `unavailable(503)` (
   coordinator stopped / snapshot unavailable), `internal(500)` (contains `ref`; show the user "internal error, please retry later").
 - `session.next.step.failed` (durable) → render as an error prompt; if `error.type=="provider"`,
-  agentserve's default `dropErroredTurns:true` removes that turn from the subsequent context (to avoid getting stuck).
+  agentd's default `dropErroredTurns:true` removes that turn from the subsequent context (to avoid getting stuck).
 - `session.status.retry` → prompt "model retrying (#N)", without exposing provider details.
 
 ### 4.8 Bot identity and group context injection (implementation of §2.6)
@@ -1332,6 +1334,15 @@ user @-mentions the bot ──► on('message.text')
   turn idle: reply_stream(frame, stream_id, full Markdown, finish=True, msg_item=[media…])
   if there is a permission mid-turn: reply_stream_with_card(frame, stream_id, text, False, template_card=permission card)
 ```
+
+**Passive-reply window (integration item)**: `reply_stream` / `reply_template_card` are *passive
+replies* bound to the callback's `req_id`. `reply_welcome` / `update_template_card` are documented
+as 5-second windows; whether `reply_stream` stays valid for the whole streamed turn (which may
+exceed 5s) must be confirmed on a real device (see §13.1). If a late `finish=True` frame is
+rejected, the bridge falls back to sending the answer as a new message (no turn is left stuck).
+A conversation with no inbound frame (a purely proactive push) cannot stream: the connector
+reports it as non-streamable (`IMConnector.supports_streaming`) and the bridge sends a single
+complete message instead.
 
 ### 5.2 Feishu
 
@@ -1499,7 +1510,7 @@ Key points:
   (`group.admins`). A one-on-one chat means the person themself.
   In a group chat, if the platform only delivers @ messages, `/stop` naturally also requires an @ trigger (see §2.5).
 - **No Conversation lifecycle commands are provided**: there is no `/new`, `/reset`, `/compact`, `/agent`, `/model`, `/status`,
-  `/help` — in IM, "one Conversation is one agent session"; context growth is left to agentserve's automatic compaction; switching
+  `/help` — in IM, "one Conversation is one agent session"; context growth is left to agentd's automatic compaction; switching
   agent/model is **operations** work handled through deployment configuration, not switched in the chat.
 
 ### 6.7 Runtime Status and Usage Display
@@ -1521,8 +1532,8 @@ Key points:
 
 **Usage/context (`streaming.show_usage`, default `true`)**:
 - Source: `session.next.step.ended`'s `tokens{input,output,reasoning,cache}` and `cost`; context ≈
-  the latest step's `tokens.input` compared against the context window `model.context_limit` (§9; `GET /api/model` currently does **not** include
-  this field — if it needs to be obtained from the API, that is an SDK alignment item, see §19).
+  the latest step's `tokens.input` compared against the context window reported by `GET /api/model`
+  (`contextLimit`; the `model.context_limit` setting in §9 is an optional override, see §19).
 - At the end of a Turn, append **one line** at the end: `📊 context 12.3k/128k (10%) · this turn in 1.2k/out 456 · $0.003`.
 - In a group Conversation, usage is the **cumulative total of the whole Conversation** (not of an individual).
 
@@ -1576,7 +1587,7 @@ outbound: the file part of event/message ──► MediaCollector(§4.5) ──�
 
 See the §4.4 decision tree. Core points:
 
-- Prefer `inline` (small files, modality supported); large files go via `file` (requires the agentserve `MediaUploader`); when a publicly reachable
+- Prefer `inline` (small files, modality supported); large files go via `file` (requires the agentd `MediaUploader`); when a publicly reachable
   URL exists use `url`; if none fits, spool to a **controlled subdirectory inside the working directory** and note it in the prompt text (details in §4.4).
 - Make `mime` as precise as possible (as given by the platform or sniffed by extension/magic); sanitize `name`.
 - Voice: if the model does not support audio, it can be spooled first; a speech-to-text subagent could also be connected in the future (not MVP).
@@ -1653,7 +1664,7 @@ See §4.5. Core points:
 
 - **Inbound dedup**: deduplicate by `(Conversation.key, message_id)` in the `dedup.ttl_s` (§9) cache (platform redelivery) — use the Conversation key rather than
   only `channel`, to avoid message-id collisions across Conversations.
-- **Prompt idempotency**: set `id` to `f"{Conversation.key}:{message_id}"`; agentserve silently
+- **Prompt idempotency**: set `id` to `f"{Conversation.key}:{message_id}"`; agentd silently
   deduplicates repeated `id`s, avoiding a retry causing a second Turn.
 - **Card callback dedup**: the button value carries `rid`, making repeated clicks idempotent (after one successful reply, subsequent ones are ignored).
 
@@ -1666,6 +1677,7 @@ See §4.5. Core points:
   3. **Finish half-done work**: if that route's streaming message stopped midway, send it a `finish` snapshot with the final text from step 2;
   4. `GET /api/permission` / `GET /api/question` → restore pending HITL.
 - SSE overflow (`event: error` + `subscriber_overflow`) → log it and run the reconciliation flow.
+- **Session recovery (lost agentd state)**: the IM↔session mapping is persisted by the bridge (`routes`), keyed by `Conversation.key`; agentd holds only session ids. If agentd is restarted with a **fresh state directory**, a persisted `session_id` no longer exists. On the **first use of a loaded route** (`sessions.validate_session`), the bridge verifies it with `GET /api/session/{id}` and, on `not_found`, creates a new session for the same `Conversation.key` and updates the route (re-injecting identity). A `not_found` on `prompt` is also recovered reactively, covering a session lost mid-run. This keeps a conversation working instead of failing permanently.
 
 ### 8.4 Backpressure and Rate Limiting
 
@@ -1677,10 +1689,10 @@ See §4.5. Core points:
 
 ### 8.5 Graceful Shutdown
 
-- On receiving SIGINT/SIGTERM: stop accepting new messages → wait for/interrupt in-progress Turns (`/interrupt` + reject pending permissions)
-  → flush unsent final messages → close the SSE and Connector connections → flush `Route` state not yet persisted to disk.
-- Decoupled from agentserve's lifecycle: the bridge **does not fork/manage** agentserve processes; when multiple instances are needed, the **host side's
-  `supervisor`/orchestrator** creates and reclaims them (the bridge calls through `ProjectProvider`, §3.7); agentserve shuts down gracefully on its own
+- On receiving SIGINT/SIGTERM: stop accepting new messages → for in-progress Turns, **by default leave them running on agentd** (stop streaming only) so a restart can resume them; with `sessions.interrupt_on_shutdown: true` instead interrupt and reject their pending permissions
+  → flush unsent final messages (only in interrupt mode) → close the SSE and Connector connections → flush `Route` state not yet persisted to disk. A parked interaction is **not** consumed by default, so clicking its card after a restart still works (the resumed turn is re-attached).
+- Decoupled from agentd's lifecycle: the bridge **does not fork/manage** agentd processes; when multiple instances are needed, the **host side's
+  `supervisor`/orchestrator** creates and reclaims them (the bridge calls through `ProjectProvider`, §3.7); agentd shuts down gracefully on its own
   (`docs/DESIGN-HTTP.md` §12.5).
 
 ---
@@ -1694,24 +1706,20 @@ here it is a Python host, adopting 12-factor env injection, and YAML holds only 
 ```yaml
 server:
   base_url: http://127.0.0.1:8787
-  token_env: AGENTSERVE_TOKEN        # read bearer token from environment variable
+  token: ${AGENTSERVE_TOKEN:-}       # ${VAR} / ${VAR:-default} expanded from the environment
   request_timeout_s: 30
   sse_reconnect_ms: 1000
   # Multiple backends (optional): one instance = one project; writable agents need to be assigned to different instances per group (§2.8)
-  pool: []                            # [{name, base_url, token_env, working_directory, default_agent}]
+  pool: []                            # [{name, base_url, token, working_directory, default_agent}]
 
 agent:
-  default_agent: build
-  default_model: null                 # leave to agentserve default
-  subagent_depth: null                # display/constraint only; actually on the Go side
-  writable:                           # overrides §2.8's automatic read/write determination; if not listed, auto-detect
-    build: true
+  default_agent: null                 # optional override; unset = first agent exposed by GET /api/agent (agentd's default)
+  default_model: null                 # optional override; unset = agentd defaultModel (discovered, not restated)
+  writable:                           # optional override of the tool-set read/write determination (§2.8)
     plan: false                       # e.g. read-only agent
-  switch_guard: reject                # reject | migrate — handling when read-only→writable (§2.8)
 
 model:
-  context_limit: null                 # model context window (tokens); the denominator of §6.7's usage line. null=unknown means the percentage is not shown
-                                      # single value: if model windows differ within server.pool, take the conservative (minimum) value
+  context_limit: null                 # optional override; by default the window comes from GET /api/model (`contextLimit`)
 
 # Project isolation (§2.8 / §2.9)
 projects:
@@ -1723,7 +1731,7 @@ projects:
   max_leases: 32                      # concurrent lease limit (disk/memory protection)
   # worktree provider (§2.9(2))
   git_base_ref: origin/HEAD           # starting point: detached or im/<group> branch
-  supervisor_command: null            # command to launch agentserve per project; unset = external registry mode
+  supervisor_command: null            # command to launch agentd per project; unset = external registry mode
   # overlay / CoW provider (§2.9(4))
   cow:
     mode: auto                        # auto | overlayfs | reflink | clonefile
@@ -1731,7 +1739,7 @@ projects:
   # container provider (§2.9(3))
   container:
     runtime: docker                   # docker | podman | k8s
-    image: ghcr.io/jiaweisky/agentserve:latest
+    image: ghcr.io/jiaweisky/agentd:latest
     network: none                     # none | allowlist:<name>
     cpus: "2"
     memory: 2g
@@ -1741,6 +1749,8 @@ sessions:
   idle_reset_s: 0                     # when >0, automatically reset the Conversation when idle
   busy_delivery: queue                # queue | steer — when supplementary messages arrive while the same user's Turn is running (§8.1)
   max_active_routes: 1000
+  validate_session: true              # on the first message after a restart, verify a loaded route's session still exists; recreate it if gone (§8.3)
+  interrupt_on_shutdown: false        # false = leave in-progress turns/parked interactions to agentd (restart-resumable, §8.5)
 
 dedup:
   ttl_s: 600                          # TTL of the inbound message / card callback dedup cache (§8.2)
@@ -1789,6 +1799,10 @@ media:
     image_max_bytes: 10485760
 
 permissions:
+  # How *Tether* handles the agent's "allow tool? once|always|reject" ask, per
+  # action (this is the bridge's answer on the user's behalf, not the user's):
+  #   ask=forward to the user; once/always/reject=auto-answer on their behalf.
+  # The agent asks on every call, so `once` auto-answers "allow once" each time.
   auto:                               # action -> once|always|reject|ask
     read: once
     glob: once
@@ -1813,16 +1827,16 @@ access:                               # inbound allowlist (§10.1)
 channels:
   wecom:
     enabled: true
-    bot_id_env: WECOM_BOT_ID
-    secret_env: WECOM_BOT_SECRET
+    bot_id: ${WECOM_BOT_ID}
+    secret: ${WECOM_BOT_SECRET}
   feishu:
     enabled: false
-    app_id_env: FEISHU_APP_ID
-    app_secret_env: FEISHU_APP_SECRET
+    app_id: ${FEISHU_APP_ID:-}
+    app_secret: ${FEISHU_APP_SECRET:-}
   qq:
     enabled: false
-    appid_env: QQ_BOT_APPID
-    secret_env: QQ_BOT_SECRET
+    appid: ${QQ_BOT_APPID:-}
+    secret: ${QQ_BOT_SECRET:-}
   wechat:
     enabled: false
     cred_path: ~/.wechatbot/credentials.json
@@ -1845,7 +1859,7 @@ Fail at startup (fail-fast):
 - The names listed in `agent.writable` must be known agents;
 - If `model.context_limit` is set, it must be > 0.
 
-### 9.2 Recommendations to Accompany the agentserve Configuration
+### 9.2 Recommendations to Accompany the agentd Configuration
 
 **Key rule**: a `deny` rule **rejects immediately and does not produce `permission.asked`**; only `ask` (including "the default ask
 when no rule matches") will park and cause the bridge's HITL card to appear. Therefore **"dangerous actions confirmed by a human via HITL" and "dangerous tools
@@ -1899,7 +1913,7 @@ inputModalities: [text, image]       # the endpoint model's actual capabilities
 
 ### 10.3 Secrets
 
-- Bearer tokens and every IM secret are all injected from env; redacted in logs (`secret_env` values, token, aes_key).
+- Bearer tokens and every IM secret are all injected from env via `${VAR}` references; redacted in logs (token, aes_key, bot secret).
 - `.env` is not committed (`.gitignore`); `.env.example` lists only key names.
 
 ### 10.4 File security
@@ -1923,7 +1937,7 @@ inputModalities: [text, image]       # the endpoint model's actual capabilities
   HITL count/timeout count, media bytes sent/received, send failures and rate-limit hits, render-downgrade count (by element type).
 - Per-route debug view: recent event sequence, last flushed text, pending interactions—for troubleshooting.
 - Isolation-related: active project lease count, isolated-view (worktree/overlay/container) create/fail count, project switch count.
-- Key alerts: agentserve unreachable, prolonged SSE disconnection, Connector authentication failure, rising HITL timeout rate.
+- Key alerts: agentd unreachable, prolonged SSE disconnection, Connector authentication failure, rising HITL timeout rate.
 
 ---
 
@@ -2028,13 +2042,13 @@ Common commands: `uv sync --extra wecom`, `uv run tether --config config.yaml`,
   - Interaction/command: `/stop` parsing, HITL payload encoding, in-group authorization (`hitl_scope`/`command_scope`+`admins`,
     §2.5(3)).
   - Config: §9.1 invalid values for each enum, `isolation: shared`+writable fail-fast, `agent.writable` unknown agent.
-- **Contract (fake backend)**: use `respx`/a self-built stub HTTP+SSE service to simulate agentserve, verifying: session creation, prompt,
+- **Contract (fake backend)**: use `respx`/a self-built stub HTTP+SSE service to simulate agentd, verifying: session creation, prompt,
   event aggregation, turn completion detection, HITL round-trip, `attachment.omitted` rendering, error code mapping, SSE disconnect **reconciliation +
   half-finished finalization** (§8.3).
 - **Connector (fake SDK)**: wrap the IM SDK behind an injectable protocol, and use a fake implementation to drive assertions on the Connector's **outbound calls**
   (message structure / cards / media upload), as well as **inbound injection** (`InboundMessage` / `IncomingInteraction` /
   `ConnectorEvent` → core layer).
-- **Integration (optional, requires real credentials)**: real agentserve + real platform sandbox, running one **complete turn** (direct-chat text → streaming →
+- **Integration (optional, requires real credentials)**: real agentd + real platform sandbox, running one **complete turn** (direct-chat text → streaming →
   @group → permission card click → stop → media send/receive).
 - **Timing/concurrency**: use `pytest-asyncio` + a frozen clock to verify the stability of throttling / backoff / reconciliation.
 - CI is offline by default (does not depend on real platforms/models).
@@ -2052,7 +2066,7 @@ Confirm item by item for each platform:
    text/image/mixed/voice/file): can it be received and successfully downloaded/decrypted (`aeskey`)? Size limit?
 3. **Outbound rendering**: the actual rendering of Markdown (headings/lists/tables/code blocks), @, quotes, links.
 4. **Outbound media**: can each type (image/voice/video/file) be sent? Size/format limits?
-5. **Streaming/editing**: does `native_stream` really refresh the same message? Is `edit_message` (card patch) available?
+5. **Streaming/editing**: does `native_stream` really refresh the same message? Is `edit_message` (card patch) available? For a passive-reply stream (WeCom), how long does the callback's `req_id` stay valid — does the `finish=True` frame still land after a multi-second turn? (see §5.1)
 6. **Interaction**: can button/card callbacks be received and relayed back? (HITL)
 7. **Rate limiting**: actual rate cap (backfill `rate_limit_per_min`).
 8. **Proactive push**: is `proactive` available when there is no callback (e.g. WeCom `send_message`)?
@@ -2085,7 +2099,7 @@ Confirm item by item for each platform:
 
 | # | Decision | Rationale |
 |---|---|---|
-| D1 | The bridge is an **independent Python project**, consuming only agentserve's HTTP/SSE | Go is not importable; IM SDKs exist only in Python; `DESIGN-HTTP.md` §11 |
+| D1 | The bridge is an **independent Python project**, consuming only agentd's HTTP/SSE | Go is not importable; IM SDKs exist only in Python; `DESIGN-HTTP.md` §11 |
 | D2 | **Canonical carrier = `RichDoc`** (Markdown + thinking + usage + media + interaction); rendering downgrades per `Capabilities` | Models naturally produce Markdown; capability-driven and extensible |
 | D3 | Adding a platform = Connector + capability declaration (+ optional profile); the core engine is unchanged | Extensibility requirement |
 | D4 | Agent events use **one global `/api/event` SSE** + routing by sessionID | The global stream contains all live-only deltas and HITL; a single connection is easy to scale |
@@ -2104,9 +2118,9 @@ Confirm item by item for each platform:
 | D17 | Group conversations **inject speaker labels** and sanitize forged prefixes; within a group, **no cross-user steer by default**, replies @-mention the initiator (§2.5(1)(2), §8.1) | Preserves "who is speaking" when multiple people share context, avoiding crosstalk and irrelevant answers |
 | D18 | Within a group, **HITL by default allows only the initiator to answer**; the only command, `/stop`, is by default limited to the turn's **initiator** (`command_scope: initiator`, configurable `admins`) (§2.5(3), §4.6, §6.6) | Prevents others from approving dangerous operations on the initiator's behalf or interrupting their turn |
 | D19 | **The bot name + description are synced into the agent context** (`<bridge-context>` lead + anti-forgery sanitization; aligned with the agent `description` per `identity.source`; re-injected after name/description changes, agent switches, compaction) (§2.6, §4.8) | Keeps the bot's external identity consistent with the agent's self-perception |
-| D20 | **Project isolation is driven by the agent's read/write capability**: a read-only agent can share a project across groups; a writable agent must isolate the project per group (multiple agentserve instances); determined by the actual tool set (`GET /api/tool?agent=`); if unknown, isolate conservatively (§2.8) | Read-only sharing has no side effects; writable sharing pollutes files for one another |
+| D20 | **Project isolation is driven by the agent's read/write capability**: a read-only agent can share a project across groups; a writable agent must isolate the project per group (multiple agentd instances); determined by the actual tool set (`GET /api/tool?agent=`); if unknown, isolate conservatively (§2.8) | Read-only sharing has no side effects; writable sharing pollutes files for one another |
 | D21 | **Isolation implementation is pluggable**: shared / git worktree / container / copy·CoW·namespace·remote, etc., abstracted via `ProjectProvider`; the bridge does not fork Go processes itself (uses a supervisor/orchestrator) (§2.9, §3.7) | Different deployments have different isolation-strength/cost needs; keeps boundaries clear |
-| D22 | **Isolation is shared between `agentserve`/`a2aserve` via a transport-agnostic project runner in `cmd/`** (`Transport` is a parameter); **a writable project has a single owner `(project, transport)`**, read-only can be shared; the SDK provides only policy (**+ the `Sandbox` hook (SDK layer), §17.2**) (§17.3, §3.7) | Isomorphic to the sandbox: share the mechanism, not the instance; avoids writing one per transport |
+| D22 | **Isolation is shared across `agentd`'s transports via a transport-agnostic project runner in `cmd/`** (`Transport` is a parameter); **a writable project has a single owner `(project, transport)`**, read-only can be shared; the SDK provides only policy (**+ the `Sandbox` hook (SDK layer), §17.2**) (§17.3, §3.7) | Isomorphic to the sandbox: share the mechanism, not the instance; avoids writing one per transport |
 
 ---
 
@@ -2176,8 +2190,8 @@ Confirm item by item for each platform:
 |---|---|---|
 | Policy (existing) | SDK | Permission rules allow/ask/deny, `external_directory`, HITL (§4.6) |
 | Execution seam (SDK layer, optional) | SDK | `Sandbox` / `CommandRunner` hook (constructor injection, same as `MediaUploader` / `Credentials`), pass-through by default |
-| Isolated view / lifecycle | Command layer `cmd/` (extend `serveconfig`) | **transport-agnostic project runner** (§17.3): worktree/overlay/container preparation + building the `Client` + starting the service; shared by `agentserve`/`a2aserve` |
-| OS enforcement | Host / deployment | seatbelt / bwrap / Landlock / seccomp / containers; wrapped outside **each** `agentserve` / `a2aserve` process |
+| Isolated view / lifecycle | Command layer `cmd/` (extend `serveconfig`) | **transport-agnostic project runner** (§17.3): worktree/overlay/container preparation + building the `Client` + starting the service; shared across `agentd`'s transports |
+| OS enforcement | Host / deployment | seatbelt / bwrap / Landlock / seccomp / containers; wrapped outside **each** `agentd` process |
 | Orchestration / leasing | Host / bridge | One instance per group for project isolation (§2.8 / §2.9) and lifecycle (§3.7) |
 
 **Suggested minimal increment to the SDK** (without breaking the alignment principle)
@@ -2197,10 +2211,10 @@ Confirm item by item for each platform:
 **Sharing point of isolation (isomorphic to the sandbox)**
 
 The unit of isolation is **`(process, project, transport)`**, not the transport itself—one `Client` binds one project, one
-process serves one project; `agentserve` (HTTP) / `a2aserve` (A2A) are just two transport adapters of the same runner.
+process serves one project; `agentd`'s HTTP / A2A transports are just two adapters of the same runner.
 See the "Layer ownership" table above for the three-way division of labor, and §17.3 for the interface draft.
 
-- **Share the runner, not the instance**: `agentserve` / `a2aserve` are two adapters of the same **transport-agnostic project runner**
+- **Share the runner, not the instance**: `agentd`'s transports are adapters of the same **transport-agnostic project runner**
   (located in `cmd/`, extending the already-shared `cmd/serveconfig`); `Transport ∈ {http, a2a}` is just a parameter.
 - **A writable project has a single owner**: the same `Client` cannot be given to both HTTP and A2A (`HoldInteractions` is global,
   `DESIGN-HTTP.md` §9); serving the same writable project concurrently would interfere; therefore it is leased to only one `(project, transport)` at a time,
@@ -2237,10 +2251,9 @@ See the "Layer ownership" table above for the three-way division of labor, and �
   `Process core.AppProcess`, or a narrower `CommandRunner`); when `nil`, fall back to the current `core.NewAppProcess()` (= pass-through,
   preserving the status quo and embeddability).
 - The host's sandbox = an `AppProcess` wrapper: in `Run`, wrap the command with bwrap/seatbelt/AppContainer/cgroup/Job Object
-  etc. before exec. Because `bash`/`ripgrep`/`git` **share the same seam**, **one injection applies everywhere** (consistent across embedding / `agentserve` /
-  `a2aserve`).
+  etc. before exec. Because `bash`/`ripgrep`/`git` **share the same seam**, **one injection applies everywhere** (consistent across embedding / `agentd`'s transports).
 - The SDK **only defines/exposes this seam** and does not bundle three-platform profiles; reference implementations are optional, build-tag-isolated, best-effort, with no promise from core.
-  The failure policy is configurable as fail-open (fall back to pass-through) / fail-closed, defaulting to the status quo.
+  The failure policy is configurable as fail-open (fall back to pass-through) or fail-closed; `agentd` defaults to **fail-closed** (a named sandbox that cannot be built refuses to start).
 - **Optional, secondary**: a guard for file-write tools (write/edit/apply_patch)—`AppProcess` does not cover file writes, so a separate
   `Allow(ctx, path, op)` hook is needed.
 
@@ -2292,7 +2305,7 @@ is restricted within the current process**.
 **The problem to solve**
 
 - The SDK's mental model is **one `Client` bound to one project / one `WorkingDirectory`** (`ClientOptions.Root` /
-  `WorkingDirectory`). But a single `agentserve` / `a2aserve` process serves **multiple sessions/multiple groups**—if they all land in the same working directory,
+  `WorkingDirectory`). But a single `agentd` process serves **multiple sessions/multiple groups**—if they all land in the same working directory,
   they **pollute one another**: group A sees/modifies group B's files, concurrent writes overwrite each other, one group's `rm` affects another group.
 - The correct approach is **one isolated view + one service process per project** (worktree / overlay / container / independent instance). But the code that "prepares the isolated view
   and starts the corresponding service" is currently **written once on each** of the HTTP and A2A paths (or simply missing), and is also disconnected from the
@@ -2305,7 +2318,7 @@ is restricted within the current process**.
     to `BaseDir`) and return an `IsolatedProject`.
   - `Serve`: build a `Client` for that view (setting the view path as `Root`/`WorkingDirectory`), and per `Transport ∈ {http,a2a}`
     start the corresponding service.
-- `cmd/agentserve` / `cmd/a2aserve` thus degrade to: parse config + choose `Transport` + call `Runner`; isolation code has **zero duplication**.
+- `cmd/agentd` thus degrades to: parse config + choose `Transport` + call `Runner`; isolation code has **zero duplication**.
 - Lifecycle is orchestrated by the **host side** (Tether itself does not fork Go processes, §3.7): `ProjectProvider.acquire(...)` → the host
   supervisor calls `Runner` → returns `ProjectLease{project_id, transport, server_base}`.
 - **Owner rule**: a writable project is leased to only one `(project, transport)` at a time; read-only can be shared (§17.1).
@@ -2337,24 +2350,24 @@ type Runner interface {
 | Problem solved | The **command execution** boundary within a single process | **Project/process isolation** across sessions/transports |
 | Injection | `ClientOptions.Process` (reuse the existing `AppProcess` seam) | runner parameters / supervisor |
 | Unit | One command | One `(process, project, transport)` |
-| Sharers | All `agent.Client` consumers | `agentserve` + `a2aserve` |
+| Sharers | All `agent.Client` consumers | `agentd` |
 | Ownership decision | Host chooses/implements | Host decides + leases |
 | Typical implementation | seatbelt / bwrap / AppContainer (single command) | worktree / overlay / container / independent instance |
 
 > **Red line**: do **not** make isolation into an SDK hook—it belongs to the command layer and the host; the SDK only provides the "one `Client`, one project"
 > primitive and policy for isolation.
 
-### 17.5 Command-layer convergence: `agentd` (single-process multi-transport, refactoring target)
+### 17.5 Command-layer convergence: `agentd` (single-process multi-transport) — implemented
 
-> Status: **refactoring target**—to be **executed with priority** after the design is finalized. Belongs to go-agent-sdk's **command layer** (not SDK core).
+> Status: **implemented** (go-agent-sdk `cmd/agentd`). Belongs to go-agent-sdk's **command layer** (not SDK core).
 > **See `docs/DESIGN-AGENTD.md` for the full design.**
 
-Merge `cmd/agentserve` + `cmd/a2aserve` into a single multi-transport process **`agentd`** — one process,
-one config (a list named **`servers[]`**; each entry is one `Client` + one adapter, and several entries may
-share a `listen` via host/path routing), N listeners. `buildClient` is currently **duplicated and drifting**:
-`cmd/a2aserve`'s **config** wires fewer `ClientOptions` (MCP / references / auto-title / `SubagentDepth`
-limit) than `cmd/agentserve` — but **agents/subagents/skills still load from `configDirs` in both**, and A2A
-sessions can use the options; it is a **config-plumbing gap, not an A2A limitation**.
+`cmd/agentd` is the single multi-transport process that **replaced** the former `cmd/agentserve` (HTTP) and
+`cmd/a2aserve` (A2A) — one process, one config (a list named **`servers[]`**; each entry is one `Client` + one
+adapter, and several entries may share a `listen` via host/path routing), N listeners. The former
+`buildClient` duplication/drift (the A2A command's config wired fewer `ClientOptions` — MCP / references /
+auto-title / `SubagentDepth`) is resolved by one shared builder feeding both transports; it was a
+**config-plumbing gap, not an A2A limitation**.
 
 Three hard constraints (details in `DESIGN-AGENTD.md` §7):
 
@@ -2363,7 +2376,7 @@ Three hard constraints (details in `DESIGN-AGENTD.md` §7):
    §2.9(4)/§3.7); **read-only** can be shared, **writable sharing without a copy is forbidden**.
 3. **Forbidden**: attaching one `Client` to two listeners (`HoldInteractions` is global + ambiguous interaction ownership).
 
-**Retain the distinction**: the two sets of **adapters** `pkg/server` and `pkg/a2a/server` (different wire protocols)—only merge the **command/assembly layer**.
+**Retain the distinction**: the two sets of **adapters** `pkg/server` and `pkg/a2a/server` (different wire protocols)—only the **command/assembly layer** was merged.
 
 ---
 
@@ -2399,7 +2412,7 @@ Three hard constraints (details in `DESIGN-AGENTD.md` §7):
 
 ## 19. Appendix: SDK dependencies and prerequisites (check before starting M0)
 
-> Conclusion: Tether depends on the HTTP/SSE contract that `cmd/agentserve` has **already implemented** (`DESIGN-HTTP.md` Phases 0–5
+> Conclusion: Tether depends on the HTTP/SSE contract that `cmd/agentd` has **already implemented** (`DESIGN-HTTP.md` Phases 0–5
 > are complete); **there is no hard blocker for M0**. The table below is categorized as "ready / to be added / non-SDK dependency".
 
 **Ready** (no SDK changes needed; actually called by Tether and already verified, §4):
@@ -2410,14 +2423,15 @@ Three hard constraints (details in `DESIGN-AGENTD.md` §7):
 | Read | `/message` (full pagination), `/context`, `/history?after=&limit=` |
 | Media | `POST /api/session/{id}/file` (provider upload), prompt `files[]` (inline/url/file/detail) |
 | Interaction | `GET /api/permission|question` (including per-session), `…/reply` / `…/reject` |
-| Discovery | `/api/agent` (including `description`), `/api/model`, `/api/tool?agent=` |
+| Discovery | `/api/agent` (including `description`), `/api/model` (including `contextLimit` / `outputLimit` / `default`), `/api/tool?agent=` |
 | Events | `/api/event` (SSE, including live-only deltas and HITL), `session.next.*`, `session.status`, `permission/question.v2.asked`, `attachment.omitted` (including `reason`) |
 
 **To be added** (cheap items, **not M0 blockers**):
 
-| Item | Current state | Affected milestone | Handling |
-|---|---|---|---|
-| `GET /api/model` lacks `contextLimit` | `modelInfoDTO` has only `id/protocol/input/sources` | M2 usage line (§6.7) | Short term: Tether configures `model.context_limit` (§9); better: the SDK adds `contextLimit` to `/api/model` (`ModelInfo.Limit.Context`) |
+_None._ The single item previously listed here — `GET /api/model` lacking `contextLimit` — is now
+**satisfied**: the SDK returns `contextLimit` (plus `outputLimit` / `default`) from `/api/model`
+(`ModelInfo.Limit.Context`), and Tether consumes it (`agent/client.py` → `resolve_context_limit` →
+`Usage`) for the §6.7 usage line.
 
 **Non-SDK dependencies** (implemented on the go-agent-sdk side; Tether does **not wait**):
 
@@ -2429,6 +2443,6 @@ Three hard constraints (details in `DESIGN-AGENTD.md` §7):
 **M0 prerequisite actions** (small checks, not major development):
 
 1. **Freeze the SDK contract**: take the endpoints/events/fields of §4 as v1; changes go through §13.1 / discussion on the go-agent-sdk side.
-2. **Source of `contextLimit`**: settled—Tether configures `model.context_limit` (§9); optional: the SDK adds that field to `/api/model`.
-3. **Deployment check**: M0 uses one `cmd/agentserve` instance; per §9.2, configure `inboundPermissions` /
+2. **Source of `contextLimit`**: satisfied—`GET /api/model` now returns `contextLimit`; `model.context_limit` (§9) is an optional override.
+3. **Deployment check**: M0 uses one `cmd/agentd` instance; per §9.2, configure `inboundPermissions` /
    `interactionTimeout|Fallback` / `MediaUploader` (if a `file` source is needed).

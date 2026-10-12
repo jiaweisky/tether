@@ -20,6 +20,7 @@ from ..models import (
     Conversation,
     ConversationInfo,
     InboundMessage,
+    IncomingInteraction,
     IncomingItem,
     MediaBytes,
     MediaHandle,
@@ -67,15 +68,15 @@ class BaseConnector:
         await self._rate_limit(conv)
         first_ref: str | None = None
         for segment in plan.segments:
-            ref = await self._dispatch_segment(conv, segment, plan.reply_to)
+            ref = await self._dispatch_segment(conv, segment, plan.reply_to, final=plan.final)
             first_ref = first_ref or ref
         return SentRef(id=first_ref or "", conversation=conv)
 
     async def _dispatch_segment(
-        self, conv: Conversation, segment: Segment, reply_to: str | None
+        self, conv: Conversation, segment: Segment, reply_to: str | None, *, final: bool
     ) -> str | None:
         if isinstance(segment, TextSegment):
-            return await self._send_text_chunks(conv, segment.text, reply_to)
+            return await self._send_text_chunks(conv, segment.text, reply_to, final=final)
         if isinstance(segment, MediaSegment) and segment.media is not None:
             return await self._send_media(conv, segment.media)
         if isinstance(segment, CardSegment) and segment.card is not None:
@@ -83,23 +84,26 @@ class BaseConnector:
         return None
 
     async def _send_text_chunks(
-        self, conv: Conversation, text: str, reply_to: str | None
+        self, conv: Conversation, text: str, reply_to: str | None, *, final: bool
     ) -> str | None:
         first_ref: str | None = None
         for chunk in self._chunk(text):
-            ref = await self._send_text(conv, chunk, reply_to)
+            ref = await self._send_text(conv, chunk, reply_to, final=final)
             first_ref = first_ref or ref
         return first_ref
 
     async def update(self, ref: SentRef, plan: OutboundPlan) -> None:
         await self._rate_limit(ref.conversation)
         if len(plan.segments) == 1 and isinstance(plan.segments[0], TextSegment):
-            await self._update_text(ref, plan.segments[0].text)
+            await self._update_text(ref, plan.segments[0].text, final=plan.final)
             return
         raise Unsupported("this plan cannot be patched in place")
 
     async def reply(self, in_reply_to: InboundMessage, plan: OutboundPlan) -> SentRef:
+        # A reply is a complete message; a caller wanting an interim frame should
+        # use send/update directly.
         plan.reply_to = plan.reply_to or in_reply_to.message_id
+        plan.final = True
         return await self.send(in_reply_to.conversation, plan)
 
     async def send_typing(self, conv: Conversation) -> None:
@@ -108,9 +112,33 @@ class BaseConnector:
     async def react(self, ref: SentRef, emoji: str) -> None:
         await self._react(ref, emoji)
 
-    async def send_card(self, conv: Conversation, card: Card) -> SentRef:
+    async def send_card(
+        self,
+        conv: Conversation,
+        card: Card,
+        *,
+        stream_id: str | None = None,
+        text: str | None = None,
+    ) -> SentRef:
+        # stream_id/text let a channel attach the card to an active streamed
+        # message (e.g. WeCom); channels that cannot ignore them.
         ref = await self._send_card(conv, card)
         return SentRef(id=ref or "", conversation=conv)
+
+    def supports_streaming(self, conv: Conversation) -> bool:
+        """Whether this conversation can be refreshed in place.
+
+        Channels without an edit or native-stream capability send a placeholder
+        and then the final message only.
+        """
+        return bool(self.capabilities.native_stream or self.capabilities.edit_message)
+
+    async def acknowledge(self, interaction: IncomingInteraction, text: str) -> None:
+        """Reflect a handled card interaction back onto the card.
+
+        Default is a no-op; channels whose cards can be updated override this.
+        """
+        return None
 
     # -- media -------------------------------------------------------------
     async def download(self, att: Attachment) -> MediaBytes:
@@ -127,10 +155,12 @@ class BaseConnector:
         return ConversationInfo()
 
     # -- platform primitives (subclass hooks) ------------------------------
-    async def _send_text(self, conv: Conversation, text: str, reply_to: str | None) -> str:
+    async def _send_text(
+        self, conv: Conversation, text: str, reply_to: str | None, *, final: bool = True
+    ) -> str:
         raise Unsupported(f"{self.name} cannot send text")
 
-    async def _update_text(self, ref: SentRef, text: str) -> None:
+    async def _update_text(self, ref: SentRef, text: str, *, final: bool = True) -> None:
         raise Unsupported(f"{self.name} cannot update a message")
 
     async def _send_media(self, conv: Conversation, media: RichMedia) -> str:

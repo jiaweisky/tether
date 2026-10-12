@@ -62,6 +62,7 @@ class FakeConnector(BaseConnector):
         self.cards: list[Card] = []
         self.typing_calls: list[str] = []
         self.reactions: list[tuple[str, str]] = []
+        self.acknowledgements: list[tuple[str, str]] = []
         self.uploads: list[MediaHandle] = []
         self._attachments: dict[str, MediaBytes] = {}
         self._counter = 0
@@ -84,12 +85,14 @@ class FakeConnector(BaseConnector):
         return f"m{self._counter}"
 
     # -- primitives --------------------------------------------------------
-    async def _send_text(self, conv: Conversation, text: str, reply_to: str | None) -> str:
+    async def _send_text(
+        self, conv: Conversation, text: str, reply_to: str | None, *, final: bool = True
+    ) -> str:
         message_id = self._next_id()
         self.messages.append({"id": message_id, "kind": "text", "text": text, "conv": conv.key})
         return message_id
 
-    async def _update_text(self, ref: SentRef, text: str) -> None:
+    async def _update_text(self, ref: SentRef, text: str, *, final: bool = True) -> None:
         for message in self.messages:
             if message["id"] == ref.id:
                 message["text"] = text
@@ -128,6 +131,9 @@ class FakeConnector(BaseConnector):
         return BotIdentity(
             name=self.bot_name, description=self.bot_description, aliases=(self.bot_name,)
         )
+
+    async def acknowledge(self, interaction, text: str) -> None:  # noqa: ANN001
+        self.acknowledgements.append((interaction.value, text))
 
 
 __all__ = ["FakeConnector", "fake_capabilities"]
