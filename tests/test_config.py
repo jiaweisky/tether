@@ -63,3 +63,17 @@ def test_wecom_requires_configured_identity():
         }
     )
     validate_startup(configured)
+
+
+def test_wecom_accepts_per_channel_identity():
+    config = Config.model_validate(
+        {
+            "channels": {
+                "wecom": {
+                    "enabled": True,
+                    "identity": {"display_name": "W", "description": "d"},
+                }
+            }
+        }
+    )
+    validate_startup(config)  # no raise

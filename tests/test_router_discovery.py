@@ -109,3 +109,27 @@ async def test_loaded_route_with_dead_session_is_recreated(tmp_path):
     route = await router.get_or_create(conv)
     assert route.session_id != "ses_dead"
     assert route.session_id in client.sessions
+
+
+@pytest.mark.asyncio
+async def test_identity_precedence_channel_over_global_over_platform(tmp_path):
+    from tether.connectors.fake import FakeConnector
+    from tether.models import Conversation
+
+    config = Config.model_validate(
+        {
+            "identity": {"display_name": "Global", "description": "global-desc"},
+            "channels": {"feishu": {"identity": {"display_name": "Channel"}}},
+        }
+    )
+    router, _, _ = await make_router(tmp_path, config)
+    conn = FakeConnector(bot_name="Platform", bot_description="platform-desc")
+
+    route = await router.get_or_create(Conversation(channel="feishu", kind="direct", id="c1"))
+    identity = await router.refresh_identity(route, conn)
+    assert identity.name == "Channel"  # per-channel override wins
+    assert identity.description == "global-desc"  # falls back to the global default
+
+    route2 = await router.get_or_create(Conversation(channel="qq", kind="direct", id="c2"))
+    identity2 = await router.refresh_identity(route2, conn)
+    assert identity2.name == "Global"  # no channel override -> global default

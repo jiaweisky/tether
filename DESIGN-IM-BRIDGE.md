@@ -98,6 +98,8 @@
 | 2026-10-13 | §5.2 **voice clarified on device (D24)**: a Feishu **voice bubble** arrives as `message_type: audio` with content `{file_key, duration}` only (no transcript), while **voice input** ("speech to text") is transcribed by the client and delivered as a `post`/text message — so voice input already works with the normal `post` parser and needs no ASR. Voice-bubble ASR stays deferred. |
 | 2026-10-13 | §5.2 **optional Feishu voice transcription** (`channels.feishu.voice_transcription`, off by default): download the voice bubble → decode Ogg-Opus to 16 kHz mono PCM via `ffmpeg` (~30 ms) → `speech_to_text/v1` `file_recognize` → use `recognition_text` as the message. The API only accepts `format=pcm`/`engine_type=16k_auto`, needs the `speech_to_text:speech` scope, is limited to 20 QPS/tenant and **is not available on the free plan** (that returns `99991400`, which is what prompted this). The bridge throttles locally, backs off `cooldown_s` on any error, falls back to the attachment (never fails the turn), and disables itself with one warning if `ffmpeg` is absent (D24). |
 | 2026-10-13 | §6.1/§4.6 **HITL message ordering**: when the bridge presents an interaction to the user (permission/question card or numbered fallback), it now **seals the streamed message and opens a new one** for the agent's continuation, so the answer appears **below** the user's reply instead of above it. Gated by the new `Capabilities.card_in_stream` (WeCom `true` = the card shares the streamed reply, so it continues in place; Feishu `false` = the card is a separate message). Only user-facing asks trigger this — bridge auto-answered permissions do not. |
+| 2026-10-13 | §2.6/§9 **identity is now two-level** (channel → global → platform). The global `identity` holds the behaviour knobs and optional defaults; each channel gained an optional `channels.<name>.identity.{display_name,description}`. This decouples channels that expose a name (Feishu uses `bot/v3/info`) from WeCom (which exposes neither and therefore needs a configured one): WeCom's required name can live under `channels.wecom.identity` without forcing it on Feishu. `validate_startup` accepts the name/description from either level; `refresh_identity` resolves channel override → global → platform. |
+| 2026-10-13 | §5.2 **multi-question** HITL + **tool-produced files**: the `question` tool may ask several questions in one call, so a card now renders one widget per question (single-choice dropdowns, multi-choice checkboxes) with a single submit, and `reply_question` gets one answer list per question. Outbound media now also reads files named by tools: `outputPaths` **and** `structured.resource`/`target` (the `write`/`edit` tools report the produced file there; `outputPaths` is often empty). |
 
 ---
 
@@ -351,10 +353,7 @@ context, so that **the bot's external identity and the agent's self-perception a
 | QQ (`botpy`) | `robot.name` (from the `on_ready` event) | not provided | optional |
 | Personal WeChat | logged-in account nickname (`whoami`) | signature (best-effort) | optional |
 
-**Rule**: if `identity.display_name` / `identity.description` are configured, they take precedence; otherwise the
-platform's own values are used. **WeCom exposes neither the name nor the description, so both are mandatory when
-WeCom is enabled** (startup validation fails if they are missing). The name is **never** inferred from message
-text (e.g. an inline `@name`) — that is fragile and was explicitly rejected.
+**Rule**: name/description resolve in this order — **per-channel `channels.<name>.identity`** → **global `identity`** default → **the platform's own values**. The identity is per-channel because one bridge process serves several bots with different platform names and different exposure (Feishu exposes `app_name`, WeCom exposes nothing). **WeCom exposes neither the name nor the description, so both are mandatory when WeCom is enabled** — supplied at either level (`channels.wecom.identity` or the global `identity`), and startup validation fails if neither provides them. The name is **never** inferred from message text (e.g. an inline `@name`) — that is fragile and was explicitly rejected.
 
 **Alignment with the agent's own identity**: `GET /api/agent` returns each agent's `description` (from the agent's
 markdown's `description` frontmatter). The bridge puts both the "IM bot identity" and the "current agent identity" into the context,
@@ -1827,11 +1826,21 @@ group:                                # group chat multi-user semantics (§2.5)
 identity:
   inject: on_change                   # once | always | on_change
   source: im                          # im (IM profile takes priority) | agent | config
-  display_name: null                  # bot name: REQUIRED when WeCom is enabled; optional override elsewhere
-  description: null                   # bot description: REQUIRED when WeCom is enabled; optional override elsewhere
+  display_name: null                  # global default; a channel's own identity overrides it
+  description: null                   # global default; a channel's own identity overrides it
   warn_on_mismatch: true              # warn when the IM profile and the agent description disagree
   sync_participants: false            # whether to also inject group members (privacy/size)
   preamble_tag: bridge-context        # context wrapping tag (for anti-forgery cleaning)
+
+channels:
+  wecom:
+    identity:                         # REQUIRED for WeCom (it exposes no name/description)
+      display_name: "..."
+      description: "..."
+  feishu:
+    identity:                         # optional; unset = use the platform's bot name
+      display_name: null
+      description: null
 
 streaming:
   mode: auto                          # auto|native|edit|chunk|final

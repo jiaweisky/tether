@@ -307,10 +307,11 @@ class Router:
         except Exception as exc:  # noqa: BLE001 - fall back to configured identity
             log.warning("identity_unavailable", conversation=route.key, error=str(exc))
             identity = BotIdentity(name=self.config.identity.display_name or "Assistant")
-        # A configured name/description overrides the platform's, independently.
+        # Name/description resolve channel override > global config > platform.
         cfg = self.config.identity
-        name = cfg.display_name or identity.name
-        description = cfg.description or identity.description
+        channel = self.config.channels.identity_for(route.conversation.channel)
+        name = channel.display_name or cfg.display_name or identity.name
+        description = channel.description or cfg.description or identity.description
         if name != identity.name or description != identity.description:
             identity = BotIdentity(name=name, description=description, aliases=identity.aliases)
         if route.bot_name != identity.name or route.bot_description != identity.description:

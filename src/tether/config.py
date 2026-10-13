@@ -240,11 +240,23 @@ class AccessConfig(BaseModel):
     allow_groups: list[str] = Field(default_factory=list)
 
 
+class ChannelIdentity(BaseModel):
+    """Per-channel override of the bot's name/description.
+
+    Empty fields fall back to the global ``identity`` config, then to whatever
+    the platform exposes (e.g. Feishu's ``bot/v3/info``).
+    """
+
+    display_name: str | None = None
+    description: str | None = None
+
+
 class WeComChannelConfig(BaseModel):
     enabled: bool = False
     bot_id: str | None = None
     secret: str | None = None
     welcome_text: str | None = None
+    identity: ChannelIdentity = Field(default_factory=ChannelIdentity)
 
 
 class VoiceTranscriptionConfig(BaseModel):
@@ -264,17 +276,20 @@ class FeishuChannelConfig(BaseModel):
     app_id: str | None = None
     app_secret: str | None = None
     voice_transcription: VoiceTranscriptionConfig = Field(default_factory=VoiceTranscriptionConfig)
+    identity: ChannelIdentity = Field(default_factory=ChannelIdentity)
 
 
 class QQChannelConfig(BaseModel):
     enabled: bool = False
     appid: str | None = None
     secret: str | None = None
+    identity: ChannelIdentity = Field(default_factory=ChannelIdentity)
 
 
 class WeChatChannelConfig(BaseModel):
     enabled: bool = False
     cred_path: str = "~/.wechatbot/credentials.json"
+    identity: ChannelIdentity = Field(default_factory=ChannelIdentity)
 
 
 class ChannelsConfig(BaseModel):
@@ -282,6 +297,12 @@ class ChannelsConfig(BaseModel):
     feishu: FeishuChannelConfig = Field(default_factory=FeishuChannelConfig)
     qq: QQChannelConfig = Field(default_factory=QQChannelConfig)
     wechat: WeChatChannelConfig = Field(default_factory=WeChatChannelConfig)
+
+    def identity_for(self, channel: str) -> ChannelIdentity:
+        """The per-channel identity override, if the channel has one."""
+        sub = getattr(self, channel, None)
+        override = getattr(sub, "identity", None)
+        return override if isinstance(override, ChannelIdentity) else ChannelIdentity()
 
 
 class MetricsConfig(BaseModel):
@@ -375,13 +396,16 @@ def validate_startup(config: Config) -> None:
         raise ValueError(
             "projects.mode=isolated requires projects.control_url and projects.source_directory"
         )
-    if config.channels.wecom.enabled and not (
-        config.identity.display_name and config.identity.description
-    ):
-        raise ValueError(
-            "channels.wecom requires identity.display_name and identity.description "
-            "(WeCom does not expose the bot's name or description)"
-        )
+    if config.channels.wecom.enabled:
+        wecom = config.channels.wecom.identity
+        name = wecom.display_name or config.identity.display_name
+        description = wecom.description or config.identity.description
+        if not (name and description):
+            raise ValueError(
+                "channels.wecom requires a display_name and description — set "
+                "channels.wecom.identity (or the global identity), since WeCom does "
+                "not expose the bot's name or description"
+            )
     spool = config.media.spool_dir
     if "{working_dir}" not in spool:
         root = Path(spool).expanduser()
