@@ -61,6 +61,10 @@ log = get_logger("tether.app")
 # agentd is not mistaken for a dead one.
 _WATCHDOG_GRACE_S = 10.0
 
+# Consecutive failed SSE reconnects (no event received) before raising a
+# prolonged-disconnection alert.
+_SSE_PROLONGED_AFTER = 3
+
 
 class TetherApp:
     def __init__(
@@ -530,9 +534,12 @@ class TetherApp:
     # -- SSE consumption + reconciliation ----------------------------------
     async def _consume_events(self, base_url: str, client: HttpAgentClient) -> None:
         backoff = self.config.server.sse_reconnect_ms / 1000.0
+        failures = 0
         while self._running:
+            received = False
             try:
                 async for event in client.events():
+                    received = True
                     await self._route_event(event)
                 backoff = self.config.server.sse_reconnect_ms / 1000.0
             except asyncio.CancelledError:
@@ -541,6 +548,15 @@ class TetherApp:
                 log.warning("sse_disconnected", base=base_url, error=str(exc))
             if not self._running:
                 break
+            if received:
+                failures = 0
+                metrics.set("sse_disconnected", 0.0)
+            else:
+                failures += 1
+                if failures == _SSE_PROLONGED_AFTER:
+                    metrics.inc("sse_prolonged_disconnects")
+                    metrics.set("sse_disconnected", 1.0)
+                    log.error("sse_disconnected_prolonged", base=base_url, reconnects=failures)
             metrics.inc("sse_reconnects")
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30.0)
