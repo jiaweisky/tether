@@ -63,8 +63,8 @@ group:
 identity:
   inject: on_change           # once | always | on_change
   source: im                  # im | agent | config
-  display_name: null
-  description: null
+  display_name: null          # bot name: REQUIRED when WeCom is enabled; optional override otherwise
+  description: null           # bot description: REQUIRED when WeCom is enabled; optional override otherwise
   warn_on_mismatch: true
   sync_participants: false
   preamble_tag: bridge-context

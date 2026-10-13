@@ -52,7 +52,11 @@ async def _run(config_path: str, db_path: str) -> None:
             pass
 
     log.info("starting", config=config_path)
-    await app.start()
+    try:
+        await app.start()
+    except ValueError as exc:  # invalid configuration: report cleanly, not a traceback
+        log.error("startup_failed", error=str(exc))
+        return
     try:
         await stop_event.wait()
     finally:

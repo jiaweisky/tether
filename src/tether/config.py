@@ -346,6 +346,13 @@ def validate_startup(
         unknown = set(config.agent.writable) - known_agents
         if unknown:
             raise ValueError(f"agent.writable lists unknown agents: {sorted(unknown)}")
+    if config.channels.wecom.enabled and not (
+        config.identity.display_name and config.identity.description
+    ):
+        raise ValueError(
+            "channels.wecom requires identity.display_name and identity.description "
+            "(WeCom does not expose the bot's name or description)"
+        )
     spool = config.media.spool_dir
     if "{working_dir}" not in spool:
         root = Path(spool).expanduser()

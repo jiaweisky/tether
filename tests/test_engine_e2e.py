@@ -494,3 +494,30 @@ async def test_attachment_omitted_is_noticed(tmp_path):
         )
     )
     assert any(m["kind"] == "text" and "big.zip" in m["text"] for m in conn.messages)
+
+
+@pytest.mark.asyncio
+async def test_refresh_identity_config_overrides_platform(tmp_path):
+    config = Config()
+    config.identity.display_name = "荔小枝"
+    config.identity.description = "自定义描述"
+    app, conn, client = await make_app(tmp_path, config=config)
+    route = await app.router.get_or_create(Conversation(channel="fake", kind="direct", id="d1"))
+    identity = await app.router.refresh_identity(route, conn)
+    assert identity.name == "荔小枝"
+    assert identity.description == "自定义描述"
+    assert route.bot_name == "荔小枝"
+    assert route.context_dirty is True
+
+
+@pytest.mark.asyncio
+async def test_refresh_identity_description_only_override(tmp_path):
+    # A description override applies even without a name override, and the
+    # platform's name is kept.
+    config = Config()
+    config.identity.description = "自定义描述"
+    app, conn, client = await make_app(tmp_path, config=config)
+    route = await app.router.get_or_create(Conversation(channel="fake", kind="direct", id="d1"))
+    identity = await app.router.refresh_identity(route, conn)
+    assert identity.name == "Assistant"
+    assert identity.description == "自定义描述"

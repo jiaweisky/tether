@@ -304,12 +304,12 @@ class Router:
         except Exception as exc:  # noqa: BLE001 - fall back to configured identity
             log.warning("identity_unavailable", conversation=route.key, error=str(exc))
             identity = BotIdentity(name=self.config.identity.display_name or "Assistant")
-        if self.config.identity.display_name:
-            identity = BotIdentity(
-                name=self.config.identity.display_name,
-                description=identity.description or self.config.identity.description,
-                aliases=identity.aliases,
-            )
+        # A configured name/description overrides the platform's, independently.
+        cfg = self.config.identity
+        name = cfg.display_name or identity.name
+        description = cfg.description or identity.description
+        if name != identity.name or description != identity.description:
+            identity = BotIdentity(name=name, description=description, aliases=identity.aliases)
         if route.bot_name != identity.name or route.bot_description != identity.description:
             route.bot_name = identity.name
             route.bot_description = identity.description

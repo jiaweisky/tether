@@ -81,6 +81,8 @@
 | 2026-10-11 | §17.5 pointer updated to name the agentd config list **`servers[]`** (each entry = one `Client` + adapter; may share a `listen`). |
 | 2026-10-12 | §8.3 session recovery: the IM↔session mapping is persisted by the bridge keyed by `Conversation.key` (agentd knows only session ids); added `sessions.validate_session` (verify a loaded route's session on first use, recreate if gone) plus reactive recovery on `prompt not_found`; config §9 updated |
 | 2026-10-12 | §8.5 shutdown: default is now to **leave in-progress turns/parked interactions on agentd** (`sessions.interrupt_on_shutdown: false`) so a restart resumes them; `true` restores interrupt+reject. Stale card clicks (already answered/expired) are ignored; answering an interaction after a restart attaches a resumed turn engine. §9 updated |
+| 2026-10-13 | §2.6/§5.1/§9 identity: the bot name/description come from the platform **only where the API exposes them** (Feishu `GET /open-apis/bot/v3/info` → `app_name` + application `description`; QQ `botpy` `robot.name`; personal WeChat nickname). **WeCom provides neither** — its callback carries only `aibotid` (confirmed against the official callback schema and captured frames) — so `identity.display_name`/`description` are **required** for WeCom and **optional overrides** elsewhere (configured wins, else the platform's). Inferring the name from an inline `@name` in message text was rejected as fragile. |
+| 2026-10-13 | Added **§8.6 Message Recall** and decision **D23**: recall is best-effort and platform-dependent — where a platform emits a recall event (Feishu `im.message.recalled_v1`) the Connector maps it to `ConnectorEvent(kind="recall")` and the core drops a queued turn / interrupts an in-flight one (never unsends an already-sent reply); a platform without the event (WeCom long connection) is a no-op. §3.2 `ConnectorEvent.kind` gained `recall`; §14 M7 lists it. |
 
 ---
 
@@ -325,15 +327,19 @@ references context, or judges "whether it is being spoken to".
 **Requirement**: synchronize the bot's **display name** and **description/persona** (and the aliases that can be @-mentioned) in each conversation into the agent
 context, so that **the bot's external identity and the agent's self-perception are consistent**; re-synchronize when the name or description changes.
 
-**Identity source (provided by the Connector, `Connector.identity(conv)`)**:
+**Identity source (implemented per Connector by `Connector.identity(conv)`)**:
 
-| Platform | Display name / alias | Description |
-|---|---|---|
-| WeCom | Smart-bot backend name; @ that name in a group | Bot intro (configured in backend) |
-| Feishu | App/bot name (`bot info`); @ that name in a group | App description |
-| QQ | `client.robot.name`; @ that name in a group/channel | Bot intro |
-| Personal WeChat | Logged-in account nickname | Signature / custom |
-| Fallback | Configure `identity.display_name` | Configure `identity.description` |
+| Platform | Name | Description | Config |
+|---|---|---|---|
+| WeCom | not provided (the callback carries only `aibotid`) | not provided | **required** |
+| Feishu | `GET /open-apis/bot/v3/info` → `app_name` | application info `description` | optional |
+| QQ (`botpy`) | `robot.name` (from the `on_ready` event) | not provided | optional |
+| Personal WeChat | logged-in account nickname (`whoami`) | signature (best-effort) | optional |
+
+**Rule**: if `identity.display_name` / `identity.description` are configured, they take precedence; otherwise the
+platform's own values are used. **WeCom exposes neither the name nor the description, so both are mandatory when
+WeCom is enabled** (startup validation fails if they are missing). The name is **never** inferred from message
+text (e.g. an inline `@name`) — that is fragile and was explicitly rejected.
 
 **Alignment with the agent's own identity**: `GET /api/agent` returns each agent's `description` (from the agent's
 markdown's `description` frontmatter). The bridge puts both the "IM bot identity" and the "current agent identity" into the context,
@@ -342,7 +348,7 @@ and decides which one takes precedence based on `identity.source`:
 - `im` (default): the IM bot's name/description takes precedence; the agent's `description` is supplementary, and when the two are inconsistent, log a
   warning (an operational signal: the bot profile in the IM backend should be set to match the target agent).
 - `agent`: the current agent's `description` takes precedence; the IM name is still used for "how it is addressed".
-- `config`: `identity.display_name` / `identity.description` take precedence (overriding the platform values).
+- `config`: `identity.display_name` / `identity.description` take precedence (overriding the platform values); for WeCom, where the platform provides neither, these configured values are **required**.
 
 > Operational advice: **set the bot name/intro in the IM backend to match the target agent**, and the bridge is then naturally aligned;
 > the alignment/injection on the bridge side is a fallback and a runtime synchronization mechanism.
@@ -728,8 +734,8 @@ class IncomingInteraction:  # card/button callback (HITL click)
 
 
 @dataclass
-class ConnectorEvent:  # platform events such as enter_chat / feedback
-    kind: Literal["enter_chat", "feedback", "other"]
+class ConnectorEvent:  # platform events such as enter_chat / feedback / recall
+    kind: Literal["enter_chat", "feedback", "recall", "other"]
     conversation: Conversation
     sender: Sender | None = None
     raw: Any = None
@@ -1317,6 +1323,10 @@ Based on `wecom-aibot-python-sdk` (`aibot`) and the official "Smart Robot Long C
 - Outbound media: materials need **chunked upload** (upload init → upload chunk → upload finish); send by type using
   image/file/voice/video messages.
 - Reply queue: replies to the same `req_id` are sent serially, naturally avoiding out-of-order.
+- **Bot identity (platform limitation)**: the long-connection callback carries only `aibotid` (the BotID); the
+  platform never sends the bot's name or description (confirmed from the official callback schema and captured
+  frames). So `identity.display_name` / `identity.description` are **required** when WeCom is enabled (§2.6); the
+  name is not inferred from an inline `@name` in the message text.
 - **Delivery semantics (documented)**: direct-chat messages are always called back; **group-chat messages are called back only when the bot is @-mentioned** (`group_delivery:
   mention_only`, `direct_delivery: always`). Entering a session requires `reply_welcome` within 5s. The
   specific API signatures for streaming/cards and the material chunked-upload flow are **pending integration testing**.
@@ -1695,6 +1705,22 @@ See §4.5. Core points:
   `supervisor`/orchestrator** creates and reclaims them (the bridge calls through `ProjectProvider`, §3.7); agentd shuts down gracefully on its own
   (`docs/DESIGN-HTTP.md` §12.5).
 
+### 8.6 Message Recall (best-effort, platform-dependent)
+
+Recalling/withdrawing a message is **not** a normal inbound item, and whether the bridge learns about it is entirely up to the platform:
+
+- **Where the platform emits a recall event** (e.g. Feishu `im.message.recalled_v1`), the Connector maps it to
+  `ConnectorEvent(kind="recall")` carrying the recalled `message_id`. The core then resolves the prompt id
+  `f"{Conversation.key}:{message_id}"` (§8.2) and:
+  - Turn still **queued** (not started) → drop it from the queue;
+  - Turn **in flight** → best-effort `POST /api/session/{sid}/interrupt` (policy-configurable; default interrupt);
+  - Turn **already answered** → no-op (a reply already sent cannot be retracted on most platforms — no "unsend" is attempted).
+- **Where the platform emits no recall event** — notably the WeCom smart-robot long connection (its callback only delivers
+  `message.text/image/mixed/voice/file` plus `enter_chat`/`template_card_event`/`feedback_event`) — recalling a message is a
+  **no-op**: the bridge never sees it, so an in-flight turn keeps running and any reply already produced stands.
+
+Rationale: recall is inherently best-effort; the bridge cannot delete its own outbound messages, so it only cancels work that has not yet been committed.
+
 ---
 
 ## 9. Configuration
@@ -1770,8 +1796,8 @@ group:                                # group chat multi-user semantics (§2.5)
 identity:
   inject: on_change                   # once | always | on_change
   source: im                          # im (IM profile takes priority) | agent | config
-  display_name: null                  # fallback/override bot name (used when the platform cannot provide one)
-  description: null                   # fallback/override bot description
+  display_name: null                  # bot name: REQUIRED when WeCom is enabled; optional override elsewhere
+  description: null                   # bot description: REQUIRED when WeCom is enabled; optional override elsewhere
   warn_on_mismatch: true              # warn when the IM profile and the agent description disagree
   sync_participants: false            # whether to also inject group members (privacy/size)
   preamble_tag: bridge-context        # context wrapping tag (for anti-forgery cleaning)
@@ -2089,7 +2115,7 @@ Confirm item by item for each platform:
 | **M4 QQ** | botpy Connector; group/channel/DM; markdown+keyboard; rich media. **Exit: §13.1 backfill** |
 | **M5 WeChat personal** | wechatbot-sdk Connector; extreme downgrade; compliance notices. **Exit: §13.1 backfill** |
 | **M6 hardening** | **Project isolation (read-only shared / writable isolated per group; `ProjectProvider`: pool/worktree/overlay/container, §2.8/§2.9/§3.7; isolated instances can be wrapped with bwrap/container sandbox, §17)**; SSRF protection; metrics/alerts; adaptive rate limiting; reconciliation improvements; migration/replay |
-| **M7 enhancements** | Voice transcription subagent, image OCR, long-term file archiving, Web admin console (optional) |
+| **M7 enhancements** | Voice transcription subagent, image OCR, long-term file archiving, Web admin console (optional), **message recall handling** (best-effort, §8.6: Feishu `im.message.recalled_v1` / QQ; WeCom has no event) |
 
 > Each phase should include corresponding unit/contract tests; starting from M1, "conversing with the agent within a group" can be demonstrated end-to-end.
 
@@ -2121,6 +2147,7 @@ Confirm item by item for each platform:
 | D20 | **Project isolation is driven by the agent's read/write capability**: a read-only agent can share a project across groups; a writable agent must isolate the project per group (multiple agentd instances); determined by the actual tool set (`GET /api/tool?agent=`); if unknown, isolate conservatively (§2.8) | Read-only sharing has no side effects; writable sharing pollutes files for one another |
 | D21 | **Isolation implementation is pluggable**: shared / git worktree / container / copy·CoW·namespace·remote, etc., abstracted via `ProjectProvider`; the bridge does not fork Go processes itself (uses a supervisor/orchestrator) (§2.9, §3.7) | Different deployments have different isolation-strength/cost needs; keeps boundaries clear |
 | D22 | **Isolation is shared across `agentd`'s transports via a transport-agnostic project runner in `cmd/`** (`Transport` is a parameter); **a writable project has a single owner `(project, transport)`**, read-only can be shared; the SDK provides only policy (**+ the `Sandbox` hook (SDK layer), §17.2**) (§17.3, §3.7) | Isomorphic to the sandbox: share the mechanism, not the instance; avoids writing one per transport |
+| D23 | **Message recall is best-effort and platform-dependent** (§8.6): handled only where the platform emits a recall event (Feishu `im.message.recalled_v1`); cancels queued/in-flight turns, never "unsends" an already-sent reply; a platform without the event (WeCom long connection) is a no-op | The bridge cannot delete its own outbound messages; recall can only cancel uncommitted work |
 
 ---
 

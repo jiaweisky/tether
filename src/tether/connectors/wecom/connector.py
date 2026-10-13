@@ -550,6 +550,8 @@ class WeComConnector(BaseConnector):
         return MediaHandle(handle=media_id, kind=normalize_media_kind(kind))
 
     async def identity(self, conv: Conversation) -> BotIdentity:
+        # WeCom never sends the bot's name (the callback carries only `aibotid`),
+        # so this id is just a fallback: the configured identity overrides it.
         return BotIdentity(name=self._bot_id, aliases=(self._bot_id,))
 
     # -- helpers -----------------------------------------------------------

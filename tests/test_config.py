@@ -50,3 +50,18 @@ def test_server_bases_default_and_pool():
     assert config.server_bases() == [("default", "http://127.0.0.1:8787", None)]
     pooled = Config.model_validate({"server": {"pool": [{"name": "a", "base_url": "http://a"}]}})
     assert pooled.server_bases()[0][0] == "a"
+
+
+def test_wecom_requires_configured_identity():
+    # WeCom exposes neither the bot name nor description, so both are required.
+    config = Config.model_validate({"channels": {"wecom": {"enabled": True}}})
+    with pytest.raises(ValueError):
+        validate_startup(config)
+
+    configured = Config.model_validate(
+        {
+            "channels": {"wecom": {"enabled": True}},
+            "identity": {"display_name": "Bot", "description": "An assistant"},
+        }
+    )
+    validate_startup(configured)
