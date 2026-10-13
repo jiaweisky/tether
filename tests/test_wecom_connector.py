@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
+from tether.connector import Unsupported
 from tether.connectors.wecom.connector import WeComConnector
 from tether.models import (
     Attachment,
     Button,
     Card,
+    CardQuestion,
     Conversation,
     InboundMessage,
     IncomingInteraction,
@@ -219,20 +223,19 @@ async def test_card_event_becomes_interaction():
 
 
 @pytest.mark.asyncio
-async def test_send_card_embeds_in_stream():
+async def test_send_card_is_a_standalone_passive_reply():
     connector, sdk, items = await start_connector()
     await sdk.emit("message.text", text_frame("hi"))
     conv = items[0].conversation
-    ref = await connector.send_card(
+    await connector.send_card(
         conv, Card(title="t", body="b", buttons=[Button(text="Go", value="v")])
     )
-    assert sdk.stream_cards, "card should ride the streaming message"
-    stream_id, _content, payload = sdk.stream_cards[0]
+    assert sdk.cards, "card should be sent as a standalone passive reply"
+    payload = sdk.cards[0]
     assert payload["card_type"] == "button_interaction"
     assert payload["button_list"][0]["key"] == "v"
     # WeCom drops the buttons without a task_id.
     assert payload["task_id"]
-    assert ref.id == stream_id
 
 
 @pytest.mark.asyncio
@@ -402,3 +405,156 @@ async def test_outbound_media_derives_filename_from_mime():
     )
     await connector.send(conv, plan)
     assert sdk.uploads == [("image", "image.png", 3)]
+
+
+@pytest.mark.asyncio
+async def test_single_multi_choice_question_becomes_vote_card():
+    connector, sdk, items = await start_connector()
+    await sdk.emit("message.text", text_frame("hi"))
+    conv = items[0].conversation
+    card = Card(
+        title="Pick",
+        body="",
+        questions=[CardQuestion(header="H", body="q", options=["A", "B"], multiple=True)],
+        submit_value='{"specs":[{"multiple":true,"options":["A","B"]}]}',
+    )
+    await connector.send_card(conv, card)
+    payload = sdk.cards[-1]  # form cards use the standalone passive reply
+    assert payload["card_type"] == "vote_interaction"
+    assert payload["checkbox"]["mode"] == 1
+    assert payload["task_id"]  # WeCom drops interaction cards without a task_id
+    assert [o["text"] for o in payload["checkbox"]["option_list"]] == ["A", "B"]
+
+
+@pytest.mark.asyncio
+async def test_multiple_single_choice_questions_become_multiple_card():
+    connector, sdk, items = await start_connector()
+    await sdk.emit("message.text", text_frame("hi"))
+    conv = items[0].conversation
+    card = Card(
+        title="Q",
+        body="",
+        questions=[
+            CardQuestion(header="A", body="a", options=["1", "2"]),
+            CardQuestion(header="B", body="b", options=["x", "y"]),
+        ],
+        submit_value="{}",
+    )
+    await connector.send_card(conv, card)
+    payload = sdk.cards[-1]
+    assert payload["card_type"] == "multiple_interaction"
+    assert payload["task_id"]
+    assert [q["question_key"] for q in payload["select_list"]] == ["q0", "q1"]
+
+
+@pytest.mark.asyncio
+async def test_mixed_multi_question_is_unsupported():
+    connector, sdk, items = await start_connector()
+    await sdk.emit("message.text", text_frame("hi"))
+    conv = items[0].conversation
+    card = Card(
+        title="Q",
+        body="",
+        questions=[
+            CardQuestion(header="A", body="a", options=["1"]),
+            CardQuestion(header="B", body="b", options=["x", "y"], multiple=True),
+        ],
+        submit_value="{}",
+    )
+    with pytest.raises(Unsupported):
+        await connector.send_card(conv, card)
+
+
+@pytest.mark.asyncio
+async def test_vote_submit_decodes_selected_items():
+    _, sdk, items = await start_connector()
+    value = json.dumps(
+        {
+            "kind": "question",
+            "sid": "s",
+            "rid": "r",
+            "specs": [{"multiple": True, "options": ["A", "B"]}],
+        }
+    )
+    frame = {
+        "cmd": "aibot_event_callback",
+        "headers": {"req_id": "r3"},
+        "body": {
+            "msgid": "card2",
+            "chattype": "single",
+            "from": {"userid": "u1"},
+            "event": {
+                "eventtype": "template_card_event",
+                "template_card_event": {
+                    "card_type": "vote_interaction",
+                    "event_key": value,
+                    "task_id": "tether-x",
+                    "selected_items": {
+                        "selected_item": [
+                            {"question_key": "q0", "option_ids": {"option_id": ["1"]}}
+                        ]
+                    },
+                },
+            },
+        },
+    }
+    await sdk.emit("event.template_card_event", frame)
+    interaction = items[0]
+    assert interaction.value == value
+    assert interaction.form == {"q0_1": True}
+
+
+@pytest.mark.asyncio
+async def test_multiple_submit_decodes_selected_labels():
+    _, sdk, items = await start_connector()
+    value = json.dumps(
+        {
+            "kind": "question",
+            "sid": "s",
+            "rid": "r",
+            "specs": [
+                {"multiple": False, "options": ["A", "B"]},
+                {"multiple": False, "options": ["X", "Y"]},
+            ],
+        }
+    )
+    frame = {
+        "cmd": "aibot_event_callback",
+        "headers": {"req_id": "r4"},
+        "body": {
+            "msgid": "card3",
+            "chattype": "single",
+            "from": {"userid": "u1"},
+            "event": {
+                "eventtype": "template_card_event",
+                "template_card_event": {
+                    "card_type": "multiple_interaction",
+                    "event_key": value,
+                    "task_id": "tether-x",
+                    "selected_items": {
+                        "selected_item": [
+                            {"question_key": "q0", "option_ids": {"option_id": ["1"]}},
+                            {"question_key": "q1", "option_ids": {"option_id": ["0"]}},
+                        ]
+                    },
+                },
+            },
+        },
+    }
+    await sdk.emit("event.template_card_event", frame)
+    assert items[0].form == {"q0": "B", "q1": "X"}
+
+
+@pytest.mark.asyncio
+async def test_more_than_three_questions_is_unsupported():
+    connector, sdk, items = await start_connector()
+    await sdk.emit("message.text", text_frame("hi"))
+    conv = items[0].conversation
+    card = Card(
+        title="Q",
+        body="",
+        questions=[CardQuestion(header=f"Q{i}", body="q", options=["a", "b"]) for i in range(4)],
+        submit_value="{}",
+    )
+    with pytest.raises(Unsupported):
+        await connector.send_card(conv, card)

@@ -7,6 +7,7 @@ dicts shaped ``{"cmd": ..., "headers": {"req_id": ...}, "body": {...}}``.
 
 from __future__ import annotations
 
+import json
 import mimetypes
 import os
 import uuid
@@ -19,6 +20,7 @@ from ...models import (
     Attachment,
     BotIdentity,
     Card,
+    ConnectorEvent,
     Conversation,
     InboundMessage,
     IncomingInteraction,
@@ -44,8 +46,9 @@ wecom_capabilities = Capabilities(
     images_inline=False,
     edit_message=False,
     native_stream=True,
-    card_in_stream=True,
+    card_in_stream=False,
     buttons=True,
+    question_form=True,
     reactions=False,
     typing=False,
     proactive=True,
@@ -371,8 +374,6 @@ class WeComConnector(BaseConnector):
         )
 
     async def _on_enter_chat(self, frame: Any) -> None:
-        from ...models import ConnectorEvent
-
         conv = self._conversation(frame)
         # Not a message callback: do not overwrite `_frames` (see _on_card_event).
         await self.emit(ConnectorEvent(kind="enter_chat", conversation=conv, raw=frame))
@@ -385,8 +386,6 @@ class WeComConnector(BaseConnector):
                 log.warning("welcome_failed", conversation=conv.key)
 
     async def _on_feedback(self, frame: Any) -> None:
-        from ...models import ConnectorEvent
-
         body = _body(frame)
         await self.emit(
             ConnectorEvent(
@@ -408,14 +407,17 @@ class WeComConnector(BaseConnector):
         payload = event.get("template_card_event") if isinstance(event, dict) else None
         if isinstance(payload, dict):
             value = str(payload.get("event_key") or payload.get("key") or "")
+            form = _selection_form(payload, value)
         else:
             value = str(event.get("event_key") or event.get("key") or "")
+            form = {}
         await self.emit(
             IncomingInteraction(
                 conversation=conv,
                 message_id=self._message_id(frame),
                 sender=self._sender(body),
                 value=value,
+                form=form,
                 raw=frame,
             )
         )
@@ -462,17 +464,12 @@ class WeComConnector(BaseConnector):
         Try, in order: attach to the stream, a standalone passive card, then a
         proactive card — so the user always gets the selectable options.
         """
-        payload = _button_card(card)
+        payload = _card_payload(card)
         frame = self._frames.get(conv.key)
         if frame is not None:
-            sid = stream_id or self._sdk.generate_stream_id()
-            try:
-                await self._sdk.reply_stream_with_card(
-                    frame, sid, text or "", finish=False, template_card=payload
-                )
-                return SentRef(id=sid, conversation=conv)
-            except Exception as exc:  # noqa: BLE001 - try the standalone forms
-                log.warning("reply_stream_with_card_failed", conversation=conv.key, error=str(exc))
+            # A standalone passive reply renders the card; the streamed-card
+            # combination is delivered unreliably by the long-connection bot, so
+            # every card is sent on its own.
             try:
                 await self._sdk.reply_template_card(frame, payload)
                 return SentRef(id="", conversation=conv)
@@ -497,14 +494,22 @@ class WeComConnector(BaseConnector):
         task_id = payload.get("task_id") if isinstance(payload, dict) else None
         if not task_id:
             return
-        card = {"card_type": "text_notice", "main_title": {"title": text}, "task_id": task_id}
+        card = {
+            "card_type": "text_notice",
+            "main_title": {"title": text},
+            # A text_notice card requires a card_action; keep it a plain notice.
+            "card_action": {"type": 1, "url": "https://work.weixin.qq.com"},
+            "task_id": task_id,
+        }
         try:
             await self._sdk.update_template_card(frame, card)
-        except Exception:  # noqa: BLE001 - best-effort acknowledgement
-            log.warning("acknowledge_failed", conversation=interaction.conversation.key)
+        except Exception as exc:  # noqa: BLE001 - best-effort acknowledgement
+            log.warning(
+                "acknowledge_failed", conversation=interaction.conversation.key, error=str(exc)
+            )
 
     async def _send_card(self, conv: Conversation, card: Card) -> str:
-        payload = _button_card(card)
+        payload = _card_payload(card)
         frame = self._frames.get(conv.key)
         if frame is not None:
             await self._sdk.reply_template_card(frame, payload)
@@ -625,6 +630,19 @@ def _get(obj: Any, *keys: str, default: Any = None) -> Any:
     return obj
 
 
+def _card_payload(card: Card) -> dict:
+    """Build the WeCom template card for our card model.
+
+    Questions that need a form (a multi-choice question, or several questions)
+    use ``vote_interaction`` / ``multiple_interaction``; everything else uses a
+    ``button_interaction`` card. A shape WeCom cannot express raises
+    :class:`Unsupported` so the caller can fall back to a numbered prompt.
+    """
+    if card.questions:
+        return _questions_card(card)
+    return _button_card(card)
+
+
 def _button_card(card: Card) -> dict:
     """Build a WeCom ``button_interaction`` template card from our card model.
 
@@ -632,7 +650,7 @@ def _button_card(card: Card) -> dict:
     platform drop the buttons (the card renders without the selectable options).
     """
     button_list = [
-        {"text": button.text, "key": button.value, "style": (index % 4) + 1}
+        {"text": button.text, "key": button.value, "style": _button_style(button.style, index)}
         for index, button in enumerate(card.buttons)
     ]
     return {
@@ -641,6 +659,101 @@ def _button_card(card: Card) -> dict:
         "button_list": button_list,
         "task_id": f"tether-{uuid.uuid4().hex}",
     }
+
+
+def _button_style(style: str | None, index: int) -> int:
+    """Map a button's semantic style to a WeCom button style (1..4)."""
+    return {"primary": 1, "danger": 4}.get(style or "", (index % 4) + 1)
+
+
+def _questions_card(card: Card) -> dict:
+    """Build a WeCom card for a multi-choice or multiple-question prompt.
+
+    A single multi-choice question becomes a ``vote_interaction`` (checkbox with
+    ``mode: 1``); several single-choice questions become a ``multiple_interaction``
+    (one dropdown each). Any other mix is not expressible as a WeCom card and
+    raises :class:`Unsupported` so the caller falls back to numbered text.
+    """
+    if len(card.questions) == 1:
+        question = card.questions[0]
+        return {
+            "card_type": "vote_interaction",
+            "main_title": {"title": card.title or "", "desc": question.header or question.body},
+            "checkbox": {
+                "question_key": "q0",
+                "mode": 1 if question.multiple else 0,
+                "option_list": [
+                    {"id": str(index), "text": label, "is_checked": False}
+                    for index, label in enumerate(question.options)
+                ],
+            },
+            "submit_button": {"text": "提交", "key": card.submit_value},
+            "task_id": f"tether-{uuid.uuid4().hex}",
+        }
+    # A ``multiple_interaction`` card holds at most 3 selectors; a multi-choice
+    # question cannot be combined with others. Anything else falls back to the
+    # numbered prompt.
+    if len(card.questions) > 3 or any(question.multiple for question in card.questions):
+        raise Unsupported("WeCom supports at most 3 single-choice questions per card")
+    return {
+        "card_type": "multiple_interaction",
+        "main_title": {"title": card.title or "", "desc": ""},
+        "select_list": [
+            {
+                "question_key": f"q{index}",
+                "title": question.header or question.body or f"问题 {index + 1}",
+                "option_list": [
+                    {"id": str(option_index), "text": label}
+                    for option_index, label in enumerate(question.options)
+                ],
+            }
+            for index, question in enumerate(card.questions)
+        ],
+        "submit_button": {"text": "提交", "key": card.submit_value},
+        "task_id": f"tether-{uuid.uuid4().hex}",
+    }
+
+
+def _selection_form(payload: dict, value: str) -> dict[str, Any]:
+    """Map a vote/multiple-interaction submit to our ``q{i}`` / ``q{i}_{j}`` form.
+
+    The card encodes each option's ``id`` as its index and each question's
+    ``question_key`` as ``q{i}``; the submit key carries the specs, so the
+    selected indices resolve back to option labels here.
+    """
+    items = (payload.get("selected_items") or {}).get("selected_item") or []
+    specs = _specs(value)
+    if not specs or not items:
+        return {}
+    form: dict[str, Any] = {}
+    for item in items:
+        key = str(item.get("question_key") or "")
+        if len(key) < 2 or key[0] != "q" or not key[1:].isdigit():
+            continue
+        index = int(key[1:])
+        if index >= len(specs):
+            continue
+        option_ids = (item.get("option_ids") or {}).get("option_id") or []
+        spec = specs[index]
+        if spec.get("multiple"):
+            for option_id in option_ids:
+                form[f"q{index}_{option_id}"] = True
+        elif option_ids:
+            options = spec.get("options") or []
+            raw = str(option_ids[0])
+            choice = int(raw) if raw.isdigit() else -1
+            if 0 <= choice < len(options):
+                form[f"q{index}"] = options[choice]
+    return form
+
+
+def _specs(value: str) -> list[dict]:
+    try:
+        data = json.loads(value)
+    except (ValueError, TypeError):
+        return []
+    specs = data.get("specs") if isinstance(data, dict) else None
+    return specs if isinstance(specs, list) else []
 
 
 __all__ = ["WeComConnector", "WeComSDK", "AibotSDK", "wecom_capabilities"]
