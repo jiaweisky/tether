@@ -248,6 +248,7 @@ class TetherApp:
         connector = self.connectors.get(msg.channel)
         if connector is None:
             return
+        await connector.transcribe_voice(msg)
         command = _command(msg.text, self.config.commands.prefix)
         if command == "stop":
             await self._handle_stop(msg, connector)
@@ -274,11 +275,17 @@ class TetherApp:
         if value is None:
             log.info("interaction_unparsed", value=item.value)
             return
+        if value.get("specs") is not None:
+            # A question form submit: turn the widgets into one answer per question.
+            value["answers"] = _form_answers(value["specs"], item.form)
+            if not any(value["answers"]):
+                value["reject"] = True
         sid = str(value.get("sid", ""))
         rid = str(value.get("rid", ""))
         engine = self._turns.get(sid)
         route = engine.route if engine is not None else await self.router.get_by_session(sid)
         if route is None:
+            log.info("interaction_no_route", rid=rid, session=sid)
             return
         pending = route.pending_interactions.get(rid)
         if pending is None:
@@ -325,6 +332,8 @@ class TetherApp:
         elif kind == "question":
             if value.get("reject"):
                 await client.reject_question(sid, rid)
+            elif value.get("answers") is not None:
+                await client.reply_question(sid, rid, value["answers"])
             else:
                 await client.reply_question(sid, rid, [list(value.get("answer") or [])])
 
@@ -348,6 +357,7 @@ class TetherApp:
             renderer=self.renderer,
             media_egress=MediaEgress(self.config, connector),
             on_finish=self._on_turn_finished,
+            working_dir=self.router.working_directory(route),
         )
         self._turns[sid] = engine
         self._turn_queue[sid] = [engine]
@@ -358,12 +368,13 @@ class TetherApp:
 
     # -- turn lifecycle ----------------------------------------------------
     async def _start_turn(self, route: Route, msg: InboundMessage, connector: IMConnector) -> None:
+        working_dir = self.router.working_directory(route)
         identity = await self.router.refresh_identity(route, connector)
         ingest = MediaIngest(
             self.config,
             connector,
             self.router.client_for(route),
-            working_dir=self.router.working_directory(route),
+            working_dir=working_dir,
         )
         model_inputs = await self._model_inputs(route)
         result = await ingest.ingest(route.session_id, msg.attachments, model_inputs=model_inputs)
@@ -388,6 +399,7 @@ class TetherApp:
                 renderer=self.renderer,
                 media_egress=MediaEgress(self.config, connector),
                 on_finish=self._on_turn_finished,
+                working_dir=working_dir,
             )
             sid = route.session_id
             had_active = sid in self._turns
@@ -897,9 +909,35 @@ def _interaction_label(value: dict[str, Any]) -> str:
     if kind == "question":
         if value.get("reject"):
             return "⛔ Cancelled"
+        if value.get("answers") is not None:
+            picked = ["，".join(answer) for answer in value["answers"] if answer]
+            return "✅ " + ("；".join(picked) if picked else "Answered")
         answer = value.get("answer") or []
         return "✅ " + (", ".join(str(a) for a in answer) if answer else "Answered")
     return "✅ Handled"
+
+
+def _form_answers(specs: list[dict[str, Any]], form: dict[str, Any]) -> list[list[str]]:
+    """Turn submitted form widgets into one answer list per question.
+
+    A single-choice question is a ``select_static`` named ``q{i}``; a
+    multi-choice question is one ``checker`` named ``q{i}_{j}`` per option.
+    """
+    answers: list[list[str]] = []
+    for q_index, spec in enumerate(specs):
+        options = spec.get("options") or []
+        if spec.get("multiple"):
+            answers.append(
+                [
+                    options[o_index]
+                    for o_index in range(len(options))
+                    if form.get(f"q{q_index}_{o_index}")
+                ]
+            )
+        else:
+            chosen = form.get(f"q{q_index}")
+            answers.append([str(chosen)] if chosen else [])
+    return answers
 
 
 def _command(text: str, prefix: str) -> str | None:

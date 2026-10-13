@@ -1,0 +1,408 @@
+from __future__ import annotations
+
+import json
+
+import pytest
+
+import tether.connectors.feishu.connector as feishu_module
+from tether.connectors.feishu.connector import (
+    FeishuConnector,
+    VoiceTranscription,
+    _interactive_card,
+)
+from tether.models import (
+    Attachment,
+    Button,
+    Card,
+    CardQuestion,
+    Conversation,
+    InboundMessage,
+    IncomingInteraction,
+    OutboundPlan,
+    Sender,
+    TextSegment,
+)
+
+
+class FakeFeishuSDK:
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+        self.transcript: str | None = None
+
+    def start(self, on_message, on_card, on_recall):
+        self.handlers = (on_message, on_card, on_recall)
+
+    def stop(self):
+        pass
+
+    def reply(self, message_id, msg_type, content):
+        self.calls.append(("reply", message_id, msg_type, content))
+        return "om_reply"
+
+    def send(self, chat_id, msg_type, content):
+        self.calls.append(("send", chat_id, msg_type, content))
+        return "om_send"
+
+    def patch(self, message_id, content):
+        self.calls.append(("patch", message_id, content))
+
+    def upload_image(self, data, filename):
+        return "img_key"
+
+    def upload_file(self, data, filename, kind):
+        return "file_key"
+
+    def download(self, message_id, file_key, kind):
+        return b"bytes"
+
+    def recognize(self, data, fmt, engine_type):
+        self.calls.append(("recognize", fmt, engine_type))
+        if self.transcript is None:
+            raise RuntimeError("asr unavailable")
+        return self.transcript
+
+    def bot_info(self):
+        return "MyBot", "An assistant"
+
+
+def connector(sdk: FakeFeishuSDK) -> FeishuConnector:
+    return FeishuConnector(app_id="a", app_secret="b", sdk=sdk)
+
+
+def _event(message: dict, sender_id: str = "ou_1") -> dict:
+    return {"event": {"sender": {"sender_id": {"open_id": sender_id}}, "message": message}}
+
+
+def test_inbound_text_message():
+    msg = {
+        "message_id": "om_1",
+        "chat_id": "oc_1",
+        "chat_type": "p2p",
+        "message_type": "text",
+        "content": json.dumps({"text": "hello"}),
+    }
+    item = connector(FakeFeishuSDK())._inbound_message(_event(msg))
+    assert item is not None
+    assert item.text == "hello"
+    assert item.sender.id == "ou_1"
+    assert item.conversation.kind == "direct"
+    assert item.conversation.id == "oc_1"
+
+
+def test_inbound_group_image_becomes_attachment():
+    msg = {
+        "message_id": "om_2",
+        "chat_id": "oc_g",
+        "chat_type": "group",
+        "message_type": "image",
+        "content": json.dumps({"image_key": "ik_1"}),
+    }
+    item = connector(FakeFeishuSDK())._inbound_message(_event(msg))
+    assert item is not None
+    assert item.conversation.kind == "group"
+    assert item.attachments[0].kind == "image"
+    assert item.attachments[0].handle == {"message_id": "om_2", "file_key": "ik_1"}
+
+
+def test_inbound_post_is_flattened():
+    post = {
+        "title": "T",
+        "content": [[{"tag": "text", "text": "hi "}, {"tag": "at", "user_id": "ou_9"}]],
+    }
+    msg = {
+        "message_id": "om_3",
+        "chat_type": "p2p",
+        "message_type": "post",
+        "content": json.dumps(post),
+    }
+    item = connector(FakeFeishuSDK())._inbound_message(_event(msg))
+    assert item is not None
+    assert item.text == "Thi @ou_9"
+
+
+def test_card_action_becomes_interaction():
+    event = {
+        "event": {
+            "operator": {"open_id": "ou_2"},
+            "action": {"value": {"key": '{"kind":"permission","reply":"once"}'}},
+            "context": {"open_message_id": "om_1", "chat_id": "oc_1", "chat_type": "group"},
+        }
+    }
+    item = connector(FakeFeishuSDK())._inbound_card(event)
+    assert item is not None
+    assert item.value == '{"kind":"permission","reply":"once"}'
+    assert item.sender.id == "ou_2"
+    assert item.conversation.kind == "group"
+
+
+@pytest.mark.asyncio
+async def test_send_then_edit_streams():
+    sdk = FakeFeishuSDK()
+    conn = connector(sdk)
+    conv = Conversation(channel="feishu", kind="direct", id="oc_1")
+    ref = await conn.send(conv, OutboundPlan(segments=[TextSegment(text="hi")], final=False))
+    sent = [c for c in sdk.calls if c[0] == "send"][0]
+    assert sent[2] == "interactive"
+    assert sent[3]["elements"][0]["content"] == "hi"
+    await conn.update(ref, OutboundPlan(segments=[TextSegment(text="hi there")], final=True))
+    patched = [c for c in sdk.calls if c[0] == "patch"][0]
+    assert patched[1] == "om_send"
+    assert patched[2]["elements"][0]["content"] == "hi there"
+
+
+@pytest.mark.asyncio
+async def test_acknowledge_patches_clicked_card():
+    sdk = FakeFeishuSDK()
+    conn = connector(sdk)
+    interaction = IncomingInteraction(
+        conversation=Conversation(channel="feishu", kind="group", id="oc_1"),
+        message_id="om_card",
+        sender=Sender(id="ou_2"),
+        value="{}",
+    )
+    await conn.acknowledge(interaction, "✅ Allowed")
+    patched = [c for c in sdk.calls if c[0] == "patch"][0]
+    assert patched[1] == "om_card"
+    assert patched[2]["body"]["elements"][0]["content"] == "✅ Allowed"
+
+
+@pytest.mark.asyncio
+async def test_send_card_is_interactive_with_buttons():
+    sdk = FakeFeishuSDK()
+    conn = connector(sdk)
+    conv = Conversation(channel="feishu", kind="direct", id="oc_1")
+    await conn.send_card(conv, Card(title="t", body="b", buttons=[Button(text="Go", value="v")]))
+    kind_call = [c for c in sdk.calls if c[0] == "send"][0]
+    assert kind_call[2] == "interactive"
+    button = kind_call[3]["body"]["elements"][-1]["columns"][0]["elements"][0]
+    assert button["behaviors"][0]["value"] == {"key": "v"}
+
+
+@pytest.mark.asyncio
+async def test_identity_uses_bot_info():
+    conn = connector(FakeFeishuSDK())
+    await conn._connect()
+    identity = await conn.identity(Conversation(channel="feishu", kind="direct", id="oc_1"))
+    assert identity.name == "MyBot"
+    assert identity.description == "An assistant"
+
+
+def test_mention_placeholders_are_replaced():
+    msg = {
+        "message_id": "om_4",
+        "chat_id": "oc_g",
+        "chat_type": "group",
+        "message_type": "text",
+        "content": json.dumps({"text": "@_user_1 hi"}),
+        "mentions": [{"key": "@_user_1", "name": "Bot", "id": {"open_id": "ou_bot"}}],
+    }
+    item = connector(FakeFeishuSDK())._inbound_message(_event(msg))
+    assert item is not None
+    assert item.text == "@Bot hi"
+    assert item.mentions[0].name == "Bot"
+
+
+def test_model_object_event_is_parsed():
+    from types import SimpleNamespace as NS
+
+    mention = NS(key="@_user_1", name="Bot", id=NS(open_id="ou_bot"))
+    message = NS(
+        message_id="om_5",
+        chat_id="oc_p2p",
+        chat_type="p2p",
+        message_type="text",
+        content=json.dumps({"text": "@_user_1 hi"}),
+        mentions=[mention],
+    )
+    event = NS(event=NS(message=message, sender=NS(sender_id=NS(open_id="ou_user"))))
+
+    item = connector(FakeFeishuSDK())._inbound_message(event)
+
+    assert item is not None
+    assert item.message_id == "om_5"
+    assert item.text == "@Bot hi"
+    assert item.conversation.id == "oc_p2p"
+    assert item.sender.id == "ou_user"
+
+
+def _voice(conv, message_id="om_v"):
+    return InboundMessage(
+        channel="feishu",
+        message_id=message_id,
+        conversation=conv,
+        sender=Sender(id="ou_1"),
+        text="",
+        attachments=[Attachment(kind="audio", handle={"message_id": message_id, "file_key": "fk"})],
+    )
+
+
+@pytest.mark.asyncio
+async def test_voice_transcription_replaces_audio(monkeypatch):
+    monkeypatch.setattr(feishu_module, "_has_ffmpeg", lambda: True)
+    monkeypatch.setattr(feishu_module, "_decode_pcm16", lambda data: b"pcm")
+    sdk = FakeFeishuSDK()
+    sdk.transcript = "打开空调"
+    conn = FeishuConnector(
+        app_id="a", app_secret="b", sdk=sdk, voice_transcription=VoiceTranscription()
+    )
+    conv = Conversation(channel="feishu", kind="direct", id="oc_1")
+    msg = _voice(conv)
+
+    await conn.transcribe_voice(msg)
+
+    assert msg.text == "打开空调"
+    assert msg.attachments == []
+
+
+@pytest.mark.asyncio
+async def test_voice_transcription_disabled_without_ffmpeg(monkeypatch):
+    monkeypatch.setattr(feishu_module, "_has_ffmpeg", lambda: False)
+    conn = FeishuConnector(
+        app_id="a",
+        app_secret="b",
+        sdk=FakeFeishuSDK(),
+        voice_transcription=VoiceTranscription(),
+    )
+    assert conn._voice is None
+
+
+@pytest.mark.asyncio
+async def test_voice_transcription_is_off_by_default():
+    sdk = FakeFeishuSDK()
+    sdk.transcript = "should not be used"
+    conn = FeishuConnector(app_id="a", app_secret="b", sdk=sdk)
+    msg = _voice(Conversation(channel="feishu", kind="direct", id="oc_1"))
+
+    await conn.transcribe_voice(msg)
+
+    assert msg.text == ""
+    assert len(msg.attachments) == 1
+    assert not any(call[0] == "recognize" for call in sdk.calls)
+
+
+@pytest.mark.asyncio
+async def test_voice_transcription_failure_keeps_audio_and_backs_off(monkeypatch):
+    monkeypatch.setattr(feishu_module, "_has_ffmpeg", lambda: True)
+    monkeypatch.setattr(feishu_module, "_decode_pcm16", lambda data: b"pcm")
+    sdk = FakeFeishuSDK()  # transcript is None -> recognize raises
+    conn = FeishuConnector(
+        app_id="a",
+        app_secret="b",
+        sdk=sdk,
+        voice_transcription=VoiceTranscription(cooldown_s=60),
+    )
+    conv = Conversation(channel="feishu", kind="direct", id="oc_1")
+    first = _voice(conv, "om_1")
+    second = _voice(conv, "om_2")
+
+    await conn.transcribe_voice(first)
+    await conn.transcribe_voice(second)  # within the cooldown window
+
+    assert first.text == "" and len(first.attachments) == 1
+    assert second.text == "" and len(second.attachments) == 1
+    assert len([call for call in sdk.calls if call[0] == "recognize"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_voice_transcription_throttles_per_minute(monkeypatch):
+    monkeypatch.setattr(feishu_module, "_has_ffmpeg", lambda: True)
+    monkeypatch.setattr(feishu_module, "_decode_pcm16", lambda data: b"pcm")
+    sdk = FakeFeishuSDK()
+    sdk.transcript = "hi"
+    conn = FeishuConnector(
+        app_id="a",
+        app_secret="b",
+        sdk=sdk,
+        voice_transcription=VoiceTranscription(max_per_min=1),
+    )
+    conv = Conversation(channel="feishu", kind="direct", id="oc_1")
+
+    await conn.transcribe_voice(_voice(conv, "om_1"))
+    await conn.transcribe_voice(_voice(conv, "om_2"))
+
+    assert len([call for call in sdk.calls if call[0] == "recognize"]) == 1
+
+
+def test_inbound_video_uses_file_key_not_cover():
+    msg = {
+        "message_id": "om_v",
+        "chat_id": "oc_1",
+        "chat_type": "p2p",
+        "message_type": "media",
+        "content": json.dumps({"file_key": "fk_video", "image_key": "ik_cover", "duration": 1000}),
+    }
+    item = connector(FakeFeishuSDK())._inbound_message(_event(msg))
+    assert item is not None
+    assert item.attachments[0].kind == "video"
+    assert item.attachments[0].handle == {"message_id": "om_v", "file_key": "fk_video"}
+
+
+@pytest.mark.asyncio
+async def test_send_text_falls_back_to_send_when_reply_fails():
+    sdk = FakeFeishuSDK()
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("stale reply target")
+
+    sdk.reply = boom
+    conn = connector(sdk)
+    conv = Conversation(channel="feishu", kind="group", id="oc_1")
+
+    await conn.send(
+        conv, OutboundPlan(segments=[TextSegment(text="hi")], reply_to="om_x", final=True)
+    )
+
+    assert any(call[0] == "send" for call in sdk.calls)
+
+
+def test_question_form_card_renders_controls():
+    card = Card(
+        title="Pick",
+        body="",
+        questions=[
+            CardQuestion(header="When", body="when?", options=["A", "B"]),
+            CardQuestion(header="More", body="more?", options=["X", "Y"], multiple=True),
+        ],
+        submit_value='{"k":1}',
+    )
+    payload = _interactive_card(card)
+    form = next(e for e in payload["body"]["elements"] if e["tag"] == "form")
+    select = next(e for e in form["elements"] if e["tag"] == "select_static")
+    assert select["name"] == "q0"
+    assert [o["value"] for o in select["options"]] == ["A", "B"]
+    checkers = [e for e in form["elements"] if e["tag"] == "checker"]
+    assert [c["name"] for c in checkers] == ["q1_0", "q1_1"]
+    submit = form["elements"][-1]
+    assert submit["form_action_type"] == "submit"
+    assert submit["behaviors"][0]["value"] == {"key": '{"k":1}'}
+
+
+def test_card_form_submit_carries_form_value():
+    event = {
+        "event": {
+            "operator": {"open_id": "ou_2"},
+            "action": {
+                "value": {"key": '{"kind":"question"}'},
+                "form_value": {"opt0": True, "opt1": False},
+            },
+            "context": {"open_message_id": "om_1", "chat_id": "oc_1", "chat_type": "group"},
+        }
+    }
+    item = connector(FakeFeishuSDK())._inbound_card(event)
+    assert item is not None
+    assert item.form == {"opt0": True, "opt1": False}
+
+
+def test_interactive_card_honors_button_style():
+    card = Card(
+        title="t",
+        body="b",
+        buttons=[
+            Button(text="Allow once", value="a"),
+            Button(text="Always allow", value="b", style="primary"),
+            Button(text="Deny", value="c", style="danger"),
+        ],
+    )
+    columns = _interactive_card(card)["body"]["elements"][-1]["columns"]
+    types = [c["elements"][0]["type"] for c in columns]
+    assert types == ["primary", "primary", "danger"]

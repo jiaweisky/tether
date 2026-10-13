@@ -101,6 +101,9 @@ class IncomingInteraction:
     message_id: str
     sender: Sender
     value: str
+    # Checkbox/field values a form submit carried (``name -> value``); empty for
+    # plain button clicks.
+    form: dict[str, Any] = field(default_factory=dict)
     raw: Any = None
 
 
@@ -108,9 +111,10 @@ class IncomingInteraction:
 class ConnectorEvent:
     """A non-message platform event, e.g. a user entering the chat."""
 
-    kind: Literal["enter_chat", "feedback", "other"]
+    kind: Literal["enter_chat", "feedback", "recall", "other"]
     conversation: Conversation
     sender: Sender | None = None
+    message_id: str | None = None
     raw: Any = None
 
 
@@ -151,11 +155,26 @@ class Button:
 
 
 @dataclass
+class CardQuestion:
+    """One item of a multi-question HITL card."""
+
+    header: str
+    body: str
+    options: list[str] = field(default_factory=list)
+    multiple: bool = False
+
+
+@dataclass
 class Card:
     title: str | None
     body: str
     buttons: list[Button] = field(default_factory=list)
     fields: dict[str, str] = field(default_factory=dict)
+    # For a question card rendered as a form (several questions and/or a
+    # multi-choice question): the questions plus the encoded payload the form's
+    # submit button returns.
+    questions: list[CardQuestion] = field(default_factory=list)
+    submit_value: str = ""
 
 
 @dataclass

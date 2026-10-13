@@ -33,6 +33,7 @@ def fake_capabilities() -> Capabilities:
         edit_message=True,
         native_stream=False,
         buttons=True,
+        question_form=True,
         reactions=True,
         typing=True,
         proactive=True,

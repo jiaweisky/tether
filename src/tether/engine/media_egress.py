@@ -10,7 +10,9 @@ from __future__ import annotations
 import base64
 import binascii
 import ipaddress
+import os
 import socket
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -38,6 +40,58 @@ _EXTENSION_KINDS = (
     ((".mp3", ".wav", ".ogg", ".amr", ".silk"), "audio"),
     ((".mp4", ".mov", ".webm"), "video"),
 )
+
+
+def files_from_paths(paths: Any, *, base_dir: str | None, max_bytes: int) -> list[RichMedia]:
+    """Read files an agent produced, named by path rather than by inline bytes.
+
+    Tool results report produced files as ``outputPaths`` (absolute paths on the
+    agent host) and step results as relative ``files`` (resolved against the
+    project directory). Missing, non-file or oversized entries are skipped.
+    """
+    out: list[RichMedia] = []
+    for raw in paths or []:
+        if not isinstance(raw, str) or not raw:
+            continue
+        path = Path(raw) if os.path.isabs(raw) else Path(base_dir or ".").joinpath(raw)
+        try:
+            if not path.is_file() or path.stat().st_size > max_bytes:
+                continue
+            data = path.read_bytes()
+        except OSError:
+            log.warning("output_file_unreadable", path=raw)
+            continue
+        mime = sniff_mime(data, path.name, None)
+        out.append(
+            RichMedia(
+                kind=normalize_media_kind(_media_kind(mime, path.name)),
+                data=data,
+                mime=mime,
+                name=path.name,
+            )
+        )
+    return out
+
+
+_STRUCTURED_FILE_OPERATIONS = ("write", "edit")
+
+
+def structured_file_paths(structured: Any) -> list[str]:
+    """File paths a mutation tool reports in its structured output.
+
+    The agent's ``write``/``edit`` tools name the produced file in
+    ``structured.resource`` (``outputPaths`` is often empty), so the bridge must
+    read it to deliver the file the user asked for.
+    """
+    if not isinstance(structured, dict):
+        return []
+    if structured.get("operation") not in _STRUCTURED_FILE_OPERATIONS:
+        return []
+    return [
+        value
+        for key in ("resource", "target")
+        if isinstance((value := structured.get(key)), str) and value
+    ]
 
 
 def extract_file_parts(data: Any) -> list[RichMedia]:

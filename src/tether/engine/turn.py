@@ -59,7 +59,12 @@ from ..models import (
 from ..render.renderer import DefaultRenderer
 from ..util.logging import get_logger
 from . import hitl
-from .media_egress import MediaEgress, extract_file_parts
+from .media_egress import (
+    MediaEgress,
+    extract_file_parts,
+    files_from_paths,
+    structured_file_paths,
+)
 from .streaming import RateLimited, StreamingController
 
 log = get_logger("tether.turn")
@@ -80,6 +85,7 @@ class TurnEngine:
         renderer: DefaultRenderer,
         media_egress: MediaEgress,
         on_finish: FinishCb,
+        working_dir: str | None = None,
     ) -> None:
         self.route = route
         self.inbound = inbound
@@ -89,10 +95,12 @@ class TurnEngine:
         self.renderer = renderer
         self.media_egress = media_egress
         self.on_finish = on_finish
+        self.working_dir = working_dir
 
         self.conv = route.conversation
         self.usage = Usage(context_limit=route.context_limit or config.model.context_limit)
         self.media: list[RichMedia] = []
+        self._media_seen: set[str] = set()
         self._sent_ref: SentRef | None = None
         self._placeholder_sent = False
         self._ended = False
@@ -260,18 +268,39 @@ class TurnEngine:
             self.controller.note_tool(name)
 
     async def _on_tool_progress(self, data: dict[str, Any]) -> None:
-        self.media.extend(extract_file_parts(data.get("content")))
+        self._collect_media(data)
 
     async def _on_tool_success(self, data: dict[str, Any]) -> None:
-        self.media.extend(extract_file_parts(data.get("content")))
+        self._collect_media(data)
         if self.config.streaming.show_tools:
             self.controller.clear_tool()
+
+    def _collect_media(self, data: dict[str, Any]) -> None:
+        """Collect media a tool produced: inline parts plus files by path.
+
+        Tool results may embed file parts (``content``) or name files on disk
+        (``outputPaths``). Either way the bytes reach the user instead of the
+        agent's "saved to <path>" text alone. Duplicates are dropped.
+        """
+        produced = extract_file_parts(data.get("content"))
+        paths = list(data.get("outputPaths") or []) + structured_file_paths(data.get("structured"))
+        produced += files_from_paths(
+            paths, base_dir=self.working_dir, max_bytes=self.config.media.max_bytes
+        )
+        for media in produced:
+            key = media.name or media.url or ""
+            if key and key in self._media_seen:
+                continue
+            if key:
+                self._media_seen.add(key)
+            self.media.append(media)
 
     async def _on_tool_failed(self, data: dict[str, Any]) -> None:
         self.controller.push_text(f"\n\n⚠️ A tool failed: {_short(data.get('error'))}\n")
 
     async def _on_step_ended(self, data: dict[str, Any]) -> None:
         self._record_usage(data)
+        self._collect_media({"outputPaths": data.get("files")})
 
     async def _on_step_failed(self, data: dict[str, Any]) -> None:
         error = data.get("error") or {}
@@ -305,6 +334,7 @@ class TurnEngine:
         perm = PendingPermission.from_json(data)
         metrics.inc("hitl_asks")
         action = self.config.permissions.action_for(perm.action)
+        log.info("permission_asked", action=perm.action, auto=action)
         if action in ("once", "always", "reject"):
             await self._reply_permission(perm, action)
             return
@@ -313,26 +343,48 @@ class TurnEngine:
         if self.connector.capabilities.buttons:
             try:
                 await self._send_card(card)
+                await self._start_new_message()
                 return
             except Exception:  # noqa: BLE001 - fall back to a numbered text prompt
                 log.warning("permission_card_send_failed", exc_info=True)
         options = [button.text for button in card.buttons]
         self.route.pending_interactions[perm.id].options = options
         await self._send_notice(_numbered_text(card.body, options))
+        await self._start_new_message()
 
     async def _on_question(self, data: dict[str, Any]) -> None:
         question = PendingQuestion.from_json(data)
         metrics.inc("hitl_asks")
+        first = question.questions[0] if question.questions else None
+        log.info(
+            "question_asked",
+            questions=len(question.questions),
+            options=len(first.options) if first else 0,
+            multiple=bool(first and first.multiple),
+        )
         text, options = hitl.question_numbered_text(question)
         self._register_pending("question", question.id, options=options)
         card = hitl.question_card(question)
-        if card is not None and self.connector.capabilities.buttons:
+        if card is not None and self._question_card_renderable(card):
             try:
                 await self._send_card(card)
+                await self._start_new_message()
                 return
             except Exception:  # noqa: BLE001 - fall back to a numbered text prompt
                 log.warning("question_card_send_failed", exc_info=True)
         await self._send_notice(text)
+        await self._start_new_message()
+
+    def _question_card_renderable(self, card: Card) -> bool:
+        """Whether the channel can render this question as a card.
+
+        A multi-choice question needs the channel to render checkboxes; a channel
+        that cannot falls back to the numbered text prompt.
+        """
+        caps = self.connector.capabilities
+        if not caps.buttons:
+            return False
+        return not card.questions or caps.question_form
 
     async def _send_card(self, card: Card) -> None:
         """Send an interaction card, attached to the active stream when possible.
@@ -424,6 +476,29 @@ class TurnEngine:
         task = self._timers.pop(request_id, None)
         if task is not None:
             task.cancel()
+
+    async def _start_new_message(self) -> None:
+        """Continue in a new message after a user is asked to choose.
+
+        The streamed message was opened before the user's reply, so continuing
+        there would show the agent's answer above that reply. Seal whatever has
+        accumulated into the current message, then open a fresh one for the rest.
+        Only channels whose interaction cards are separate messages need this;
+        where the card shares the streamed message (e.g. WeCom) the answer simply
+        continues in place.
+        """
+        if not self._can_stream or self.connector.capabilities.card_in_stream:
+            return
+        text = self.controller.text
+        if self._sent_ref is not None and text.strip():
+            try:
+                await self.connector.update(
+                    self._sent_ref, OutboundPlan(segments=[TextSegment(text=text)], final=True)
+                )
+            except Exception:  # noqa: BLE001 - sealing is best-effort
+                log.warning("segment_seal_failed", exc_info=True)
+        self._sent_ref = None
+        self.controller.begin_segment()
 
     async def _emit(self, final: bool, snapshot: str) -> None:
         if not final and await self._maybe_placeholder(snapshot):

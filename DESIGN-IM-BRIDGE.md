@@ -91,6 +91,13 @@
 | 2026-10-13 | §11 implemented: process-wide counters/gauges, an optional HTTP endpoint (`metrics.listen` → `GET /healthz`, `GET /metrics`) and a periodic structured `metrics` log (`metrics.log_interval_s`). §9 config updated. |
 | 2026-10-13 | §8.3/§8.4/§14: marked the remaining M6 hardening items **deferred — do not implement without an explicit instruction** (adaptive rate limiting; per-session `?after=` replay / explicit overflow handling; migration/replay). Project isolation, SSRF protection, observability and the watchdog/re-acquire are done. |
 | 2026-10-13 | §11: added the **prolonged SSE disconnection** alert (`sse_disconnected_prolonged` at alert level + `sse_prolonged_disconnects` counter + `sse_disconnected` gauge after N consecutive failed reconnects). |
+| 2026-10-13 | §5.2 expanded into a **Feishu implementation plan** (M3): long-connection transport, event→§3.2 mapping (`im.message.receive_v1`/`card.action.trigger`/`im.message.recalled_v1`), capabilities (`edit_message=True` → edit streaming; buttons; media), identity via `bot/v3/info`, outbound/edit/media APIs, delivery caveats and §13.1 backfill items. |
+| 2026-10-13 | §5.2 Feishu connector implemented on **`lark-oapi`**: blocking WS run in a thread with handlers hopping back to the bridge loop + REST via `to_thread`; inbound `im.message.receive_v1` (text/post/image/file/audio/sticker), `card.action.trigger`, `im.message.recalled_v1`; text send + **edit-based streaming** (`patch`); interactive-card HITL; media upload/download; identity via `bot/v3/info`. `ConnectorEvent` gained `recall` + `message_id` (§3.2). Capabilities set to `markdown=BASIC`. Device backfill (§13.1) pending. |
+| 2026-10-13 | §5.2 Feishu **device-verified** (p2p text round-trip). Fixed two defects found on device: (1) the SDK delivers **model objects**, not dicts — the field accessor now accepts both; (2) text streaming must use `update` (`PUT /im/v1/messages/{id}`, `msg_type=text`), not `PATCH` (cards only → 400 on text). Inbound `@_user_N` mention placeholders are resolved to `@name`. **Markdown is not yet actually rendered** (`text` messages stay plain; card `lark_md` is not wired) and **Feishu voice is not transcribed** — its `audio` event carries only `file_key`+`duration` (no transcript, unlike WeCom) so it is delivered as an attachment only (D24). |
+| 2026-10-13 | §5.2 Feishu **Markdown rendering + card streaming**: replies now go out as an **interactive card** using the card **`markdown` component** (renders lists, code blocks, `---` and inline styles — a `div`+`lark_md` renders only inline markup), so `capabilities.markdown` → `STANDARD` / `code_block=true` and `max_text_chars` → 8000; streaming edits the card in place with `PATCH` (`PUT` remains only for plain `text`). `acknowledge` rewrites the clicked HITL card to a text notice (like WeCom). Device-verified. |
+| 2026-10-13 | §5.2 **voice clarified on device (D24)**: a Feishu **voice bubble** arrives as `message_type: audio` with content `{file_key, duration}` only (no transcript), while **voice input** ("speech to text") is transcribed by the client and delivered as a `post`/text message — so voice input already works with the normal `post` parser and needs no ASR. Voice-bubble ASR stays deferred. |
+| 2026-10-13 | §5.2 **optional Feishu voice transcription** (`channels.feishu.voice_transcription`, off by default): download the voice bubble → decode Ogg-Opus to 16 kHz mono PCM via `ffmpeg` (~30 ms) → `speech_to_text/v1` `file_recognize` → use `recognition_text` as the message. The API only accepts `format=pcm`/`engine_type=16k_auto`, needs the `speech_to_text:speech` scope, is limited to 20 QPS/tenant and **is not available on the free plan** (that returns `99991400`, which is what prompted this). The bridge throttles locally, backs off `cooldown_s` on any error, falls back to the attachment (never fails the turn), and disables itself with one warning if `ffmpeg` is absent (D24). |
+| 2026-10-13 | §6.1/§4.6 **HITL message ordering**: when the bridge presents an interaction to the user (permission/question card or numbered fallback), it now **seals the streamed message and opens a new one** for the agent's continuation, so the answer appears **below** the user's reply instead of above it. Gated by the new `Capabilities.card_in_stream` (WeCom `true` = the card shares the streamed reply, so it continues in place; Feishu `false` = the card is a separate message). Only user-facing asks trigger this — bridge auto-answered permissions do not. |
 
 ---
 
@@ -837,7 +844,7 @@ Preliminary assessment per platform (**starting from documentation, unconfirmed 
 | Platform | markdown | edit | native_stream | buttons | media_out | direct_delivery | group_delivery | Status |
 |---|---|---|---|---|---|---|---|---|
 | WeCom Smart Robot | RICH (bot markdown) | No* | **Yes** (`reply_stream`) | Yes (template card) | image/file/voice/video | `always` | `mention_only` | Docs (long connection) |
-| Feishu | RICH (interactive card markdown) | Yes (patch card) | No (simulated with edit) | Yes (card buttons) | image/file/audio/video | **pending integration testing** | **pending integration testing** | pending integration testing |
+| Feishu | STANDARD (card `markdown` component) | Yes (patch card) | No (simulated with edit) | Yes (card buttons) | image/file/audio/video | **pending integration testing** | **pending integration testing** | pending integration testing |
 | QQ (botpy) | BASIC (markdown message) | No | No | Yes (keyboard) | image/video/audio | **pending integration testing** | **pending integration testing** | pending integration testing |
 | WeChat Personal (wechatbot.dev) | NONE | No | No | No | image/voice/file/video | **pending integration testing** | **pending integration testing** | pending integration testing |
 
@@ -1340,19 +1347,60 @@ complete message instead.
 
 ### 5.2 Feishu
 
-Based on `feishu-bot-sdk`:
+**SDK / transport.** Use the **official `lark-oapi`** SDK's long connection (WebSocket): it opens a WS to the open platform, authenticates with the app's `tenant_access_token`, and the platform pushes events — no public callback URL (the same "no fixed public IP" advantage as WeCom, §5.1). Config `channels.feishu.{app_id, app_secret}` already exists; the `feishu` optional extra installs `lark-oapi`. Note the SDK's **threading reality**: its WS client is *blocking* (it runs its own event loop and calls *synchronous* handlers) and its REST client is synchronous too — so the bridge runs the stream in a dedicated thread, hops its handlers back onto Tether's loop, and dispatches REST calls with `asyncio.to_thread`.
 
-- Connection: `FeishuBotServer(app_id, app_secret)` long connection; `@server.on_im_message_receive`.
-- Outbound: `MessageService.send_text/send_image/send_markdown`, interactive cards; cards can be
-  `patch`ed (edited) → mapped to `Capabilities.edit_message=True`, with streaming simulated by "send the card first, then patch"
-  (`native_stream=False`).
-- Media: `MediaService.upload_image` / file upload and download; rich-text `post` structure.
-- **Inbound interaction**: card button callback (`card.action.trigger`, with `operator`) → `IncomingInteraction`
-  (§3.2/§4.6); `on_im_message_receive` → `InboundMessage`.
-- Note: when multiple instances are online at the same time, events are **randomly delivered** to one of them (not broadcast) — the bridge should be as single-instance as possible, or de-duplicate
-  the same event (`message_id`).
-- **Delivery semantics**: the push rules for p2p and group chat (whether group chat is @-only, whether it is affected by the `im.message.receive_v1` permission/settings
-  ) are **pending integration testing confirmation**; before confirmation, handle per the most conservative `group_delivery: mention_only`.
+**Capabilities (declared best-effort; confirm on device, §13.1).**
+
+| aspect | value |
+|---|---|
+| markdown | `STANDARD` — rendered via the card **`markdown` component** (bold/italic/strikethrough/links/inline code plus **lists**, **code blocks** and `---`); headings degrade to bold (`**`) and tables to columns, since the component supports neither. Requires Feishu client ≥ 7.6 |
+| `edit_message` | **true** — text replies are **interactive cards**, updated in place (`PATCH`); plain `text` uses `PUT` → the **edit** streaming strategy |
+| `native_stream` | false (no server-push stream like WeCom) |
+| buttons | true — interactive cards (`card.action.trigger`) |
+| reactions / typing | false |
+| proactive | true |
+| groups | true; group **@-only** (`group_delivery: mention_only`, conservative); p2p delivery unconfirmed (§13.1 — `direct_delivery` stays `unknown` until tested) |
+| media_in / media_out | image / audio / video / file |
+| max_text_chars | ~4000; typical `max_cards` ~5 |
+
+**Inbound events → §3.2**
+
+| Feishu event (v2) | maps to |
+|---|---|
+| `im.message.receive_v1` | `InboundMessage` (`text`/`post`/`image`/`file`/`audio`/`media`) |
+| `card.action.trigger` | `IncomingInteraction` (button `value` + `operator.open_id`) |
+| `im.message.recalled_v1` | `ConnectorEvent(kind="recall")` (§8.6) |
+| `im.chat.member.bot.added_v1` (+ deleted) | `ConnectorEvent` (membership; informational) |
+
+> **Voice (D24, device-verified).** Two distinct paths: (1) **voice input / "speech to text"** — the Feishu client transcribes and sends a `post` message with the text, so it is handled like any text (no ASR needed); (2) a **voice bubble** — `message_type: audio` with content `{file_key, duration}` only, no transcript (unlike WeCom, whose `message.voice.content` *is* the transcript). A voice bubble is passed through as an attachment (§7.1 normalizes `voice`→`audio`) unless optional transcription is enabled (below).
+
+`message` fields: `message_id`, `chat_id`, `chat_type` (`p2p`|`group`), `message_type`, `content` (a JSON **string**: e.g. `{"text": …}`, `{"image_key": …}`, `{"file_key":…, "file_name":…}`), `mentions` (each `{key, id, name}`; the text carries the `@_user_N` placeholder), and `parent_id`/`root_id`/`thread_id` (→ `Conversation.thread`). Group messages are delivered only when the bot is @-mentioned unless "receive all group messages" is granted.
+
+**Identity.** `GET /open-apis/bot/v3/info` → `bot.app_name` (+ `avatar_url`, `open_id`); the description, if wanted, comes from the application info (`application/v6/applications/{app_id}`). So `Connector.identity()` returns the platform name/description here — **unlike WeCom**, no configuration is required (config still overrides, §2.6).
+
+**Outbound / streaming.**
+- `send`/`reply`: text is sent as an **interactive card** whose body is a `markdown` component (§capabilities.markdown); HITL uses an `interactive` card; media uses `image`/`file`. `msg_type` comes from the rendered plan.
+- `update`: **edit** the card in place → the **edit** strategy (§6.1): open the card (initial snapshot), `PATCH` its content on each flush, finalize with the complete text. `PATCH /im/v1/messages/{message_id}` updates card content; a plain `text` message instead uses `PUT` (a `PATCH` on a `text` message returns `400`). Long text chunks per `max_text_chars` (§6.5).
+
+**HITL.** Render permission/question as an **interactive card** with button elements whose `value` carries the encoded payload (§4.6). `card.action.trigger` → `IncomingInteraction`; the clicker's `operator.open_id` is the actor, enabling in-group authorization (§2.5(3)). Dedup by the encoded `rid` (§8.2); after a decision the clicked card is rewritten in place to a text notice (`acknowledge`, patch-by `message_id`, like WeCom).
+
+**Media.**
+- Inbound: `GET /im/v1/messages/{message_id}/resources/{file_key}?type=image|file` → bytes (the `image_key`/`file_key` come from the message content). **Voice** downloads as `type=file`; it carries no transcript (D24), so the agent receives the raw audio and normally cannot use it unless transcription is enabled.
+- Outbound: upload via `POST /im/v1/images` (image_key) and `POST /im/v1/files` (file_key), then send an `image`/`file`/`audio`/`media` message. (Current implementation sends non-image media as a `file`; native audio/video bubbles are a follow-up.)
+
+**Voice transcription (optional, D24).** When `channels.feishu.voice_transcription.enabled` is set, the connector transcribes an inbound voice bubble before the turn starts: download the audio → **decode Ogg-Opus to 16 kHz mono PCM** (`ffmpeg`, one pass, ~30 ms) → `POST /open-apis/speech_to_text/v1/speech/file_recognize` → put `recognition_text` into the message text (and drop the attachment so it is not also spooled). Facts and constraints:
+- the API accepts **only `format=pcm` + `engine_type=16k_auto`**, and requires the `speech_to_text:speech` scope (app identity);
+- the tenant limit is **20 QPS** shared by all apps in the tenant, and **the free version does not support the API** (a call there returns the misleading `99991400 request trigger frequency limit`);
+- the bridge applies its own throttle (`max_per_min`) and, on **any** error (rate limit, quota, permission, format, decode), logs `feishu_transcription_failed`, **backs off** for `cooldown_s` (skipping ASR meanwhile) and falls back to the raw attachment — it never fails the turn;
+- `ffmpeg` must be on `PATH`; if it is missing the feature is **disabled at startup with a single warning** (no repeated errors).
+
+**Delivery / auth / caveats.**
+- Auth: `tenant_access_token` (from `app_id`/`app_secret`), managed by the SDK.
+- **Multiple long connections**: with several instances of the app online, the platform may deliver an event to only **one** of them (not broadcast) — the bridge must run a **single instance** (as with WeCom's one-connection rule) or de-duplicate by `message_id`.
+- **Delivery semantics** (p2p always? group @-only? effect of the event-subscription permission) are **pending integration testing**; until confirmed, keep the conservative `group_delivery: mention_only`.
+- `mentions` carry names → speaker labeling / `@`-stripping use the bot `app_name` from identity.
+
+**§13.1 backfill items**: capabilities table; p2p vs group delivery; card-callback fields (`operator`, `action.value`); the breadth of `edit` (which `msg_type`s can be patched); media types/size limits; proactive push; rate limits; clicker identity.
 
 ### 5.3 QQ (botpy)
 
@@ -1842,6 +1890,12 @@ channels:
     enabled: false
     app_id: ${FEISHU_APP_ID:-}
     app_secret: ${FEISHU_APP_SECRET:-}
+    voice_transcription:               # optional; off by default
+      enabled: false
+      engine_type: 16k_auto            # the API supports only this
+      format: pcm                      # the API supports only this
+      max_per_min: 20                  # local throttle (tenant limit is 20 QPS)
+      cooldown_s: 60                   # skip ASR after any error
   qq:
     enabled: false
     appid: ${QQ_BOT_APPID:-}
@@ -2099,7 +2153,7 @@ Confirm item by item for each platform:
 | **M0 skeleton** | uv project, config/validation, unified message model (including inbound items `InboundMessage`/`IncomingInteraction`/`ConnectorEvent`), Connector protocol+registry, AgentClient (HTTP/SSE), Router+SQLite, StreamingController, Renderer (plain-text profile), `/stop`, identity-lead skeleton, structured logging |
 | **M1 (MVP) WeCom direct chat + group chat text** | WeCom long-connection Connector; **direct chat and group chat (one session per conversation; bot name/description and speaker identity injected)**; `reply_stream` streaming Markdown; no cross-user steer within a group, reply @-mentions the initiator; turn completion/error notices; `/stop`. **Exit: §13.1 integration testing and backfill §3.3** |
 | **M2 WeCom full experience** | Markdown RICH profile (table/code-block downgrade); **run status/usage/thinking display (§6.7)**; template-card HITL (permission/question); inbound media (`download_file` decryption → inline/file/url/spool); outbound media (tool media → chunked upload → image/file/voice/video); `attachment.omitted` notice. **Exit: §13.1 backfill** |
-| **M3 Feishu** | Long-connection Connector; card streaming (patch); card interaction callbacks → HITL; media. **Exit: §13.1 backfill** |
+| **M3 Feishu** | Long-connection Connector; text/p2p round-trip (**done**); card streaming + card-Markdown rendering (**done**); card interaction callbacks → HITL + `acknowledge`; media; optional voice-bubble transcription (`voice_transcription`, D24 — opt-in, needs a paid tenant + `ffmpeg`). **Exit: §13.1 backfill** |
 | **M4 QQ** | botpy Connector; group/channel/DM; markdown+keyboard; rich media. **Exit: §13.1 backfill** |
 | **M5 WeChat personal** | wechatbot-sdk Connector; extreme downgrade; compliance notices. **Exit: §13.1 backfill** |
 | **M6 hardening** | **Done:** project sharing vs isolation (`projects.mode: shared | isolated`; per-conversation views via agentd's control API `POST/GET/DELETE /admin/projects`, impl `none`/`copy`/`worktree`/`overlay`, with `inboundPermissions` + `sandbox` passthrough, §2.8/§2.9); SSRF protection; observability `GET /healthz` + `/metrics` (§11 core; a few listed metrics still deferred, §11); stale-turn watchdog + isolated re-acquire (§8.3). **Deferred — do not implement without an explicit instruction:** adaptive rate limiting (§8.4), per-session `?after=` replay / explicit overflow handling (§8.3), migration/replay. |
@@ -2136,6 +2190,7 @@ Confirm item by item for each platform:
 | D21 | **Isolation is `shared` or `isolated`** (`projects.mode`, D20): `isolated` leases per-conversation views from **agentd's control API** (`none`/`copy`/`worktree`/`overlay`); the bridge never forks Go processes (container/remote would be host-orchestrated). Abstracted via `ProjectProvider` (§2.8/§2.9/§3.7) | One clear boundary; reuses agentd's built-in isolation runner |
 | D22 | **Isolation is shared across `agentd`'s transports via a transport-agnostic project runner in `cmd/`** (`Transport` is a parameter); **a writable project has a single owner `(project, transport)`**, read-only can be shared; the SDK provides only policy (**+ the `Sandbox` hook (SDK layer), §17.2**) (§17.3, §3.7) | Isomorphic to the sandbox: share the mechanism, not the instance; avoids writing one per transport |
 | D23 | **Message recall is best-effort and platform-dependent** (§8.6): handled only where the platform emits a recall event (Feishu `im.message.recalled_v1`); cancels queued/in-flight turns, never "unsends" an already-sent reply; a platform without the event (WeCom long connection) is a no-op | The bridge cannot delete its own outbound messages; recall can only cancel uncommitted work |
+| D24 | **Feishu voice bubbles are transcribed on demand** (§5.2, device-verified): a **voice bubble** (`audio`) event carries only `{file_key, duration}` — no transcript (unlike WeCom, whose `message.voice.content` *is* the transcript). Optional `channels.feishu.voice_transcription` transcodes it (Ogg-Opus → 16 kHz mono PCM via `ffmpeg` → `speech_to_text/v1` `file_recognize`) and feeds the text to the model. **Voice input** ("speech to text") already arrives as a `post`/text message and needs no ASR. Off by default; the API needs a paid tenant (the free version is blocked), requires `ffmpeg`, and is rate-limited — any error falls back to the raw attachment | Keep it opt-in and degrade gracefully: the API is not on the free plan, needs a decode step, and shares a 20 QPS/tenant limit |
 
 ---
 

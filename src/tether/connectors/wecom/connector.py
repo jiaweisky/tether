@@ -44,6 +44,7 @@ wecom_capabilities = Capabilities(
     images_inline=False,
     edit_message=False,
     native_stream=True,
+    card_in_stream=True,
     buttons=True,
     reactions=False,
     typing=False,

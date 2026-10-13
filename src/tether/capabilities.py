@@ -37,7 +37,15 @@ class Capabilities:
     images_inline: bool = False
     edit_message: bool = False
     native_stream: bool = False
+    # Whether an interaction card is rendered inside the streamed message itself
+    # (e.g. WeCom's streamed reply) rather than as a separate message. When it is
+    # separate, the agent's continuation after a HITL answer must open a new
+    # message so it is not shown above the user's reply.
+    card_in_stream: bool = False
     buttons: bool = False
+    # Whether the channel can render a question card as a form (dropdowns /
+    # checkboxes) rather than falling back to a numbered text prompt.
+    question_form: bool = False
     reactions: bool = False
     typing: bool = False
     proactive: bool = False

@@ -147,6 +147,13 @@ class BaseConnector:
     async def upload(self, data: MediaBytes, *, kind: str) -> MediaHandle:
         raise Unsupported(f"{self.name} cannot upload media")
 
+    async def transcribe_voice(self, message: InboundMessage) -> None:
+        """Optional: replace a voice attachment with its transcript, in place.
+
+        Channels without speech-to-text leave the message untouched.
+        """
+        return None
+
     # -- facts -------------------------------------------------------------
     async def identity(self, conv: Conversation) -> BotIdentity:
         return BotIdentity(name="Assistant")

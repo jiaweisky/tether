@@ -9,12 +9,14 @@ from tether.agent.events import (
     ATTACHMENT_OMITTED,
     PERMISSION_ASKED,
     QUESTION_ASKED,
+    QUESTION_REPLIED,
     SESSION_STATUS,
     STEP_ENDED,
     STEP_STARTED,
     TEXT_DELTA,
     TEXT_ENDED,
     TOOL_CALLED,
+    TOOL_SUCCESS,
     Event,
 )
 from tether.app import TetherApp
@@ -578,3 +580,141 @@ async def test_turn_finish_clears_pending_interactions(tmp_path):
         Event("d1", SESSION_STATUS, {"sessionID": sid, "status": {"type": "idle"}})
     )
     assert not route.pending_interactions
+
+
+@pytest.mark.asyncio
+async def test_continuation_after_question_opens_new_message(tmp_path):
+    """After a HITL answer, the agent's continuation goes to a new message.
+
+    The streamed message was opened before the user's reply, so re-editing it
+    would place the answer above that reply.
+    """
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+
+    await app._route_event(Event("t1", TEXT_DELTA, {"delta": "First part", "sessionID": sid}))
+    await app._route_event(
+        Event(
+            "q1",
+            QUESTION_ASKED,
+            {
+                "id": "que_1",
+                "sessionID": sid,
+                "questions": [{"question": "env?", "header": "Env", "options": [{"label": "dev"}]}],
+            },
+        )
+    )
+    await app._route_event(Event("q2", QUESTION_REPLIED, {"requestID": "que_1", "sessionID": sid}))
+    await app._route_event(Event("t2", TEXT_DELTA, {"delta": "Second part", "sessionID": sid}))
+    await app._route_event(
+        Event("e4", SESSION_STATUS, {"sessionID": sid, "status": {"type": "idle"}})
+    )
+
+    texts = [m for m in conn.messages if m["kind"] == "text"]
+    first = next(m for m in texts if m["text"] == "First part")
+    second = next(m for m in texts if m["text"] == "Second part")
+    assert first["id"] != second["id"]
+    # The first message is sealed, not extended with the continuation.
+    assert all("Second part" not in m["text"] for m in texts if m["id"] == first["id"])
+
+
+@pytest.mark.asyncio
+async def test_tool_output_file_is_sent_to_the_user(tmp_path):
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+
+    produced = tmp_path / "segments.csv"
+    produced.write_text("a,b\n1,2\n")
+    await app._route_event(
+        Event(
+            "t1",
+            TOOL_SUCCESS,
+            {"tool": "write", "sessionID": sid, "outputPaths": [str(produced)]},
+        )
+    )
+    await app._route_event(
+        Event("t2", SESSION_STATUS, {"sessionID": sid, "status": {"type": "idle"}})
+    )
+
+    media = [m for m in conn.messages if m["kind"] == "media"]
+    assert media, "the produced file should be delivered to the user"
+    assert media[0]["media"].name == "segments.csv"
+
+
+@pytest.mark.asyncio
+async def test_multi_question_form_card_and_submit(tmp_path):
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+
+    await app._route_event(
+        Event(
+            "q1",
+            QUESTION_ASKED,
+            {
+                "id": "que_1",
+                "sessionID": sid,
+                "questions": [
+                    {
+                        "question": "when?",
+                        "header": "Time",
+                        "options": [{"label": "A"}, {"label": "B"}],
+                    },
+                    {
+                        "question": "more?",
+                        "header": "More",
+                        "multiple": True,
+                        "options": [{"label": "X"}, {"label": "Y"}],
+                    },
+                ],
+            },
+        )
+    )
+    assert conn.cards, "a multi-question form card should be sent (not numbered text)"
+    card = conn.cards[-1]
+    assert len(card.questions) == 2
+
+    await app._on_interaction(
+        IncomingInteraction(
+            conversation=Conversation(channel="fake", kind="direct", id="d1"),
+            message_id="c",
+            sender=Sender(id="u1"),
+            value=card.submit_value,
+            form={"q0": "A", "q1_0": True},
+        )
+    )
+    assert client.question_replies == [(sid, "que_1", [["A"], ["X"]])]
+
+
+@pytest.mark.asyncio
+async def test_written_file_reported_in_structured_output_is_sent(tmp_path):
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+
+    produced = tmp_path / "plan.md"
+    produced.write_text("# Plan\n")
+    await app._route_event(
+        Event(
+            "t1",
+            TOOL_SUCCESS,
+            {
+                "tool": "write",
+                "sessionID": sid,
+                "structured": {
+                    "operation": "write",
+                    "resource": str(produced),
+                    "target": str(produced),
+                },
+            },
+        )
+    )
+    await app._route_event(
+        Event("t2", SESSION_STATUS, {"sessionID": sid, "status": {"type": "idle"}})
+    )
+
+    media = [m for m in conn.messages if m["kind"] == "media"]
+    assert media, "a file named by a write tool should be delivered"
+    assert media[0]["media"].name == "plan.md"

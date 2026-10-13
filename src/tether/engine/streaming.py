@@ -215,6 +215,21 @@ class StreamingController:
             log.warning("streaming_emit_failed", exc_info=True)
 
     # -- lifecycle ---------------------------------------------------------
+    def begin_segment(self) -> None:
+        """Drop accumulated output so the next flush opens a fresh message.
+
+        Used after an interaction (permission/question) is answered: the message
+        opened before the user's reply is already sealed, and the agent's
+        continuation must go into a new message below that reply.
+        """
+        self.text = ""
+        self.reasoning = ""
+        self._tool_line = None
+        self._status = None
+        self._dirty = False
+        self._force = False
+        self._live_disabled = False
+
     async def finalize(self) -> None:
         """Stop the timer and emit the final snapshot."""
         self._closed = True

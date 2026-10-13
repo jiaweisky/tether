@@ -247,10 +247,23 @@ class WeComChannelConfig(BaseModel):
     welcome_text: str | None = None
 
 
+class VoiceTranscriptionConfig(BaseModel):
+    # Optional: transcribe inbound voice (Feishu voice bubbles) to text via the
+    # platform's speech-to-text API so the model can understand them. Off by
+    # default; the platform API is rate-limited, so a failure falls back to the
+    # raw attachment instead of failing the turn.
+    enabled: bool = False
+    engine_type: str = "16k_auto"
+    format: str = "pcm"
+    max_per_min: int = 20
+    cooldown_s: int = 60
+
+
 class FeishuChannelConfig(BaseModel):
     enabled: bool = False
     app_id: str | None = None
     app_secret: str | None = None
+    voice_transcription: VoiceTranscriptionConfig = Field(default_factory=VoiceTranscriptionConfig)
 
 
 class QQChannelConfig(BaseModel):

@@ -15,6 +15,7 @@ from ..config import Config
 from ..models import (
     Button,
     Card,
+    CardQuestion,
     Conversation,
     PendingInteraction,
     Sender,
@@ -59,32 +60,54 @@ def permission_card(perm: PendingPermission) -> Card:
 
 
 def question_card(question: PendingQuestion) -> Card | None:
-    """Build a button card for a single-choice question.
+    """Build a card for a question tool call.
 
-    Returns ``None`` for multi-select questions, which fall back to a numbered
-    text prompt because the platform cannot express the choice as buttons.
+    A lone single-choice question becomes option buttons; anything else (a
+    multi-choice question or several questions in one call) becomes a form the
+    channel renders with dropdowns/checkboxes and one submit.
     """
     if not question.questions:
         return None
     first = question.questions[0]
-    if first.multiple:
-        return None
-    buttons = [
-        Button(
-            text=option.label or f"Option {i + 1}",
-            value=encode_value("question", question.session_id, question.id, answer=[option.label]),
+    if len(question.questions) == 1 and not first.multiple:
+        body = first.question or first.header or "Please choose an option."
+        buttons = [
+            Button(
+                text=option.label or f"Option {i + 1}",
+                value=encode_value(
+                    "question", question.session_id, question.id, answer=[option.label]
+                ),
+            )
+            for i, option in enumerate(first.options)
+        ]
+        buttons.append(
+            Button(
+                text="Cancel",
+                value=encode_value("question", question.session_id, question.id, reject=True),
+                style="danger",
+            )
         )
-        for i, option in enumerate(first.options)
+        return Card(title=first.header or "Question", body=body, buttons=buttons)
+    return _question_form_card(question)
+
+
+def _question_form_card(question: PendingQuestion) -> Card:
+    items = [
+        CardQuestion(
+            header=item.header or item.question,
+            body=item.question or item.header,
+            options=[option.label or f"Option {i + 1}" for i, option in enumerate(item.options)],
+            multiple=item.multiple,
+        )
+        for item in question.questions
     ]
-    buttons.append(
-        Button(
-            text="Cancel",
-            value=encode_value("question", question.session_id, question.id, reject=True),
-            style="danger",
-        )
+    specs = [{"multiple": item.multiple, "options": item.options} for item in items]
+    return Card(
+        title="Questions",
+        body="",
+        questions=items,
+        submit_value=encode_value("question", question.session_id, question.id, specs=specs),
     )
-    body = first.question or first.header or "Please choose an option."
-    return Card(title=first.header or "Question", body=body, buttons=buttons)
 
 
 def question_numbered_text(question: PendingQuestion) -> tuple[str, list[str]]:
