@@ -337,6 +337,9 @@ class Config(BaseModel):
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    # Watch config.yaml and hot-apply a safe subset (group/access/permissions/
+    # commands/identity/sessions/media) without a restart.
+    reload: bool = False
 
     def server_bases(self) -> list[tuple[str, str, str | None]]:
         """(name, base_url, working_directory) tuples for the pool (or single base)."""

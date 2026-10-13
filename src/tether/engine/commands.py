@@ -1,7 +1,8 @@
 """Parse the small set of in-chat commands the bridge handles itself.
 
-The only command is ``/stop``. A command is intercepted locally and never
-forwarded to the agent.
+The commands are ``/stop`` (interrupt the running turn) and ``/new`` (start a
+fresh agent session for this conversation). A command is intercepted locally
+and never forwarded to the agent.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from typing import Literal
 
 @dataclass
 class Command:
-    kind: Literal["stop"]
+    kind: Literal["stop", "new", "whoami"]
     args: list[str]
 
 
@@ -25,6 +26,11 @@ def parse_command(text: str, prefix: str = "/") -> Command | None:
     if not body:
         return None
     parts = body.split()
-    if parts[0].lower() == "stop":
+    name = parts[0].lower()
+    if name == "stop":
         return Command(kind="stop", args=parts[1:])
+    if name == "new":
+        return Command(kind="new", args=parts[1:])
+    if name == "whoami":
+        return Command(kind="whoami", args=parts[1:])
     return None

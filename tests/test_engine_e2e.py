@@ -718,3 +718,55 @@ async def test_written_file_reported_in_structured_output_is_sent(tmp_path):
     media = [m for m in conn.messages if m["kind"] == "media"]
     assert media, "a file named by a write tool should be delivered"
     assert media[0]["media"].name == "plan.md"
+
+
+@pytest.mark.asyncio
+async def test_new_command_restarts_the_session_for_an_admin(tmp_path):
+    config = Config.model_validate({"group": {"admins": ["u1"]}})
+    app, conn, client = await make_app(tmp_path, config=config)
+    await app._on_message(inbound("hi"))
+    old = client.prompts[0]["sid"]
+
+    await app._on_message(inbound("/new", message_id="m2"))
+
+    assert client.deleted == [old]
+    route = await app.router.get(Conversation(channel="fake", kind="direct", id="d1"))
+    assert route is not None and route.session_id != old
+
+
+@pytest.mark.asyncio
+async def test_new_command_is_rejected_without_admin(tmp_path):
+    app, conn, client = await make_app(tmp_path)  # no admins configured
+    await app._on_message(inbound("hi"))
+    old = client.prompts[0]["sid"]
+
+    await app._on_message(inbound("/new", message_id="m2"))
+
+    assert client.deleted == []
+    route = await app.router.get(Conversation(channel="fake", kind="direct", id="d1"))
+    assert route is not None and route.session_id == old
+    assert "admin" in conn.last_text().lower()
+
+
+@pytest.mark.asyncio
+async def test_whoami_command_replies_with_the_sender_id(tmp_path):
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("/whoami"))
+    assert "u1" in conn.last_text()
+    assert not client.prompts  # the command is not forwarded to the agent
+
+
+@pytest.mark.asyncio
+async def test_config_hot_reload_applies_admins(tmp_path):
+    from tether.config import load_config
+
+    path = tmp_path / "c.yaml"
+    path.write_text("group:\n  admins: []\n")
+    config = load_config(str(path))
+    app, conn, client = await make_app(tmp_path, config=config)
+    app._config_path = str(path)
+
+    path.write_text('group:\n  admins: ["u9"]\n')
+    app._reload_config()
+
+    assert app.config.group.admins == ["u9"]

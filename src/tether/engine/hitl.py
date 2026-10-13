@@ -164,8 +164,10 @@ def command_authorized(
     """Whether ``sender`` may run the stop command against the current turn."""
     if not conv.is_group:
         return True
+    if sender.id in config.group.admins:  # admins are a superset for commands
+        return True
     if config.group.command_scope == "admins":
-        return sender.id in config.group.admins
+        return False
     if active_turn_sender is None:
         return True
     return sender.id == active_turn_sender

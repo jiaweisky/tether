@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import os
 import time
 from collections.abc import Awaitable
 from typing import Any, Literal
@@ -27,7 +28,7 @@ from .agent.events import (
     SESSION_STATUS,
     Event,
 )
-from .config import Config, validate_startup
+from .config import Config, load_config, validate_startup
 from .connector import IMConnector, build_connectors
 from .engine import hitl
 from .engine.media_egress import MediaEgress
@@ -74,8 +75,11 @@ class TetherApp:
         db_path: str = "tether.sqlite3",
         connectors: list[IMConnector] | None = None,
         client_factory: ClientFactory | None = None,
+        config_path: str | None = None,
     ) -> None:
         self.config = config
+        self._config_path = config_path
+        self._config_mtime = 0.0
         self.store = RouteStore(db_path)
         self._connectors_override = connectors
         self.provider = build_provider(config)
@@ -96,6 +100,7 @@ class TetherApp:
         self._janitor_task: asyncio.Task[None] | None = None
         self._watchdog_task: asyncio.Task[None] | None = None
         self._metrics_task: asyncio.Task[None] | None = None
+        self._config_task: asyncio.Task[None] | None = None
         self._metrics_server: asyncio.AbstractServer | None = None
         self.metrics_port: int | None = None
         self._running = False
@@ -128,6 +133,9 @@ class TetherApp:
             await self._ensure_sse(base_url)
         self._janitor_task = asyncio.ensure_future(self._janitor())
         self._watchdog_task = asyncio.ensure_future(self._watchdog_loop())
+        if self.config.reload and self._config_path:
+            self._config_mtime = _mtime(self._config_path)
+            self._config_task = asyncio.ensure_future(self._watch_config())
         await self._start_metrics()
         log.info("tether_started", connectors=list(self.connectors))
 
@@ -146,6 +154,8 @@ class TetherApp:
             self._janitor_task.cancel()
         if self._watchdog_task is not None:
             self._watchdog_task.cancel()
+        if self._config_task is not None:
+            self._config_task.cancel()
         with contextlib.suppress(Exception):
             await self._stop_metrics()
         for task in self._sse_tasks.values():
@@ -157,6 +167,9 @@ class TetherApp:
         if self._watchdog_task is not None:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._watchdog_task
+        if self._config_task is not None:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._config_task
         log.info("stop_streams_closed", elapsed_ms=_ms_since(started))
         for engine in list(self._turns.values()):
             # Default: just stop streaming and leave the turn on agentd so a
@@ -252,6 +265,16 @@ class TetherApp:
         command = _command(msg.text, self.config.commands.prefix)
         if command == "stop":
             await self._handle_stop(msg, connector)
+            return
+        if command == "new":
+            await self._handle_new(msg, connector)
+            return
+        if command == "whoami":
+            await self._notice(
+                connector,
+                msg.conversation,
+                f"🆔 your id: `{msg.sender.id}`\nconversation: `{msg.conversation.key}`",
+            )
             return
         try:
             route = await self.router.get_or_create(msg.conversation, title=_title(msg))
@@ -491,6 +514,57 @@ class TetherApp:
         if engine is not None:
             await engine.cancel()
         await self._notice(connector, route.conversation, "🛑 Stopped.")
+
+    async def _handle_new(self, msg: InboundMessage, connector: IMConnector) -> None:
+        """`/new`: start a fresh agent session for this conversation.
+
+        Only configured admins may run it; with no admins configured nobody can,
+        so the command has no effect. The project/view is left untouched.
+        """
+        route = await self.router.get(msg.conversation)
+        if route is None:
+            return
+        if msg.sender.id not in self.config.group.admins:
+            await self._notice(
+                connector, route.conversation, "🔒 Only admins may start a new conversation."
+            )
+            return
+        old = route.session_id
+        engine = self._turns.get(old)
+        if engine is not None:
+            await engine.cancel()
+        self._turns.pop(old, None)
+        self._turn_queue.pop(old, None)
+        try:
+            await self.router.client_for(route).delete_session(old)
+        except AgentError as exc:
+            log.warning("session_delete_failed", session=old, error=exc.code)
+        await self.router.recreate_session(route)
+        await self._notice(connector, route.conversation, "🆕 Started a new conversation.")
+
+    # -- config hot-reload -------------------------------------------------
+    async def _watch_config(self) -> None:
+        """Apply runtime-safe config changes when ``config.yaml`` changes."""
+        path = self._config_path
+        assert path is not None
+        while self._running:
+            await asyncio.sleep(2.0)
+            mtime = _mtime(path)
+            if mtime > self._config_mtime:
+                self._config_mtime = mtime
+                self._reload_config()
+
+    def _reload_config(self) -> None:
+        path = self._config_path
+        assert path is not None
+        try:
+            updated = load_config(path)
+        except Exception:  # noqa: BLE001 - keep running on a broken file
+            log.warning("config_reload_failed", exc_info=True)
+            return
+        for name in _RUNTIME_SECTIONS:
+            setattr(self.config, name, getattr(updated, name))
+        log.info("config_reloaded")
 
     async def _maybe_answer_pending(
         self, route: Route, msg: InboundMessage, connector: IMConnector
@@ -938,6 +1012,26 @@ def _form_answers(specs: list[dict[str, Any]], form: dict[str, Any]) -> list[lis
             chosen = form.get(f"q{q_index}")
             answers.append([str(chosen)] if chosen else [])
     return answers
+
+
+# Config sections safe to hot-reload (read at call time). channels/credentials/
+# server/agent are not, so those still require a restart.
+_RUNTIME_SECTIONS = (
+    "group",
+    "access",
+    "permissions",
+    "commands",
+    "identity",
+    "sessions",
+    "media",
+)
+
+
+def _mtime(path: str) -> float:
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
 
 
 def _command(text: str, prefix: str) -> str | None:

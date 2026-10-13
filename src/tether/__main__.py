@@ -30,7 +30,7 @@ async def _run(config_path: str, db_path: str) -> None:
     config = load_config(config_path)
     configure_logging(config.logging.level, config.logging.json_logs)
     log = get_logger("tether")
-    app = TetherApp(config, db_path=db_path)
+    app = TetherApp(config, db_path=db_path, config_path=config_path)
 
     stop_event = asyncio.Event()
     presses = 0

@@ -79,3 +79,26 @@ def test_command_scope_admins():
     conv = Conversation(channel="fake", kind="group", id="g1")
     assert hitl.command_authorized(Sender(id="a1"), conv, config, active_turn_sender="bob")
     assert not hitl.command_authorized(Sender(id="bob"), conv, config, active_turn_sender="bob")
+
+
+def test_parse_new_command():
+    cmd = parse_command("/new")
+    assert cmd is not None and cmd.kind == "new"
+
+
+def test_parse_whoami_command():
+    cmd = parse_command("/whoami")
+    assert cmd is not None and cmd.kind == "whoami"
+
+
+def test_admins_are_a_superset_for_commands():
+    config = Config.model_validate({"group": {"admins": ["admin1"], "command_scope": "initiator"}})
+    conv = Conversation(channel="x", kind="group", id="g")
+    # An admin may act even when they are not the turn's initiator.
+    assert hitl.command_authorized(Sender(id="admin1"), conv, config, active_turn_sender="other")
+    # The initiator (scope=initiator) may act.
+    assert hitl.command_authorized(Sender(id="other"), conv, config, active_turn_sender="other")
+    # A stranger may not.
+    assert not hitl.command_authorized(
+        Sender(id="stranger"), conv, config, active_turn_sender="other"
+    )

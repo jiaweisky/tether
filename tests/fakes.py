@@ -23,6 +23,7 @@ class FakeAgentClient:
         self.sessions: dict[str, SessionInfo] = {}
         self.prompts: list[dict[str, Any]] = []
         self.interrupted: list[str] = []
+        self.deleted: list[str] = []
         self.permission_replies: list[tuple[str, str, str]] = []
         self.question_replies: list[tuple[str, str, list[list[str]]]] = []
         self.rejected_questions: list[tuple[str, str]] = []
@@ -71,7 +72,8 @@ class FakeAgentClient:
     async def set_agent(self, sid, agent): ...
     async def set_model(self, sid, model_ref): ...
     async def set_title(self, sid, title): ...
-    async def delete_session(self, sid): ...
+    async def delete_session(self, sid):
+        self.deleted.append(sid)
 
     # execution
     async def prompt(self, sid, *, prompt, files=None, id=None, delivery="queue"):
