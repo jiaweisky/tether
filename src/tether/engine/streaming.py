@@ -15,6 +15,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
+from ..metrics import metrics
 from ..util.logging import get_logger
 
 log = get_logger("tether.streaming")
@@ -206,6 +207,7 @@ class StreamingController:
             self._last = self._clock.now()
             self._interval = max(self._min_interval, self._interval / self._backoff)
         except RateLimited:
+            metrics.inc("rate_limit_hits")
             self._interval = min(self._max_interval, self._interval * self._backoff)
             log.warning("streaming_rate_limited", interval=self._interval)
         except Exception:  # noqa: BLE001 - stop live updates; the final flush still sends

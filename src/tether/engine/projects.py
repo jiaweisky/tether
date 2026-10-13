@@ -28,6 +28,7 @@ from typing import Any, Protocol
 import httpx
 
 from ..config import Config
+from ..metrics import metrics
 from ..models import Conversation
 from ..util.logging import get_logger
 
@@ -182,12 +183,14 @@ class AgentdControlProvider:
                 f"{self._base}/admin/projects", json=request, headers=self._headers
             )
             if resp.status_code == 201:
+                metrics.inc("isolated_leases_created")
                 return dict(resp.json().get("data") or {})
             detail = resp.text.strip()
         # A same-named project may survive an agentd crash; drop it and retry once.
         if retry and "already exists" in detail:
             await self._delete(request["name"])
             return await self._create(request, retry=False)
+        metrics.inc("isolated_lease_failures")
         raise RuntimeError(f"control create failed ({resp.status_code}): {detail}")
 
     async def _delete(self, project_id: str) -> None:

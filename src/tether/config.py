@@ -271,6 +271,14 @@ class ChannelsConfig(BaseModel):
     wechat: WeChatChannelConfig = Field(default_factory=WeChatChannelConfig)
 
 
+class MetricsConfig(BaseModel):
+    # Optional HTTP endpoint exposing GET /healthz and GET /metrics
+    # (e.g. "127.0.0.1:9091"); unset = no listener.
+    listen: str | None = None
+    # Also log a structured "metrics" event every N seconds (0 disables).
+    log_interval_s: int = 60
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
     json_logs: bool = Field(default=True, alias="json")
@@ -293,6 +301,7 @@ class Config(BaseModel):
     commands: CommandsConfig = Field(default_factory=CommandsConfig)
     access: AccessConfig = Field(default_factory=AccessConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+    metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
     def server_bases(self) -> list[tuple[str, str, str | None]]:

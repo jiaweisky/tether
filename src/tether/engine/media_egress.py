@@ -18,6 +18,7 @@ import httpx
 
 from ..config import Config
 from ..connector import IMConnector
+from ..metrics import metrics
 from ..models import (
     Conversation,
     MediaSegment,
@@ -157,7 +158,9 @@ class MediaEgress:
             plan.segments.insert(0, TextSegment(text=media.caption))
         try:
             await self.connector.send(conv, plan)
+            metrics.inc("media_bytes_out", len(data))
         except Exception as exc:  # noqa: BLE001 - fall back to a link, never crash the turn
+            metrics.inc("media_send_failures")
             log.warning("media_send_failed", kind=kind, error=str(exc))
             await self._send_link(conv, media, reason="send failed")
 

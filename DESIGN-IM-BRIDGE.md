@@ -88,6 +88,7 @@
 | 2026-10-13 | **Simplified project isolation to one axis** (§2.8, D20, §9, §14 M6): `projects.mode: shared | isolated` replaces the capability-driven `auto`/`on_conflict`/switch guards and the `provider` enum. `shared` reuses the configured base; `isolated` leases a per-conversation view via agentd's control API (`source_directory` + `control_url`, impl `none/copy/worktree/overlay`); an isolated lease is re-acquired (fresh view + session) on first use after a restart. |
 | 2026-10-13 | §4.3/§2.8/§9: isolated instances run on their own base, so the bridge now **subscribes to each lease's `/api/event`** (started before the first prompt, stopped on release; HITL poll covers them), and passes a tool policy via the new `projects.inbound_permissions` (agentd `ProjectRequest.inboundPermissions`) since agentd's default is read-only. Verified all four implementations (`none`/`copy`/`worktree`/`overlay`) and an end-to-end WeCom turn (view edited, source untouched). |
 | 2026-10-13 | §2.8/§9: added `projects.sandbox` (agentd `ProjectRequest.sandbox`), so a leased isolated instance can also be wrapped in the OS command sandbox (`seatbelt`/`bwrap`) — isolation (view) and sandbox (command restrictions) are orthogonal, and both are now configurable per isolated instance. |
+| 2026-10-13 | §11 implemented: process-wide counters/gauges, an optional HTTP endpoint (`metrics.listen` → `GET /healthz`, `GET /metrics`) and a periodic structured `metrics` log (`metrics.log_interval_s`). §9 config updated. |
 
 ---
 
@@ -1845,6 +1846,11 @@ channels:
     enabled: false
     cred_path: ~/.wechatbot/credentials.json
 
+# Health/metrics (§11)
+metrics:
+  listen: null                        # optional HTTP endpoint (e.g. 127.0.0.1:9091): GET /healthz, GET /metrics
+  log_interval_s: 60                  # periodic structured "metrics" log; 0 disables
+
 logging:
   level: INFO
   json: true
@@ -1940,6 +1946,8 @@ inputModalities: [text, image]       # the endpoint model's actual capabilities
 - Per-route debug view: recent event sequence, last flushed text, pending interactions—for troubleshooting.
 - Isolation-related: active project lease count, isolated-view (worktree/overlay/container) create/fail count, project switch count.
 - Key alerts: agentd unreachable, prolonged SSE disconnection, Connector authentication failure, rising HITL timeout rate.
+
+**Implemented**: a process-wide counter/gauge registry (`tether.metrics`) incremented by the app, the engine and the connectors; an **optional HTTP endpoint** (`metrics.listen`) serving `GET /healthz` (JSON: `status`, `uptime_s`, `connectors`, per-base `agentd` reachability, `active_turns`, `leases`) and `GET /metrics` (Prometheus text); and a **periodic `metrics` structured log** (`metrics.log_interval_s`). Counters: `inbound_messages`, `prompts`, `turns`, `sse_reconnects`, `hitl_asks`, `hitl_timeouts`, `isolated_leases_created`/`isolated_lease_failures`, `rate_limit_hits`, `media_bytes_out`, `media_send_failures`; gauges: `uptime_s`, `active_turns`, `leases`, `queue_depth`. Alerts remain structured log events (e.g. `sse_disconnected`, `route_unavailable`, `stale_turn_recovered`).
 
 ---
 

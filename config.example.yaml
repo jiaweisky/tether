@@ -137,6 +137,11 @@ channels:
     enabled: false
     cred_path: ~/.wechatbot/credentials.json
 
+# Health/metrics: an optional HTTP endpoint plus a periodic structured log line.
+metrics:
+  listen: null                # e.g. 127.0.0.1:9091 → GET /healthz and GET /metrics; null = no listener
+  log_interval_s: 60          # also log a "metrics" event every N seconds (0 disables)
+
 logging:
   level: INFO
   json: true

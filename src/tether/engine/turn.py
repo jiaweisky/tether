@@ -43,6 +43,7 @@ from ..agent.events import (
 from ..agent.usage import UsageTokens, parse_usage
 from ..config import Config
 from ..connector import IMConnector
+from ..metrics import metrics
 from ..models import (
     Card,
     InboundMessage,
@@ -302,6 +303,7 @@ class TurnEngine:
 
     async def _on_permission(self, data: dict[str, Any]) -> None:
         perm = PendingPermission.from_json(data)
+        metrics.inc("hitl_asks")
         action = self.config.permissions.action_for(perm.action)
         if action in ("once", "always", "reject"):
             await self._reply_permission(perm, action)
@@ -320,6 +322,7 @@ class TurnEngine:
 
     async def _on_question(self, data: dict[str, Any]) -> None:
         question = PendingQuestion.from_json(data)
+        metrics.inc("hitl_asks")
         text, options = hitl.question_numbered_text(question)
         self._register_pending("question", question.id, options=options)
         card = hitl.question_card(question)
@@ -390,6 +393,7 @@ class TurnEngine:
         self._timers.pop(request_id, None)
         if self.route.pending_interactions.pop(request_id, None) is None:
             return
+        metrics.inc("hitl_timeouts")
         if kind == "permission":
             fallback = self.config.permissions.fallback
             try:

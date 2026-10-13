@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import json
 import time
 from collections.abc import Awaitable
 from typing import Any, Literal
@@ -35,6 +36,7 @@ from .engine.projects import build_provider
 from .engine.prompt import PromptComposer
 from .engine.router import ClientFactory, Router
 from .engine.turn import TurnEngine
+from .metrics import metrics
 from .models import (
     ConnectorEvent,
     Conversation,
@@ -89,11 +91,14 @@ class TetherApp:
         self._clients: dict[str, HttpAgentClient] = {}
         self._janitor_task: asyncio.Task[None] | None = None
         self._watchdog_task: asyncio.Task[None] | None = None
+        self._metrics_task: asyncio.Task[None] | None = None
+        self._metrics_server: asyncio.AbstractServer | None = None
+        self.metrics_port: int | None = None
         self._running = False
         self._stopped = False
         self._accepting = True
         self._stop_event: asyncio.Event | None = None
-        self.metrics: dict[str, int] = {}
+        self.metrics: dict[str, int] = metrics.counters
 
     # -- lifecycle ---------------------------------------------------------
     async def start(self) -> None:
@@ -119,6 +124,7 @@ class TetherApp:
             await self._ensure_sse(base_url)
         self._janitor_task = asyncio.ensure_future(self._janitor())
         self._watchdog_task = asyncio.ensure_future(self._watchdog_loop())
+        await self._start_metrics()
         log.info("tether_started", connectors=list(self.connectors))
 
     async def stop(self) -> None:
@@ -136,6 +142,8 @@ class TetherApp:
             self._janitor_task.cancel()
         if self._watchdog_task is not None:
             self._watchdog_task.cancel()
+        with contextlib.suppress(Exception):
+            await self._stop_metrics()
         for task in self._sse_tasks.values():
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
@@ -232,6 +240,7 @@ class TetherApp:
         if self.dedup.is_duplicate(key):
             log.info("duplicate_message", key=key)
             return
+        metrics.inc("inbound_messages")
         connector = self.connectors.get(msg.channel)
         if connector is None:
             return
@@ -532,6 +541,7 @@ class TetherApp:
                 log.warning("sse_disconnected", base=base_url, error=str(exc))
             if not self._running:
                 break
+            metrics.inc("sse_reconnects")
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30.0)
             await self._reconcile(base_url, client)
@@ -761,7 +771,93 @@ class TetherApp:
             await connector.send(conv, OutboundPlan(segments=[TextSegment(text=text)]))
 
     def _bump(self, name: str, amount: int = 1) -> None:
-        self.metrics[name] = self.metrics.get(name, 0) + amount
+        metrics.inc(name, amount)
+
+    # -- observability -----------------------------------------------------
+    async def _start_metrics(self) -> None:
+        cfg = self.config.metrics
+        if cfg.log_interval_s > 0:
+            self._metrics_task = asyncio.ensure_future(self._metrics_log_loop())
+        if cfg.listen:
+            host, _, port = cfg.listen.rpartition(":")
+            server = await asyncio.start_server(
+                self._handle_http, host or "127.0.0.1", int(port or "0")
+            )
+            self._metrics_server = server
+            self.metrics_port = server.sockets[0].getsockname()[1]
+            log.info("metrics_listening", address=cfg.listen)
+
+    async def _stop_metrics(self) -> None:
+        if self._metrics_task is not None:
+            self._metrics_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._metrics_task
+        if self._metrics_server is not None:
+            self._metrics_server.close()
+            with contextlib.suppress(Exception):
+                await self._metrics_server.wait_closed()
+
+    def _refresh_gauges(self) -> None:
+        metrics.set("active_turns", float(len(self._turns)))
+        metrics.set("leases", float(self.router.leases.count))
+        metrics.set("queue_depth", float(sum(e.route.queue_depth for e in self._turns.values())))
+
+    async def _metrics_log_loop(self) -> None:
+        while self._running:
+            await asyncio.sleep(self.config.metrics.log_interval_s)
+            self._refresh_gauges()
+            log.info("metrics", **metrics.snapshot())
+
+    async def _handle_http(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        try:
+            request = (await asyncio.wait_for(reader.readline(), timeout=5)).decode("latin-1")
+            path = request.split(" ")[1] if len(request.split(" ")) >= 2 else "/"
+            while True:  # drain headers
+                header = await asyncio.wait_for(reader.readline(), timeout=5)
+                if header in (b"\r\n", b"\n", b""):
+                    break
+            self._refresh_gauges()
+            if path == "/healthz":
+                body = await self._health_payload()
+                ok = body["status"] == "ok"
+                status = "200 OK" if ok else "503 Service Unavailable"
+                content, ctype = json.dumps(body), "application/json"
+            elif path == "/metrics":
+                status, content, ctype = "200 OK", metrics.prometheus(), "text/plain; version=0.0.4"
+            else:
+                status, content, ctype = "404 Not Found", "not found", "text/plain"
+            payload = content.encode()
+            writer.write(
+                f"HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\n"
+                f"Content-Length: {len(payload)}\r\nConnection: close\r\n\r\n".encode()
+                + payload
+            )
+            await writer.drain()
+        except Exception:  # noqa: BLE001 - a probe must never crash the bridge
+            log.debug("metrics_probe_failed", exc_info=True)
+        finally:
+            writer.close()
+            with contextlib.suppress(Exception):
+                await writer.wait_closed()
+
+    async def _health_payload(self) -> dict[str, Any]:
+        agentd = {}
+        for base in self._base_urls():
+            try:
+                agentd[base] = await self.router.client_for_base(base).health()
+            except Exception:  # noqa: BLE001
+                agentd[base] = False
+        ok = bool(self.connectors) and all(agentd.values())
+        return {
+            "status": "ok" if ok else "degraded",
+            "uptime_s": round(metrics.uptime_s(), 1),
+            "connectors": sorted(self.connectors),
+            "agentd": agentd,
+            "active_turns": len(self._turns),
+            "leases": self.router.leases.count,
+        }
 
 
 def _ms_since(started: float) -> int:
