@@ -6,6 +6,7 @@ server:
   token: ${AGENTSERVE_TOKEN:-}   # bearer token; ${VAR} / ${VAR:-default} are expanded from env
   request_timeout_s: 30
   sse_reconnect_ms: 1000
+  working_directory: null     # the base's working dir (for the media spool path); pool entries carry their own
   pool: []                    # [{name, base_url, token, working_directory, default_agent, default_model}]
 
 # Optional overrides only: the agent and model are discovered from agentd
@@ -14,30 +15,26 @@ server:
 agent:
   default_agent: null         # override; unset = first agent exposed by GET /api/agent
   default_model: null         # override; unset = agentd defaultModel
-  writable: {}                # optional override of the tool-set read/write detection
 
 model:
   context_limit: null         # optional override; by default the window comes from GET /api/model (contextLimit)
 
+# Project sharing: either everyone shares one project, or each conversation
+# leases its own isolated view of the source project.
 projects:
-  isolation: auto             # auto | shared | per_conversation
-  provider: pool              # shared | pool | worktree | overlay | container | remote
-  on_conflict: isolate        # isolate | reject
-  base_dir: /var/lib/tether/workspaces
-  ttl_s: 3600
+  mode: shared                # shared | isolated
+  isolation: worktree         # mode=isolated only: none | copy | worktree | overlay
+  base_dir: /var/lib/tether/workspaces   # mode=isolated: views + per-instance roots
+  ttl_s: 3600                 # idle lease reclamation (mode=isolated)
   max_leases: 32
-  git_base_ref: origin/HEAD
-  supervisor_command: null
+  git_base_ref: HEAD          # worktree starting point
   cow:
-    mode: auto                # auto | overlayfs | reflink | clonefile
+    mode: auto                # auto | reflink | clonefile (overlay)
     base_readonly: true
-  container:
-    runtime: docker           # docker | podman | k8s
-    image: ghcr.io/jiaweisky/agentd:latest
-    network: none
-    cpus: "2"
-    memory: 2g
-    read_only_root: true
+  # mode=isolated (agentd control API)
+  control_url: null           # e.g. http://127.0.0.1:9090
+  control_token: null         # bearer (optional on loopback)
+  source_directory: null      # the project to derive views from (absolute)
 
 sessions:
   idle_reset_s: 0

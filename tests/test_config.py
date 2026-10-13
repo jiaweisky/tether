@@ -26,16 +26,14 @@ def test_context_limit_positive():
         Config.model_validate({"model": {"context_limit": 0}})
 
 
-def test_shared_isolation_with_writable_agent_fails_fast():
-    config = Config.model_validate({"projects": {"isolation": "shared"}})
+def test_isolated_mode_requires_control_and_source():
+    config = Config.model_validate({"projects": {"mode": "isolated"}})
     with pytest.raises(ValueError):
-        validate_startup(config, writable_agents={"build"})
-
-
-def test_unknown_agent_in_writable_fails():
-    config = Config.model_validate({"agent": {"writable": {"ghost": True}}})
-    with pytest.raises(ValueError):
-        validate_startup(config, known_agents={"build"})
+        validate_startup(config)
+    ok = Config.model_validate(
+        {"projects": {"mode": "isolated", "control_url": "http://x", "source_directory": "/src"}}
+    )
+    validate_startup(ok)  # no raise
 
 
 def test_load_config_from_yaml(tmp_path):

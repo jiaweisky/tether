@@ -213,7 +213,16 @@ class TetherApp:
         if command == "stop":
             await self._handle_stop(msg, connector)
             return
-        route = await self.router.get_or_create(msg.conversation, title=_title(msg))
+        try:
+            route = await self.router.get_or_create(msg.conversation, title=_title(msg))
+        except Exception as exc:  # noqa: BLE001 - e.g. an isolated lease could not be allocated
+            log.warning("route_unavailable", conversation=msg.conversation.key, error=str(exc))
+            await self._notice(
+                connector,
+                msg.conversation,
+                "⚠️ Could not allocate a project for this message; please retry.",
+            )
+            return
         if await self._maybe_answer_pending(route, msg, connector):
             return
         await self._start_turn(route, msg, connector)
@@ -315,7 +324,7 @@ class TetherApp:
             self.config,
             connector,
             self.router.client_for(route),
-            working_dir=_working_dir(self.config, route),
+            working_dir=self.router.working_directory(route),
         )
         model_inputs = await self._model_inputs(route)
         result = await ingest.ingest(route.session_id, msg.attachments, model_inputs=model_inputs)
@@ -800,10 +809,3 @@ def tool_media(messages: list[dict]) -> list[RichMedia]:
 def _title(msg: InboundMessage) -> str | None:
     name = msg.conversation.name
     return f"{msg.conversation.kind}: {name}" if name else None
-
-
-def _working_dir(config: Config, route: Route) -> str | None:
-    for entry in config.server.pool:
-        if entry.base_url.rstrip("/") == route.server_base.rstrip("/"):
-            return entry.working_directory
-    return None

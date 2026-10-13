@@ -19,9 +19,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 # ``$$`` (a literal ``$``) or ``${VAR}`` / ``${VAR:-default}``.
 _ENV_REF = re.compile(r"\$\$|\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
-Isolation = Literal["auto", "shared", "per_conversation"]
-ProviderName = Literal["shared", "pool", "worktree", "overlay", "container", "remote"]
-OnConflict = Literal["isolate", "reject"]
+Isolation = Literal["shared", "isolated"]
+IsolationImpl = Literal["none", "copy", "worktree", "overlay"]
 BusyDelivery = Literal["queue", "steer"]
 CrossUserDelivery = Literal["queue", "steer_same_user"]
 HitlScope = Literal["initiator", "participants", "admins"]
@@ -30,8 +29,7 @@ IdentityInject = Literal["once", "always", "on_change"]
 IdentitySource = Literal["im", "agent", "config"]
 StreamingMode = Literal["auto", "native", "edit", "chunk", "final"]
 ReasoningStyle = Literal["collapsible", "separate", "inline"]
-CowMode = Literal["auto", "overlayfs", "reflink", "clonefile"]
-ContainerRuntime = Literal["docker", "podman", "k8s"]
+CowMode = Literal["auto", "reflink", "clonefile"]
 PermissionAction = Literal["once", "always", "reject", "ask"]
 
 
@@ -49,6 +47,9 @@ class ServerConfig(BaseModel):
     token: str | None = None
     request_timeout_s: float = 30.0
     sse_reconnect_ms: int = 1000
+    # The single base's working directory, when it is known (used for the media
+    # spool path); pool entries carry their own.
+    working_directory: str | None = None
     pool: list[ServerPoolEntry] = Field(default_factory=list)
 
 
@@ -58,9 +59,6 @@ class AgentConfig(BaseModel):
     # default), so the bridge does not restate agentd's configuration.
     default_agent: str | None = None
     default_model: str | None = None
-    # Optional override of the read/write determination (auto-detected from the
-    # agent's tool set); governs per-conversation project isolation.
-    writable: dict[str, bool] = Field(default_factory=dict)
 
 
 class ModelConfig(BaseModel):
@@ -82,26 +80,23 @@ class CowConfig(BaseModel):
     base_readonly: bool = True
 
 
-class ContainerConfig(BaseModel):
-    runtime: ContainerRuntime = "docker"
-    image: str = "ghcr.io/jiaweisky/agentd:latest"
-    network: str = "none"
-    cpus: str = "2"
-    memory: str = "2g"
-    read_only_root: bool = True
-
-
 class ProjectsConfig(BaseModel):
-    isolation: Isolation = "auto"
-    provider: ProviderName = "pool"
-    on_conflict: OnConflict = "isolate"
+    # Either everyone shares one project, or each conversation leases its own
+    # view of the source project.
+    mode: Isolation = "shared"
+    # Isolation implementation, used when mode=isolated (agentd's control API).
+    isolation: IsolationImpl = "worktree"
+    # Parent directory for created views and per-instance state roots.
     base_dir: str = "/var/lib/tether/workspaces"
     ttl_s: int = 3600
     max_leases: int = 32
-    git_base_ref: str = "origin/HEAD"
-    supervisor_command: str | None = None
+    # The commit-ish a worktree view starts from.
+    git_base_ref: str = "HEAD"
     cow: CowConfig = Field(default_factory=CowConfig)
-    container: ContainerConfig = Field(default_factory=ContainerConfig)
+    # mode=isolated: agentd's control API and the source project to derive views from.
+    control_url: str | None = None
+    control_token: str | None = None
+    source_directory: str | None = None
 
 
 class SessionsConfig(BaseModel):
@@ -295,9 +290,6 @@ class Config(BaseModel):
                 return entry.token
         return self.server.token
 
-    def writable_override(self, agent: str) -> bool | None:
-        return self.agent.writable.get(agent)
-
 
 def _expand_env(value: Any) -> Any:
     """Recursively resolve ``${VAR}`` references in YAML string values."""
@@ -334,22 +326,14 @@ def load_config(path: str | Path | None) -> Config:
     return Config.model_validate(_expand_env(raw))
 
 
-def validate_startup(
-    config: Config, *, known_agents: set[str] | None = None, writable_agents: set[str] | None = None
-) -> None:
-    """Reject configurations that are unsafe or unusable at startup.
-
-    ``known_agents`` and ``writable_agents`` are optional because they require
-    querying the agent service; supply them once it is reachable.
-    """
-    if config.projects.isolation == "shared" and writable_agents:
+def validate_startup(config: Config) -> None:
+    """Reject configurations that are unsafe or unusable at startup."""
+    if config.projects.mode == "isolated" and not (
+        config.projects.control_url and config.projects.source_directory
+    ):
         raise ValueError(
-            f"projects.isolation=shared is unsafe with writable agents: {sorted(writable_agents)}"
+            "projects.mode=isolated requires projects.control_url and projects.source_directory"
         )
-    if known_agents is not None:
-        unknown = set(config.agent.writable) - known_agents
-        if unknown:
-            raise ValueError(f"agent.writable lists unknown agents: {sorted(unknown)}")
     if config.channels.wecom.enabled and not (
         config.identity.display_name and config.identity.description
     ):

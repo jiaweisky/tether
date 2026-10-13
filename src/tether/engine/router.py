@@ -22,9 +22,6 @@ from .projects import LeaseManager, ProjectProvider
 
 log = get_logger("tether.router")
 
-# Tools whose presence marks an agent as able to modify the workspace.
-MUTATION_TOOLS = frozenset({"write", "edit", "apply_patch", "bash", "task"})
-
 ClientFactory = Callable[[str, str | None], HttpAgentClient]
 
 
@@ -49,7 +46,6 @@ class Router:
         self.leases = LeaseManager(provider, config.projects.ttl_s)
         self._client_factory = client_factory or _default_client_factory
         self._clients: dict[str, HttpAgentClient] = {}
-        self._writable_cache: dict[tuple[str, str], bool] = {}
         self._agent_cache: dict[str, str] = {}
         self._models_cache: dict[str, dict[str, Any]] = {}
         # Session ids validated (or created) in this process, so the first-use
@@ -121,6 +117,20 @@ class Router:
         """Best-effort discovery so the first message does not pay for it."""
         await self.resolve_agent(base_url)
 
+    def working_directory(self, route: Route) -> str | None:
+        """The working directory of a route's project instance, when known.
+
+        Isolated projects return the view path from the control API; a static
+        pool entry carries it in configuration.
+        """
+        lease = self.leases.get(route.key)
+        if lease is not None and lease.working_directory:
+            return lease.working_directory
+        for entry in self.config.server.pool:
+            if entry.base_url.rstrip("/") == route.server_base.rstrip("/"):
+                return entry.working_directory
+        return self.config.server.working_directory
+
     # -- clients -----------------------------------------------------------
     def client_for_base(self, base_url: str) -> HttpAgentClient:
         base = base_url.rstrip("/")
@@ -139,29 +149,6 @@ class Router:
         for client in self._clients.values():
             await client.aclose()
         self._clients.clear()
-
-    # -- read/write determination ------------------------------------------
-    async def is_writable(self, base_url: str, agent: str) -> bool:
-        """Decide whether an agent can modify the workspace.
-
-        An explicit config override wins; otherwise the agent's tool list is
-        inspected, and a failure to inspect is treated conservatively as
-        writable so the agent is isolated.
-        """
-        override = self.config.writable_override(agent)
-        if override is not None:
-            return override
-        key = (base_url.rstrip("/"), agent)
-        if key in self._writable_cache:
-            return self._writable_cache[key]
-        try:
-            tools = await self.client_for_base(base_url).agent_tools(agent)
-            writable = bool({tool.name for tool in tools} & MUTATION_TOOLS)
-        except Exception as exc:  # noqa: BLE001 - unknown is treated as writable
-            log.warning("writable_determination_failed", agent=agent, error=str(exc))
-            writable = True
-        self._writable_cache[key] = writable
-        return writable
 
     # -- routing -----------------------------------------------------------
     async def get_by_session(self, session_id: str) -> Route | None:
@@ -196,6 +183,7 @@ class Router:
     ) -> Route:
         existing = await self.get(conv)
         if existing is not None:
+            await self._ensure_lease(existing, agent=agent)
             await self._validate_session(existing)
             if existing.context_limit is None:
                 # Backfill routes persisted before the limit was discovered, so
@@ -208,8 +196,7 @@ class Router:
             return existing
         primary = self._primary_base()
         agent_id = agent or await self.resolve_agent(primary)
-        readonly = not await self.is_writable(primary, agent_id)
-        lease = await self.provider.acquire(conv, agent=agent_id, readonly=readonly)
+        lease = await self.provider.acquire(conv, agent=agent_id)
         await self.leases.register(conv.key, lease)
         # Re-resolve against the leased base: pool entries may differ.
         agent_id = agent or await self.resolve_agent(lease.server_base)
@@ -256,6 +243,22 @@ class Router:
     def _primary_base(self) -> str:
         bases = self.config.server_bases()
         return bases[0][1]
+
+    async def _ensure_lease(self, route: Route, *, agent: str | None) -> None:
+        """Re-acquire an ephemeral (isolated) lease lost across a restart.
+
+        Isolated views and their instances are gone once the bridge restarts (or
+        a lease is reclaimed), so a loaded route points at a dead base. Lease a
+        fresh view and rebuild the session on it — the previous context is gone.
+        """
+        if self.config.projects.mode != "isolated" or self.leases.get(route.key) is not None:
+            return
+        lease = await self.provider.acquire(route.conversation, agent=agent or route.agent)
+        await self.leases.register(route.key, lease)
+        route.server_base = lease.server_base
+        route.project_id = lease.project_id
+        log.info("lease_reacquired", conversation=route.key, project=lease.project_id)
+        await self.recreate_session(route)
 
     async def recreate_session(self, route: Route) -> None:
         """Rebuild the agent session for an existing route.

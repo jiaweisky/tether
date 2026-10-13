@@ -1,23 +1,37 @@
-"""Lease isolated agent-project instances for writable conversations.
+"""Lease project instances for conversations.
 
-A project instance is one agent-service process bound to one working directory.
-The bridge never starts such processes itself; it acquires and returns leases
-through a provider, and tracks their lifetime.
+A "project" is one agentd server unit bound to one working directory. The bridge
+never starts agentd itself; it acquires and returns leases through a provider,
+and tracks their lifetime.
+
+Two modes (config ``projects.mode``):
+
+- ``shared``: every conversation uses the same instance(s) — the configured
+  ``server.pool`` if present, otherwise the single ``server.base_url``.
+- ``isolated``: every conversation leases its own view of ``source_directory``
+  through agentd's control API (``/admin/projects``).
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import itertools
-import json
-import shlex
+import os
+import re
+import shutil
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+import httpx
+
 from ..config import Config
 from ..models import Conversation
+from ..util.logging import get_logger
+
+log = get_logger("tether.projects")
 
 
 @dataclass
@@ -31,18 +45,16 @@ class ProjectLease:
 
 class ProjectProvider(Protocol):
     async def acquire(
-        self, conv: Conversation, *, agent: str, readonly: bool, transport: str = "http"
+        self, conv: Conversation, *, agent: str, transport: str = "http"
     ) -> ProjectLease: ...
 
     async def release(self, lease: ProjectLease) -> None: ...
-
-    async def health(self, lease: ProjectLease) -> bool: ...
 
     async def preflight(self) -> None: ...
 
 
 class SharedProjectProvider:
-    """One instance reused by all conversations; safe only for read-only agents."""
+    """One instance shared by all conversations."""
 
     def __init__(
         self, server_base: str, *, working_directory: str | None = None, project_id: str = "shared"
@@ -52,196 +64,178 @@ class SharedProjectProvider:
         )
 
     async def acquire(
-        self, conv: Conversation, *, agent: str, readonly: bool, transport: str = "http"
+        self, conv: Conversation, *, agent: str, transport: str = "http"
     ) -> ProjectLease:
-        if not readonly:
-            raise RuntimeError("a shared project cannot host a writable agent")
         return self._lease
 
     async def release(self, lease: ProjectLease) -> None:
         return None
-
-    async def health(self, lease: ProjectLease) -> bool:
-        return True
 
     async def preflight(self) -> None:
         return None
 
 
 class PoolProjectProvider:
-    """A fixed pool of instances: read-only conversations share, writable ones
-    hold an instance exclusively until released."""
+    """A fixed pool of instances shared round-robin across conversations."""
 
-    def __init__(
-        self,
-        pool: list[tuple[str, str, str | None]],
-        *,
-        max_leases: int = 32,
-        allow_writable_share: bool = False,
-    ) -> None:
-        self._entries = pool
-        self._max = max_leases
-        self._allow_writable_share = allow_writable_share
-        self._round_robin = itertools.cycle(range(len(pool)))
-        self._owners: dict[str, str] = {}  # project id -> owning conversation key
+    def __init__(self, pool: Sequence[tuple[str, str, str | None]]) -> None:
+        self._entries = list(pool)
+        self._round_robin = itertools.cycle(range(len(pool))) if pool else None
 
     async def acquire(
-        self, conv: Conversation, *, agent: str, readonly: bool, transport: str = "http"
+        self, conv: Conversation, *, agent: str, transport: str = "http"
     ) -> ProjectLease:
-        if not self._entries:
+        if not self._entries or self._round_robin is None:
             raise RuntimeError("the project pool is empty")
-        if readonly or self._allow_writable_share:
-            return self._lease_for(self._entries[next(self._round_robin)])
-        existing = self._owned_by(conv.key)
-        if existing is not None:
-            return existing
-        if len(self._owners) >= self._max:
-            raise RuntimeError(f"project lease limit reached ({self._max})")
-        return self._claim_free(conv.key)
-
-    def _owned_by(self, conversation_key: str) -> ProjectLease | None:
-        for project_id, owner in self._owners.items():
-            if owner == conversation_key:
-                return self._lease_for(next(e for e in self._entries if e[0] == project_id))
-        return None
-
-    def _claim_free(self, conversation_key: str) -> ProjectLease:
-        for entry in self._entries:
-            if entry[0] not in self._owners:
-                self._owners[entry[0]] = conversation_key
-                return self._lease_for(entry)
-        raise RuntimeError("no free project instance in the pool")
-
-    @staticmethod
-    def _lease_for(entry: tuple[str, str, str | None]) -> ProjectLease:
-        name, base, working_directory = entry
+        name, base, working_directory = self._entries[next(self._round_robin)]
         return ProjectLease(project_id=name, server_base=base, working_directory=working_directory)
 
     async def release(self, lease: ProjectLease) -> None:
-        self._owners.pop(lease.project_id, None)
-
-    async def health(self, lease: ProjectLease) -> bool:
-        return True
+        return None
 
     async def preflight(self) -> None:
         if not self._entries:
-            raise RuntimeError("the pool provider requires at least one server")
+            raise RuntimeError("the project pool is empty")
 
 
-class SupervisorProjectProvider:
-    """Provision project instances through a host-configured supervisor command.
+class AgentdControlProvider:
+    """Lease per-conversation isolated views from agentd's control API.
 
-    The bridge never starts Go processes itself; it delegates to a host
-    supervisor. The command is invoked with one JSON request on stdin and must
-    print one JSON response on stdout:
-
-    - acquire request: ``{"action":"acquire","project_id",...,"readonly",...}``
-      response: ``{"project_id","server_base","transport","working_directory",
-      "ephemeral"}``
-    - release request: ``{"action":"release","project_id","server_base"}``
-
-    With no ``projects.supervisor_command`` configured the provider refuses to
-    acquire, so an operator must configure a static ``server.pool`` instead.
+    Each conversation gets its own view (``worktree``/``overlay``/``copy``) of
+    ``source_directory``; the view is created on first use and released on idle.
     """
 
-    def __init__(self, config: Config) -> None:
+    def __init__(
+        self, config: Config, *, transport: httpx.AsyncBaseTransport | None = None
+    ) -> None:
         self.config = config
-        self._command = config.projects.supervisor_command
+        self._transport = transport
+        projects = config.projects
+        self._base = (projects.control_url or "").rstrip("/")
+        self._source = projects.source_directory
+        self._base_dir = os.path.abspath(projects.base_dir)
+        self._headers = (
+            {"Authorization": f"Bearer {projects.control_token}"} if projects.control_token else {}
+        )
 
     async def acquire(
-        self, conv: Conversation, *, agent: str, readonly: bool, transport: str = "http"
+        self, conv: Conversation, *, agent: str, transport: str = "http"
     ) -> ProjectLease:
-        if not self._command:
-            raise RuntimeError(
-                "projects.provider=supervisor requires projects.supervisor_command, "
-                "or configure a static server.pool"
-            )
-        response = await self._invoke(
-            {
-                "action": "acquire",
-                "project_id": conv.key,
-                "conversation": conv.id,
-                "kind": conv.kind,
-                "agent": agent,
-                "readonly": readonly,
-                "transport": transport,
-            }
-        )
-        server_base = response.get("server_base")
+        self._require_configured()
+        name = _project_name(conv)
+        request = {
+            "name": name,
+            "kind": transport,
+            # The view lives at <base_dir>/<name>; keep the state root outside it.
+            "root": os.path.join(self._base_dir, ".state", name),
+            "workingDirectory": self._source,
+            "agents": [agent],
+            "isolation": {
+                "mode": self.config.projects.isolation,
+                "baseDir": self._base_dir,
+                "baseRef": self.config.projects.git_base_ref,
+                "baseReadOnly": self.config.projects.cow.base_readonly,
+                "cow": {"mode": self.config.projects.cow.mode},
+            },
+        }
+        data = await self._create(request, retry=True)
+        server_base = data.get("server_base")
         if not server_base:
-            raise RuntimeError(f"supervisor response has no server_base: {response!r}")
+            raise RuntimeError(f"control API returned no server_base: {data!r}")
         return ProjectLease(
-            project_id=str(response.get("project_id") or conv.key),
-            transport=str(response.get("transport", transport)),
+            project_id=str(data.get("project_id", name)),
+            transport=str(data.get("transport", transport)),
             server_base=str(server_base),
-            working_directory=response.get("working_directory"),
-            ephemeral=bool(response.get("ephemeral", True)),
+            working_directory=data.get("working_directory"),
+            ephemeral=True,
         )
 
     async def release(self, lease: ProjectLease) -> None:
-        if not self._command:
-            return
-        await self._invoke(
-            {
-                "action": "release",
-                "project_id": lease.project_id,
-                "server_base": lease.server_base,
-                "transport": lease.transport,
-            }
-        )
-
-    async def health(self, lease: ProjectLease) -> bool:
-        return bool(lease.server_base)
+        if self._base:
+            await self._delete(lease.project_id)
 
     async def preflight(self) -> None:
-        if not self._command:
+        self._require_configured()
+        # A crash can leave views behind (agentd tears them down only on DELETE);
+        # they are ephemeral, so wipe the workspace root on startup.
+        await asyncio.to_thread(_wipe_dir, self._base_dir)
+        if self.config.projects.isolation == "worktree":
+            await _run("git", "-C", self._source or ".", "worktree", "prune")
+        async with self._client() as client:
+            resp = await client.get(f"{self._base}/admin/projects", headers=self._headers)
+            if resp.status_code != 200:
+                raise RuntimeError(f"control API not reachable ({resp.status_code})")
+
+    async def _create(self, request: dict, *, retry: bool) -> dict:
+        async with self._client() as client:
+            resp = await client.post(
+                f"{self._base}/admin/projects", json=request, headers=self._headers
+            )
+            if resp.status_code == 201:
+                return dict(resp.json().get("data") or {})
+            detail = resp.text.strip()
+        # A same-named project may survive an agentd crash; drop it and retry once.
+        if retry and "already exists" in detail:
+            await self._delete(request["name"])
+            return await self._create(request, retry=False)
+        raise RuntimeError(f"control create failed ({resp.status_code}): {detail}")
+
+    async def _delete(self, project_id: str) -> None:
+        try:
+            async with self._client() as client:
+                await client.delete(
+                    f"{self._base}/admin/projects/{project_id}", headers=self._headers
+                )
+        except httpx.HTTPError as exc:  # best-effort; the startup wipe is the backstop
+            log.warning("control_delete_failed", project=project_id, error=str(exc))
+
+    def _client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            timeout=self.config.server.request_timeout_s, transport=self._transport
+        )
+
+    def _require_configured(self) -> None:
+        if not self._base or not self._source:
             raise RuntimeError(
-                "projects.provider=supervisor is not configured; set projects.supervisor_command"
+                "projects.mode=isolated requires projects.control_url and projects.source_directory"
             )
 
-    async def _invoke(self, request: dict) -> dict:
-        parts = shlex.split(self._command or "")
-        if not parts:
-            raise RuntimeError("projects.supervisor_command is empty")
-        proc = await asyncio.create_subprocess_exec(
-            *parts,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate(json.dumps(request).encode())
-        if proc.returncode != 0:
-            detail = stderr.decode(errors="replace").strip()
-            raise RuntimeError(f"supervisor command failed ({proc.returncode}): {detail}")
-        try:
-            response = json.loads(stdout.decode() or "{}")
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("supervisor command returned invalid JSON") from exc
-        if not isinstance(response, dict):
-            raise RuntimeError(f"supervisor command returned a non-object: {response!r}")
-        return response
+
+def _sanitize(value: str) -> str:
+    """Make a conversation key safe as one path element / project name."""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", value)
+    return safe.strip(" .") or "project"
+
+
+def _project_name(conv: Conversation) -> str:
+    """A stable, collision-resistant instance name for a conversation."""
+    return f"{_sanitize(conv.key)}_{hashlib.sha1(conv.key.encode()).hexdigest()[:8]}"
+
+
+async def _run(*argv: str) -> None:
+    proc = await asyncio.create_subprocess_exec(
+        *argv, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+    )
+    await proc.wait()
+
+
+def _wipe_dir(path: str) -> None:
+    if os.path.isdir(path):
+        for entry in os.listdir(path):
+            shutil.rmtree(os.path.join(path, entry), ignore_errors=True)
 
 
 def build_provider(config: Config) -> ProjectProvider:
-    if config.projects.provider == "shared":
-        name, base, working_directory = config.server_bases()[0]
-        return SharedProjectProvider(base, working_directory=working_directory, project_id=name)
-    if config.projects.provider == "pool":
-        return PoolProjectProvider(
-            config.server_bases(),
-            max_leases=config.projects.max_leases,
-            allow_writable_share=config.projects.isolation == "shared",
-        )
-    return SupervisorProjectProvider(config)
+    if config.projects.mode == "isolated":
+        return AgentdControlProvider(config)
+    if config.server.pool:
+        return PoolProjectProvider(config.server_bases())
+    name, base, working_directory = config.server_bases()[0]
+    return SharedProjectProvider(base, working_directory=working_directory, project_id=name)
 
 
 class LeaseManager:
-    """Track live leases and reclaim idle ephemeral views.
-
-    Only ephemeral isolated views (a worktree, overlay or container created for a
-    single conversation) are reclaimed on idle; fixed pool instances stay bound
-    to their conversation.
-    """
+    """Track live leases and reclaim idle ephemeral views."""
 
     def __init__(
         self,
@@ -257,6 +251,10 @@ class LeaseManager:
 
     async def register(self, key: str, lease: ProjectLease) -> None:
         self._leases[key] = (lease, self._clock())
+
+    def get(self, key: str) -> ProjectLease | None:
+        entry = self._leases.get(key)
+        return entry[0] if entry else None
 
     def touch(self, key: str) -> None:
         entry = self._leases.get(key)

@@ -84,6 +84,8 @@
 | 2026-10-13 | §2.6/§5.1/§9 identity: the bot name/description come from the platform **only where the API exposes them** (Feishu `GET /open-apis/bot/v3/info` → `app_name` + application `description`; QQ `botpy` `robot.name`; personal WeChat nickname). **WeCom provides neither** — its callback carries only `aibotid` (confirmed against the official callback schema and captured frames) — so `identity.display_name`/`description` are **required** for WeCom and **optional overrides** elsewhere (configured wins, else the platform's). Inferring the name from an inline `@name` in message text was rejected as fragile. |
 | 2026-10-13 | Added **§8.6 Message Recall** and decision **D23**: recall is best-effort and platform-dependent — where a platform emits a recall event (Feishu `im.message.recalled_v1`) the Connector maps it to `ConnectorEvent(kind="recall")` and the core drops a queued turn / interrupts an in-flight one (never unsends an already-sent reply); a platform without the event (WeCom long connection) is a no-op. §3.2 `ConnectorEvent.kind` gained `recall`; §14 M7 lists it. |
 | 2026-10-13 | §8.3 added the **stale-turn watchdog** (`sessions.turn_watchdog_s`, default 30s): a Turn ends only on the live `session.status idle` (no SSE replay), so a missed idle would block the conversation's queue forever; the bridge now cross-checks active Turns against `GET /api/session/active` and finishes those whose session is gone. §9 config updated. |
+| 2026-10-13 | §7.4 marked **per-type platform media size limits as deferred — not to be implemented without an explicit instruction** (not device-verified, and the link fallback already handles rejection). |
+| 2026-10-13 | **Simplified project isolation to one axis** (§2.8, D20, §9, §14 M6): `projects.mode: shared | isolated` replaces the capability-driven `auto`/`on_conflict`/switch guards and the `provider` enum. `shared` reuses the configured base; `isolated` leases a per-conversation view via agentd's control API (`source_directory` + `control_url`, impl `none/copy/worktree/overlay`); an isolated lease is re-acquired (fresh view + session) on first use after a restart. |
 
 ---
 
@@ -391,65 +393,47 @@ participants: Alice, Bob            # optional, only when sync_participants
 | Direct message (1 user ↔ bot) | One DM = one session | bot name + description (optional) |
 | Group chat (N users ↔ bot) | **One conversation** (key = conversation identifier, including thread) = one session | bot name + description + per-speaker label |
 
-### 2.8 Project isolation: shared read-only, isolated writable
+### 2.8 Project sharing vs isolation
 
-**Background**: For `go-agent-sdk`, **one `Client` (one agentd instance) = one project/working directory**
-(`ClientOptions.WorkingDirectory` / `Root`). The HTTP API **does not provide per-session directory or location routing**
-(`DESIGN-HTTP.md` §5.5 explicitly discards the location scope); a session's inline `directory` is fixed to the instance's
-workingDirectory. One bot can join **multiple IM groups**, each group corresponding to one agent session (§2.5); whether these sessions share
-**the same project (filesystem)** depends on the agent's **read/write capability**:
+**Background**: for go-agent-sdk, **one `Client` (one agentd instance = one server unit) = one project /
+working directory** (`ClientOptions.WorkingDirectory` / `Root`). The HTTP API has **no per-session directory
+routing** (`DESIGN-HTTP.md` §5.5), so a session's `directory` is fixed to its instance's `workingDirectory`.
+One bot can join multiple IM groups, each group being one agent session (§2.5). Whether those sessions share
+the same **filesystem** is a single, explicit deployment choice — **`projects.mode`**:
 
-- **Read-only agent** (only read-only tools allowed; `write`/`edit`/`apply_patch`/`bash` all rejected): multiple groups sharing the same
-  project has **no side effects**—each group's session context remains isolated (one session per group), they merely read the same code/files.
-  **No project isolation needed.**
-- **Writable agent** (allowed `write`/`edit`/`apply_patch`/`bash`, or can spawn writable sub-agents): multiple groups sharing one
-  project will **modify each other's files and contaminate each other**. **Projects must be isolated per group**—each group binds to an independent agentd project instance
-  (an independent working directory).
-
-**Determination: based on the actual tool set, not the agent name**
-
-`GET /api/tool?agent=<name>` (the server side has already materialized per `Options.InboundPermissions`) returns the tool set
-actually available to that agent. If it contains **no mutation tools**, it is treated as read-only:
-
-- Direct mutation: `write`, `edit`, `apply_patch`
-- Indirect mutation: `bash` (can write files)
-- Derivation: `task` (sub-agents may be writable)—unless all sub-agents are read-only
-
-If any one is present ⇒ writable. **Unknown (query failed/ambiguous) ⇒ conservatively treat as writable (isolated)**. `agent.writable.<name>` can be used to
-override the automatic determination.
-
-**Isolation policy and implementation**
-
-| `projects.isolation` | behavior |
+| `projects.mode` | behavior |
 |---|---|
-| `auto` (default) | read-only agent → shared project; writable agent → per-session isolated project |
-| `shared` | force sharing (only read-only agents allowed; a writable agent is rejected outright) |
-| `per_conversation` | always one project per conversation (even if read-only) |
+| `shared` (default) | every conversation uses the **same** project instance(s): they read/write the same working directory. Safe for a single owner / trusted set; writable changes land directly in the source project. |
+| `isolated` | every conversation leases its **own view** (worktree / overlay / copy) of the source project, created and destroyed on demand through agentd's control API. Cross-conversation file effects are impossible; a view is **ephemeral** (torn down on release) and a change does **not** flow back to the source. |
 
-Isolation = **leasing an independent project instance** from `server.pool` (each instance has one `working_directory`):
+> An earlier revision derived the policy from the agent's read/write tool set (read-only ⇒ share, writable ⇒
+> isolate, plus `on_conflict` / switch guards). That double axis (`shared|isolated` × `read-only|writable`) is
+> **dropped as over-complex**: the operator already knows the deployment. It is now simply **shared or
+> isolated**, and when isolated you pick the implementation (`projects.isolation`).
+
+Isolation = leasing an independent project instance:
 
 ```
-read-only agent:  group A ─┐
-                  group B ─┼─► same agentd project (shared files, safe for reading; each group still has its own session)
-                  group C ─┘
-writable agent:   group A ──► agentd project P_A (working directory A)
-                  group B ──► agentd project P_B (working directory B)
-                  group C ──► agentd project P_C (working directory C)
+shared:    group A ─┐
+           group B ─┼─► one agentd project (same files / working dir; each group still its own session)
+           group C ─┘
+isolated:  group A ──► view A (worktree / overlay / copy)
+           group B ──► view B
+           group C ──► view C
 ```
 
-- **Startup validation**: `isolation: shared` and a writable agent detected → **fail-fast**.
-- **Runtime conflict** (a writable agent lands on a shared project) → `projects.on_conflict: reject | isolate` (default `isolate`,
-  lease an isolated project from the pool).
-- **Agent switching** (operations via `POST …/agent`): when going read-only→writable while currently on a shared project, `agent.switch_guard: reject | migrate`
-  (`migrate` = create a new session on an isolated project, the old context is not carried over automatically; default `reject` with a prompt).
-- **Providers**: `pool` has independent instances pre-provisioned by the host; `worktree` (`git worktree` per group into an independent directory) requires the host to pair it with an
-  agentd process supervisor; the bridge is only responsible for acquiring/releasing (clear boundary, the bridge does not spawn Go processes itself).
-- **Snapshots/revert**: a writable project should enable snapshots if undo is needed; a read-only shared project needs no snapshots.
+- `shared` uses the configured base(s) directly — `server.pool` if present, otherwise the single `server.base_url`.
+- `isolated` uses agentd's control API (`POST/GET/DELETE /admin/projects`, §2.9) and needs `control_url` + `source_directory`.
+- **Startup validation**: `shared` requires a base; `isolated` requires `control_url` + `source_directory`.
+- **Snapshots**: not needed for `shared`; optional per view for `isolated`.
 
 ### 2.9 Implementation approaches to isolation (shared / worktree / container / others)
 
 **Premise**: an agentd instance is permanently bound to one directory (no per-session location routing; `session.next.moved`
-is defined but has no producer/public API), so "isolated project" = **multiple instances**. Isolation has multiple dimensions:
+is defined but has no producer/public API), so "isolated project" = **multiple instances**. `projects.mode` (§2.8) chooses
+`shared` vs `isolated`; when isolated, `projects.isolation` picks one of the implementations below — the local ones
+(`none`/`copy`/`worktree`/`overlay`) are served by agentd's control API (§2.8, `POST /admin/projects`), while
+container/remote are provisioned by the host. Isolation has multiple dimensions:
 
 | Dimension | Description |
 |---|---|
@@ -533,9 +517,9 @@ need strong isolation? ──yes──► (3) container + directory
    └──────────────► (4) directory copy
 ```
 
-**Boundary with the bridge**: the bridge **does not fork Go processes itself**; multiple instances are created by a **host-side `supervisor`/orchestrator**,
-and the bridge acquires/returns "project instances" (worktree/overlay/container) via `ProjectProvider` (§3.7). The static
-`server.pool` and dynamic provisioning can coexist (a pool hit is reused, otherwise provision).
+**Boundary with the bridge**: the bridge **does not fork Go processes itself**; local isolated instances (copy/worktree/overlay) are created
+in-process by **agentd's control API** (`POST /admin/projects`, §2.8/§3.7), and container/remote instances would be provisioned by a host
+orchestrator. The bridge acquires/returns "project instances" via `ProjectProvider`. A static `server.pool` (shared mode) can coexist.
 
 **Lifecycle and quotas**: leases are reclaimed with the group's idle TTL (release = `git worktree remove`/destroy container);
 `projects.max_leases` limits concurrent leases (disk/memory protection); instance/working-directory naming and spool directory are isolated.
@@ -982,8 +966,8 @@ class PendingInteraction:
   — SSE events and HITL reconciliation are both looked up in reverse by `sessionID` (§4.3/§8.3); this guarantees conversations are not lost after a bridge restart.
 - One Route corresponds to one agentd session; on the SDK side this is naturally "serial within the same conversation" — this is exactly the basis for queueing
   multi-user messages in a group chat in arrival order (§2.5(2)).
-- **Project ownership** (§2.8): `project_id`/`server_base` are assigned by the Router according to the agent's read-write capability — a read-only agent can
-  reuse the same project; a writable agent exclusively holds one project instance leased from `server.pool` per group.
+- **Project ownership** (§2.8): `projects.mode` decides the mapping — `shared` gives every conversation the same
+  `project_id`/`server_base`; `isolated` leases one per conversation from agentd's control API (a view), released on idle.
 
 ### 3.7 Project provider `ProjectProvider` (isolation implementation abstraction)
 
@@ -994,43 +978,33 @@ consistent with "the SDK does not own infrastructure"). This makes the various i
 @dataclass
 class ProjectLease:
     project_id: str
-    transport: str = "http"  # "http" | "a2a" — one instance serves one transport (§17.3). Tether always uses "http"
-    server_base: str  # address of this instance (HTTP or A2A endpoint)
-    working_directory: str | None = None  # for audit/logging only
-    ephemeral: bool = False  # whether it is ephemeral (needs release)
+    transport: str = "http"  # "http" | "a2a"; Tether always uses "http"
+    server_base: str
+    working_directory: str | None = None
+    ephemeral: bool = False
 
 
 class ProjectProvider(Protocol):
     async def acquire(
-        self, conv: Conversation, *, agent: str, readonly: bool, transport: str = "http"
-    ) -> ProjectLease: ...  # reuse on a pool hit, otherwise create
-    async def release(
-        self, lease: ProjectLease
-    ) -> None: ...  # return the lease (destroy worktree/container)
-    async def health(self, lease: ProjectLease) -> bool: ...
-    async def preflight(self) -> None: ...  # startup validation (§2.8 fail-fast)
+        self, conv: Conversation, *, agent: str, transport: str = "http"
+    ) -> ProjectLease: ...
+    async def release(self, lease: ProjectLease) -> None: ...
+    async def preflight(self) -> None: ...
 ```
 
-Built-in implementations (selected by the `projects.provider` config):
+Built-in implementations (selected by `projects.mode`, §2.8):
 
-| provider | Corresponding §2.9 | Description |
+| mode | provider | Description |
 |---|---|---|
-| `shared` | (1) | Single-instance reuse (read-only) |
-| `pool` | — | Static `server.pool` leasing |
-| `worktree` | (2) | `git worktree` + host supervisor launches the corresponding agentd (§17.3) |
-| `overlay` | (4) | **CoW isolated view**: overlayfs / reflink / clonefile generates a per-group writable layer (§2.9(4)) |
-| `container` | (3) | Docker/Podman/K8s API requests a containerized agentd |
-| `remote` | (4) | An existing remote instance |
+| `shared` | `SharedProjectProvider` / `PoolProjectProvider` | every conversation uses the same base — `server.pool` if present, else the single `server.base_url`. |
+| `isolated` | `AgentdControlProvider` | every conversation leases its own view via agentd's control API; implementation = `projects.isolation`. |
 
-- The `readonly` of `acquire` comes from the §2.8 determination; `shared`/`pool` reject `readonly=False` by default (unless
-  `isolation: per_conversation` and the pool is sufficient).
-- **`supervisor` is a host-side component** (Tether does not execute it): the provider hands `(project identifier, isolation strategy, transport)`
-  (corresponding to §17.3's `ProjectSpec`/`IsolationSpec`) to the host supervisor (or first checks the static `server.pool`),
-  which calls the transport-agnostic project runner under `cmd/` to launch the instance and return `server_base`; **a writable project at any one time
-  is leased to only one `(project, transport)`**, while read-only can be shared (§17).
-- `supervisor.command` is the entry point in the **host configuration** for "launching agentd per project" (interpreted and executed by the host); **if unconfigured
-  it degrades to an external registry mode** (the host pre-provisions instances and the bridge only looks up the table to lease).
-- Leases are released with the group's idle TTL (§2.9), with `projects.max_leases` as the limit.
+- **`isolated`** POSTs `{name, kind:"http", root, workingDirectory: source_directory, agents, isolation:{mode, baseDir, baseRef, cow}}`
+  to `{control_url}/admin/projects` and maps the response's `server_base` and `working_directory` (the **view**) to a lease; `release` → `DELETE`.
+  `preflight` wipes `base_dir` (leftover views from a crash) and probes the control API. A `view already exists` reply triggers one `DELETE`+retry.
+- Leases are `ephemeral` in `isolated` mode and released on the conversation's idle TTL; `shared`/`pool` leases are not. `projects.max_leases`
+  bounds live instances. On first use after a restart (or after a reclaim) an **isolated route re-leases a fresh view and rebuilds its session**
+  (the view and its state root are gone, so the conversation context resets); a failed allocation notifies the user instead of dropping the message.
 
 ---
 
@@ -1622,6 +1596,8 @@ See §4.5. Core points:
 | Text file | Send as a file; if the content is short and the channel supports it, an inline code block is allowed |
 | MIME sniffing | Prefer platform metadata, then `filetype`/extension |
 
+> **Deferred — do NOT implement without an explicit instruction.** Per-type platform size limits (e.g. WeCom image 10MB / file 20MB / voice 2MB / video 10MB) are **not** enforced proactively. They are not device-verified (§13.1), and the existing send-failure **link fallback** (§7.3) already degrades a platform rejection gracefully. Add a per-kind `max_bytes` guard (compress images to the bound first, otherwise fall back to a text link) only when explicitly requested **and** after the limits are confirmed on a real device.
+
 ### 7.5 Storage and Lifecycle
 
 - The spool directory is by default **inside the working directory** (`<working_dir>/.tether/spool`), and filenames are `<sha256 first 8>_<safe_name>`.
@@ -1703,8 +1679,8 @@ See §4.5. Core points:
 
 - On receiving SIGINT/SIGTERM: stop accepting new messages → for in-progress Turns, **by default leave them running on agentd** (stop streaming only) so a restart can resume them; with `sessions.interrupt_on_shutdown: true` instead interrupt and reject their pending permissions
   → flush unsent final messages (only in interrupt mode) → close the SSE and Connector connections → flush `Route` state not yet persisted to disk. A parked interaction is **not** consumed by default, so clicking its card after a restart still works (the resumed turn is re-attached).
-- Decoupled from agentd's lifecycle: the bridge **does not fork/manage** agentd processes; when multiple instances are needed, the **host side's
-  `supervisor`/orchestrator** creates and reclaims them (the bridge calls through `ProjectProvider`, §3.7); agentd shuts down gracefully on its own
+- Decoupled from agentd's lifecycle: the bridge **does not fork/manage** agentd processes; isolated instances are created and reclaimed by
+  agentd's control API (the bridge calls through `ProjectProvider`, §3.7); agentd shuts down gracefully on its own
   (`docs/DESIGN-HTTP.md` §12.5).
 
 ### 8.6 Message Recall (best-effort, platform-dependent)
@@ -1737,41 +1713,32 @@ server:
   token: ${AGENTSERVE_TOKEN:-}       # ${VAR} / ${VAR:-default} expanded from the environment
   request_timeout_s: 30
   sse_reconnect_ms: 1000
-  # Multiple backends (optional): one instance = one project; writable agents need to be assigned to different instances per group (§2.8)
+  working_directory: null             # the base's working dir (for the media spool path); pool entries carry their own
+  # Multiple backends (optional): used when projects.mode=shared (round-robin); one entry = one base
   pool: []                            # [{name, base_url, token, working_directory, default_agent}]
 
 agent:
   default_agent: null                 # optional override; unset = first agent exposed by GET /api/agent (agentd's default)
   default_model: null                 # optional override; unset = agentd defaultModel (discovered, not restated)
-  writable:                           # optional override of the tool-set read/write determination (§2.8)
-    plan: false                       # e.g. read-only agent
 
 model:
   context_limit: null                 # optional override; by default the window comes from GET /api/model (`contextLimit`)
 
 # Project isolation (§2.8 / §2.9)
 projects:
-  isolation: auto                     # auto | shared | per_conversation
-  provider: pool                      # shared | pool | worktree | overlay | container | remote (§3.7)
-  on_conflict: isolate                # isolate | reject — when a writable agent lands on a shared project
-  base_dir: /var/lib/tether/workspaces
-  ttl_s: 3600                         # idle lease reclamation
+  mode: shared                        # shared | isolated (§2.8)
+  isolation: worktree                 # mode=isolated only: none | copy | worktree | overlay
+  base_dir: /var/lib/tether/workspaces # mode=isolated: parent for views + per-instance roots
+  ttl_s: 3600                         # idle lease reclamation (mode=isolated)
   max_leases: 32                      # concurrent lease limit (disk/memory protection)
-  # worktree provider (§2.9(2))
-  git_base_ref: origin/HEAD           # starting point: detached or im/<group> branch
-  supervisor_command: null            # command to launch agentd per project; unset = external registry mode
-  # overlay / CoW provider (§2.9(4))
+  git_base_ref: HEAD                  # worktree starting point (detached)
   cow:
-    mode: auto                        # auto | overlayfs | reflink | clonefile
-    base_readonly: true               # base read-only (prevents write-through; prerequisite of the link-farm approach)
-  # container provider (§2.9(3))
-  container:
-    runtime: docker                   # docker | podman | k8s
-    image: ghcr.io/jiaweisky/agentd:latest
-    network: none                     # none | allowlist:<name>
-    cpus: "2"
-    memory: 2g
-    read_only_root: true
+    mode: auto                        # auto | reflink | clonefile (overlay)
+    base_readonly: true
+  # mode=isolated via agentd's control API (§2.8 / §2.9)
+  control_url: null                   # e.g. http://127.0.0.1:9090
+  control_token: null                 # bearer for the control API (optional on loopback)
+  source_directory: null              # the project to derive views from (absolute)
 
 sessions:
   idle_reset_s: 0                     # when >0, automatically reset the Conversation when idle
@@ -1881,11 +1848,9 @@ Fail at startup (fail-fast):
 
 - A connector is enabled but lacks a secret/manifest; `server.base_url` is unreachable (optional: retry with delay instead of failing);
 - Invalid enum: `streaming.mode`/`reasoning_style`, `identity.inject`/`source`, `group.hitl_scope`/
-  `command_scope`/`cross_user_delivery`, `permissions.fallback`, `projects.isolation`/`provider`/
-  `on_conflict`/`cow.mode`, `container.runtime`;
+  `command_scope`/`cross_user_delivery`, `permissions.fallback`, `projects.mode`/`isolation`/`cow.mode`;
 - `spool_dir` is not writable; `min_interval_ms ≤ 0`; `inline_limit_bytes` is too large, causing a base64 memory risk;
-- `isolation: shared` and a **writable agent** exists (§2.8, fail-fast);
-- The names listed in `agent.writable` must be known agents;
+- `projects.mode=isolated` requires `control_url` + `source_directory` (§2.8);
 - If `model.context_limit` is set, it must be > 0.
 
 ### 9.2 Recommendations to Accompany the agentd Configuration
@@ -2070,7 +2035,7 @@ Common commands: `uv sync --extra wecom`, `uv run tether --config config.yaml`,
     `identity.source`/`inject` (§2.6/§4.8).
   - Interaction/command: `/stop` parsing, HITL payload encoding, in-group authorization (`hitl_scope`/`command_scope`+`admins`,
     §2.5(3)).
-  - Config: §9.1 invalid values for each enum, `isolation: shared`+writable fail-fast, `agent.writable` unknown agent.
+  - Config: §9.1 invalid values for each enum, `projects.mode=isolated` requires `control_url`+`source_directory`.
 - **Contract (fake backend)**: use `respx`/a self-built stub HTTP+SSE service to simulate agentd, verifying: session creation, prompt,
   event aggregation, turn completion detection, HITL round-trip, `attachment.omitted` rendering, error code mapping, SSE disconnect **reconciliation +
   half-finished finalization** (§8.3).
@@ -2117,7 +2082,7 @@ Confirm item by item for each platform:
 | **M3 Feishu** | Long-connection Connector; card streaming (patch); card interaction callbacks → HITL; media. **Exit: §13.1 backfill** |
 | **M4 QQ** | botpy Connector; group/channel/DM; markdown+keyboard; rich media. **Exit: §13.1 backfill** |
 | **M5 WeChat personal** | wechatbot-sdk Connector; extreme downgrade; compliance notices. **Exit: §13.1 backfill** |
-| **M6 hardening** | **Project isolation (read-only shared / writable isolated per group; `ProjectProvider`: pool/worktree/overlay/container, §2.8/§2.9/§3.7; isolated instances can be wrapped with bwrap/container sandbox, §17)**; SSRF protection; metrics/alerts; adaptive rate limiting; reconciliation improvements; migration/replay |
+| **M6 hardening** | **Project sharing vs isolation** (`projects.mode: shared | isolated`; isolated leases a per-conversation view via agentd's control API `POST/GET/DELETE /admin/projects`, impl `none/copy/worktree/overlay`, §2.8/§2.9; views can be wrapped by a bwrap/container sandbox, §17); SSRF protection; metrics/alerts; adaptive rate limiting; reconciliation improvements; migration/replay |
 | **M7 enhancements** | Voice transcription subagent, image OCR, long-term file archiving, Web admin console (optional), **message recall handling** (best-effort, §8.6: Feishu `im.message.recalled_v1` / QQ; WeCom has no event) |
 
 > Each phase should include corresponding unit/contract tests; starting from M1, "conversing with the agent within a group" can be demonstrated end-to-end.
@@ -2147,8 +2112,8 @@ Confirm item by item for each platform:
 | D17 | Group conversations **inject speaker labels** and sanitize forged prefixes; within a group, **no cross-user steer by default**, replies @-mention the initiator (§2.5(1)(2), §8.1) | Preserves "who is speaking" when multiple people share context, avoiding crosstalk and irrelevant answers |
 | D18 | Within a group, **HITL by default allows only the initiator to answer**; the only command, `/stop`, is by default limited to the turn's **initiator** (`command_scope: initiator`, configurable `admins`) (§2.5(3), §4.6, §6.6) | Prevents others from approving dangerous operations on the initiator's behalf or interrupting their turn |
 | D19 | **The bot name + description are synced into the agent context** (`<bridge-context>` lead + anti-forgery sanitization; aligned with the agent `description` per `identity.source`; re-injected after name/description changes, agent switches, compaction) (§2.6, §4.8) | Keeps the bot's external identity consistent with the agent's self-perception |
-| D20 | **Project isolation is driven by the agent's read/write capability**: a read-only agent can share a project across groups; a writable agent must isolate the project per group (multiple agentd instances); determined by the actual tool set (`GET /api/tool?agent=`); if unknown, isolate conservatively (§2.8) | Read-only sharing has no side effects; writable sharing pollutes files for one another |
-| D21 | **Isolation implementation is pluggable**: shared / git worktree / container / copy·CoW·namespace·remote, etc., abstracted via `ProjectProvider`; the bridge does not fork Go processes itself (uses a supervisor/orchestrator) (§2.9, §3.7) | Different deployments have different isolation-strength/cost needs; keeps boundaries clear |
+| D20 | **A project is either `shared` or `isolated`** (`projects.mode`, §2.8): `shared` = one project for all conversations (single owner / trusted set, writes land in the source); `isolated` = each conversation leases its own view (worktree/overlay/copy) through agentd's control API. The earlier capability-driven `auto` (read-only share / writable isolate, plus `on_conflict`/switch guards) was **dropped as over-complex** | One explicit axis the operator already knows; simpler to reason about and implement |
+| D21 | **Isolation is `shared` or `isolated`** (`projects.mode`, D20): `isolated` leases per-conversation views from **agentd's control API** (`none`/`copy`/`worktree`/`overlay`); the bridge never forks Go processes (container/remote would be host-orchestrated). Abstracted via `ProjectProvider` (§2.8/§2.9/§3.7) | One clear boundary; reuses agentd's built-in isolation runner |
 | D22 | **Isolation is shared across `agentd`'s transports via a transport-agnostic project runner in `cmd/`** (`Transport` is a parameter); **a writable project has a single owner `(project, transport)`**, read-only can be shared; the SDK provides only policy (**+ the `Sandbox` hook (SDK layer), §17.2**) (§17.3, §3.7) | Isomorphic to the sandbox: share the mechanism, not the instance; avoids writing one per transport |
 | D23 | **Message recall is best-effort and platform-dependent** (§8.6): handled only where the platform emits a recall event (Feishu `im.message.recalled_v1`); cancels queued/in-flight turns, never "unsends" an already-sent reply; a platform without the event (WeCom long connection) is a no-op | The bridge cannot delete its own outbound messages; recall can only cancel uncommitted work |
 
@@ -2349,8 +2314,8 @@ is restricted within the current process**.
   - `Serve`: build a `Client` for that view (setting the view path as `Root`/`WorkingDirectory`), and per `Transport ∈ {http,a2a}`
     start the corresponding service.
 - `cmd/agentd` thus degrades to: parse config + choose `Transport` + call `Runner`; isolation code has **zero duplication**.
-- Lifecycle is orchestrated by the **host side** (Tether itself does not fork Go processes, §3.7): `ProjectProvider.acquire(...)` → the host
-  supervisor calls `Runner` → returns `ProjectLease{project_id, transport, server_base}`.
+- Lifecycle is orchestrated by the **host side** (Tether itself does not fork Go processes, §3.7): `ProjectProvider.acquire(...)` → agentd's
+  control API calls `Runner` → returns `ProjectLease{project_id, transport, server_base}`.
 - **Owner rule**: a writable project is leased to only one `(project, transport)` at a time; read-only can be shared (§17.1).
 
 **Interface** (Go, illustrative):
