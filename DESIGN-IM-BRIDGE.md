@@ -89,6 +89,7 @@
 | 2026-10-13 | §4.3/§2.8/§9: isolated instances run on their own base, so the bridge now **subscribes to each lease's `/api/event`** (started before the first prompt, stopped on release; HITL poll covers them), and passes a tool policy via the new `projects.inbound_permissions` (agentd `ProjectRequest.inboundPermissions`) since agentd's default is read-only. Verified all four implementations (`none`/`copy`/`worktree`/`overlay`) and an end-to-end WeCom turn (view edited, source untouched). |
 | 2026-10-13 | §2.8/§9: added `projects.sandbox` (agentd `ProjectRequest.sandbox`), so a leased isolated instance can also be wrapped in the OS command sandbox (`seatbelt`/`bwrap`) — isolation (view) and sandbox (command restrictions) are orthogonal, and both are now configurable per isolated instance. |
 | 2026-10-13 | §11 implemented: process-wide counters/gauges, an optional HTTP endpoint (`metrics.listen` → `GET /healthz`, `GET /metrics`) and a periodic structured `metrics` log (`metrics.log_interval_s`). §9 config updated. |
+| 2026-10-13 | §8.3/§8.4/§14: marked the remaining M6 hardening items **deferred — do not implement without an explicit instruction** (adaptive rate limiting; per-session `?after=` replay / explicit overflow handling; migration/replay). Project isolation, SSRF protection, observability and the watchdog/re-acquire are done. |
 
 ---
 
@@ -1673,6 +1674,7 @@ See §4.5. Core points:
 - SSE overflow (`event: error` + `subscriber_overflow`) → log it and run the reconciliation flow.
 - **Session recovery (lost agentd state)**: the IM↔session mapping is persisted by the bridge (`routes`), keyed by `Conversation.key`; agentd holds only session ids. If agentd is restarted with a **fresh state directory**, a persisted `session_id` no longer exists. On the **first use of a loaded route** (`sessions.validate_session`), the bridge verifies it with `GET /api/session/{id}` and, on `not_found`, creates a new session for the same `Conversation.key` and updates the route (re-injecting identity). A `not_found` on `prompt` is also recovered reactively, covering a session lost mid-run. This keeps a conversation working instead of failing permanently.
 - **Stale-turn watchdog (`sessions.turn_watchdog_s`)**: a Turn ends **only** on the live `session.status idle` event, and the global SSE has **no replay** — so a single missed idle (a reconnect gap, an agentd restart, or a second bridge instance taking the connection) would leave the Turn "active" and **block that conversation's queue forever**. Every N seconds the bridge cross-checks each active Turn against `GET /api/session/active` and, for any whose session is **no longer running** (after a short grace period, so a just-started Turn is not raced), finishes it — flushing the partial snapshot and draining the queue. `0` disables it.
+- **Deferred — do not implement without an explicit instruction**: per-session `?after=` event replay and any explicit `subscriber_overflow` protocol handling beyond the existing "log + reconnect + reconcile" (the design uses the global stream + reconciliation, §4.3 / D14).
 
 ### 8.4 Backpressure and Rate Limiting
 
@@ -1681,6 +1683,7 @@ See §4.5. Core points:
   blocking event consumption.
 - In the event loop shared by multiple Connectors, any blocking call (the SDK's internal HTTP) should be executed in a thread pool or native async
   to avoid dragging down event consumption.
+- **Deferred — do not implement without an explicit instruction**: adaptive (auto-tuning) rate limiting. The per-Conversation token bucket and the streaming backoff are in place; auto-tuning needs the real per-platform caps, which are pending device verification (§13.1).
 
 ### 8.5 Graceful Shutdown
 
@@ -1947,7 +1950,7 @@ inputModalities: [text, image]       # the endpoint model's actual capabilities
 - Isolation-related: active project lease count, isolated-view (worktree/overlay/container) create/fail count, project switch count.
 - Key alerts: agentd unreachable, prolonged SSE disconnection, Connector authentication failure, rising HITL timeout rate.
 
-**Implemented**: a process-wide counter/gauge registry (`tether.metrics`) incremented by the app, the engine and the connectors; an **optional HTTP endpoint** (`metrics.listen`) serving `GET /healthz` (JSON: `status`, `uptime_s`, `connectors`, per-base `agentd` reachability, `active_turns`, `leases`) and `GET /metrics` (Prometheus text); and a **periodic `metrics` structured log** (`metrics.log_interval_s`). Counters: `inbound_messages`, `prompts`, `turns`, `sse_reconnects`, `hitl_asks`, `hitl_timeouts`, `isolated_leases_created`/`isolated_lease_failures`, `rate_limit_hits`, `media_bytes_out`, `media_send_failures`; gauges: `uptime_s`, `active_turns`, `leases`, `queue_depth`. Alerts remain structured log events (e.g. `sse_disconnected`, `route_unavailable`, `stale_turn_recovered`).
+**Implemented**: a process-wide counter/gauge registry (`tether.metrics`) incremented by the app, the engine and the connectors; an **optional HTTP endpoint** (`metrics.listen`) serving `GET /healthz` (JSON: `status`, `uptime_s`, `connectors`, per-base `agentd` reachability, `active_turns`, `leases`) and `GET /metrics` (Prometheus text); and a **periodic `metrics` structured log** (`metrics.log_interval_s`). Counters: `inbound_messages`, `prompts`, `turns`, `sse_reconnects`, `hitl_asks`, `hitl_timeouts`, `isolated_leases_created`/`isolated_lease_failures`, `rate_limit_hits`, `media_bytes_out`, `media_send_failures`; gauges: `uptime_s`, `active_turns`, `leases`, `queue_depth`. Alerts remain structured log events (e.g. `sse_disconnected`, `route_unavailable`, `stale_turn_recovered`). **Not yet instrumented** (deferred): outbound message counts, turn duration, media bytes received, render-downgrade counts, the per-route debug view, and project-switch count.
 
 ---
 
@@ -2098,7 +2101,7 @@ Confirm item by item for each platform:
 | **M3 Feishu** | Long-connection Connector; card streaming (patch); card interaction callbacks → HITL; media. **Exit: §13.1 backfill** |
 | **M4 QQ** | botpy Connector; group/channel/DM; markdown+keyboard; rich media. **Exit: §13.1 backfill** |
 | **M5 WeChat personal** | wechatbot-sdk Connector; extreme downgrade; compliance notices. **Exit: §13.1 backfill** |
-| **M6 hardening** | **Project sharing vs isolation** (`projects.mode: shared | isolated`; isolated leases a per-conversation view via agentd's control API `POST/GET/DELETE /admin/projects`, impl `none/copy/worktree/overlay`, §2.8/§2.9; views can be wrapped by a bwrap/container sandbox, §17); SSRF protection; metrics/alerts; adaptive rate limiting; reconciliation improvements; migration/replay |
+| **M6 hardening** | **Done:** project sharing vs isolation (`projects.mode: shared | isolated`; per-conversation views via agentd's control API `POST/GET/DELETE /admin/projects`, impl `none`/`copy`/`worktree`/`overlay`, with `inboundPermissions` + `sandbox` passthrough, §2.8/§2.9); SSRF protection; observability `GET /healthz` + `/metrics` (§11 core; a few listed metrics still deferred, §11); stale-turn watchdog + isolated re-acquire (§8.3). **Deferred — do not implement without an explicit instruction:** adaptive rate limiting (§8.4), per-session `?after=` replay / explicit overflow handling (§8.3), migration/replay. |
 | **M7 enhancements** | Voice transcription subagent, image OCR, long-term file archiving, Web admin console (optional), **message recall handling** (best-effort, §8.6: Feishu `im.message.recalled_v1` / QQ; WeCom has no event) |
 
 > Each phase should include corresponding unit/contract tests; starting from M1, "conversing with the agent within a group" can be demonstrated end-to-end.

@@ -20,6 +20,7 @@ from tether.agent.events import (
 from tether.app import TetherApp
 from tether.config import Config
 from tether.connectors.fake import FakeConnector
+from tether.metrics import metrics
 from tether.models import (
     Conversation,
     InboundMessage,
@@ -30,6 +31,7 @@ from tether.models import (
 
 
 async def make_app(tmp_path, config: Config | None = None, connector=None):
+    metrics.reset()  # the registry is process-global; isolate counter assertions
     config = config or Config()
     conn = connector or FakeConnector()
     client = FakeAgentClient()

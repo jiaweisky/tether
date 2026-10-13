@@ -805,8 +805,13 @@ class TetherApp:
     async def _metrics_log_loop(self) -> None:
         while self._running:
             await asyncio.sleep(self.config.metrics.log_interval_s)
-            self._refresh_gauges()
-            log.info("metrics", **metrics.snapshot())
+            try:
+                self._refresh_gauges()
+                log.info("metrics", **metrics.snapshot())
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - the log loop must never die
+                log.exception("metrics_log_failed")
 
     async def _handle_http(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter

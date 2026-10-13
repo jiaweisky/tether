@@ -22,6 +22,12 @@ class Metrics:
     def set(self, name: str, value: float) -> None:
         self.gauges[name] = value
 
+    def reset(self) -> None:
+        """Clear all counters/gauges (used between apps, mainly in tests)."""
+        self.counters.clear()
+        self.gauges.clear()
+        self.started_at = time.monotonic()
+
     def uptime_s(self) -> float:
         return time.monotonic() - self.started_at
 
