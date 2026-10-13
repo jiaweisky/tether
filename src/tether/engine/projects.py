@@ -142,6 +142,12 @@ class AgentdControlProvider:
             request["inboundPermissions"] = [
                 rule.model_dump() for rule in self.config.projects.inbound_permissions
             ]
+        sandbox = self.config.projects.sandbox
+        if sandbox is not None and sandbox.process != "none":
+            request["sandbox"] = {
+                "process": sandbox.process,
+                "failurePolicy": sandbox.failure_policy,
+            }
         data = await self._create(request, retry=True)
         server_base = data.get("server_base")
         if not server_base:

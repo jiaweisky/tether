@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 from fakes import FakeAgentClient
 
-from tether.config import Config
+from tether.config import Config, InboundPermissionRule, SandboxConfig
 from tether.engine.projects import (
     AgentdControlProvider,
     SharedProjectProvider,
@@ -126,3 +128,22 @@ async def test_working_directory_falls_back_to_server_config(tmp_path):
     )
     assert router.working_directory(route) == "/wd"
     await store.close()
+
+
+@pytest.mark.asyncio
+async def test_acquire_passes_permissions_and_sandbox(tmp_path):
+    config = control_config(tmp_path)
+    config.projects.inbound_permissions = [
+        InboundPermissionRule(action="bash", resource="*", effect="allow")
+    ]
+    config.projects.sandbox = SandboxConfig(process="seatbelt", failure_policy="fail-closed")
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(request.content))
+        return httpx.Response(201, json={"data": {"server_base": "http://x", "project_id": "p"}})
+
+    provider = AgentdControlProvider(config, transport=httpx.MockTransport(handler))
+    await provider.acquire(Conversation(channel="wecom", kind="direct", id="u1"), agent="build")
+    assert seen["inboundPermissions"][0]["action"] == "bash"
+    assert seen["sandbox"] == {"process": "seatbelt", "failurePolicy": "fail-closed"}

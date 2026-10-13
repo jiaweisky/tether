@@ -87,6 +87,7 @@
 | 2026-10-13 | §7.4 marked **per-type platform media size limits as deferred — not to be implemented without an explicit instruction** (not device-verified, and the link fallback already handles rejection). |
 | 2026-10-13 | **Simplified project isolation to one axis** (§2.8, D20, §9, §14 M6): `projects.mode: shared | isolated` replaces the capability-driven `auto`/`on_conflict`/switch guards and the `provider` enum. `shared` reuses the configured base; `isolated` leases a per-conversation view via agentd's control API (`source_directory` + `control_url`, impl `none/copy/worktree/overlay`); an isolated lease is re-acquired (fresh view + session) on first use after a restart. |
 | 2026-10-13 | §4.3/§2.8/§9: isolated instances run on their own base, so the bridge now **subscribes to each lease's `/api/event`** (started before the first prompt, stopped on release; HITL poll covers them), and passes a tool policy via the new `projects.inbound_permissions` (agentd `ProjectRequest.inboundPermissions`) since agentd's default is read-only. Verified all four implementations (`none`/`copy`/`worktree`/`overlay`) and an end-to-end WeCom turn (view edited, source untouched). |
+| 2026-10-13 | §2.8/§9: added `projects.sandbox` (agentd `ProjectRequest.sandbox`), so a leased isolated instance can also be wrapped in the OS command sandbox (`seatbelt`/`bwrap`) — isolation (view) and sandbox (command restrictions) are orthogonal, and both are now configurable per isolated instance. |
 
 ---
 
@@ -427,6 +428,7 @@ isolated:  group A ──► view A (worktree / overlay / copy)
 - `isolated` uses agentd's control API (`POST/GET/DELETE /admin/projects`, §2.9) and needs `control_url` + `source_directory`.
 - **Isolation implementation** (`projects.isolation`): `copy` (full copy), `worktree` (`git worktree`; source must be a git repo), `overlay` (CoW: `clonefile` on macOS / `reflink` on Linux; needs `cow.base_readonly`), and `none` — **`none` is not isolation**: the instance serves the source directory itself (no `baseDir`), so view edits hit the source. Use it only to give a conversation its own *server* without a separate filesystem.
 - **Tool policy**: agentd's default inbound policy is **read-only**; a writable isolated agent needs `projects.inbound_permissions` (passed to the control API as `inboundPermissions`) — e.g. `bash`/`write`/`edit` at `ask` (HITL) or `allow`.
+- **OS sandbox** (`projects.sandbox`): the leased instance can also wrap every spawned command in an OS sandbox (`seatbelt` on macOS / `bwrap` on Linux), passed to the control API as `sandbox`. This is **orthogonal** to project isolation (which is about the filesystem view): without it, an isolated view's commands are not network/filesystem restricted (§17).
 - **Startup validation**: `shared` requires a base; `isolated` requires `control_url` + `source_directory`.
 - **Snapshots**: not needed for `shared`; optional per view for `isolated`.
 
@@ -1744,6 +1746,7 @@ projects:
   control_token: null                 # bearer for the control API (optional on loopback)
   source_directory: null              # the project to derive views from (absolute)
   inbound_permissions: []             # mode=isolated: tool policy for the instance ([] = agentd read-only default)
+  sandbox: null                       # mode=isolated: OS command sandbox, e.g. {process: seatbelt|bwrap, failurePolicy: fail-closed}
 
 sessions:
   idle_reset_s: 0                     # when >0, automatically reset the Conversation when idle

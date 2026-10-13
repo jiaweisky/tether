@@ -86,6 +86,13 @@ class InboundPermissionRule(BaseModel):
     effect: str = "ask"
 
 
+class SandboxConfig(BaseModel):
+    # OS-level command sandbox for a leased instance (agentd's sandbox.process):
+    # none | bwrap | seatbelt.
+    process: str = "none"
+    failure_policy: Literal["fail-closed", "fail-open"] = "fail-closed"
+
+
 class ProjectsConfig(BaseModel):
     # Either everyone shares one project, or each conversation leases its own
     # view of the source project.
@@ -106,6 +113,9 @@ class ProjectsConfig(BaseModel):
     # mode=isolated: the tool policy for the leased instance (empty = agentd's
     # read-only default). Same shape as agentd's server inboundPermissions.
     inbound_permissions: list[InboundPermissionRule] = Field(default_factory=list)
+    # mode=isolated: the OS command sandbox for the leased instance (none =
+    # agentd pass-through). Same shape as agentd's server sandbox.
+    sandbox: SandboxConfig | None = None
 
 
 class SessionsConfig(BaseModel):
