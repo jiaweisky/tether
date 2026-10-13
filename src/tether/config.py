@@ -80,6 +80,12 @@ class CowConfig(BaseModel):
     base_readonly: bool = True
 
 
+class InboundPermissionRule(BaseModel):
+    action: str
+    resource: str = "*"
+    effect: str = "ask"
+
+
 class ProjectsConfig(BaseModel):
     # Either everyone shares one project, or each conversation leases its own
     # view of the source project.
@@ -97,6 +103,9 @@ class ProjectsConfig(BaseModel):
     control_url: str | None = None
     control_token: str | None = None
     source_directory: str | None = None
+    # mode=isolated: the tool policy for the leased instance (empty = agentd's
+    # read-only default). Same shape as agentd's server inboundPermissions.
+    inbound_permissions: list[InboundPermissionRule] = Field(default_factory=list)
 
 
 class SessionsConfig(BaseModel):

@@ -85,8 +85,8 @@ class TetherApp:
         self.connectors: dict[str, IMConnector] = {}
         self._turns: dict[str, TurnEngine] = {}
         self._turn_queue: dict[str, list[TurnEngine]] = {}
-        self._sse_tasks: list[asyncio.Task[None]] = []
-        self._clients: list[tuple[str, HttpAgentClient]] = []
+        self._sse_tasks: dict[str, asyncio.Task[None]] = {}
+        self._clients: dict[str, HttpAgentClient] = {}
         self._janitor_task: asyncio.Task[None] | None = None
         self._watchdog_task: asyncio.Task[None] | None = None
         self._running = False
@@ -116,9 +116,7 @@ class TetherApp:
             except Exception as exc:  # noqa: BLE001 - discovery retries on first message
                 log.warning("agent_discovery_failed", base=base_url, error=str(exc))
         for base_url in self._base_urls():
-            client = self.router.client_for_base(base_url)
-            self._clients.append((base_url, client))
-            self._sse_tasks.append(asyncio.ensure_future(self._consume_events(base_url, client)))
+            await self._ensure_sse(base_url)
         self._janitor_task = asyncio.ensure_future(self._janitor())
         self._watchdog_task = asyncio.ensure_future(self._watchdog_loop())
         log.info("tether_started", connectors=list(self.connectors))
@@ -132,13 +130,13 @@ class TetherApp:
         if self._stop_event is not None:
             self._stop_event.set()
         started = time.monotonic()
-        for task in self._sse_tasks:
+        for task in self._sse_tasks.values():
             task.cancel()
         if self._janitor_task is not None:
             self._janitor_task.cancel()
         if self._watchdog_task is not None:
             self._watchdog_task.cancel()
-        for task in self._sse_tasks:
+        for task in self._sse_tasks.values():
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
         if self._janitor_task is not None:
@@ -183,6 +181,34 @@ class TetherApp:
         if pool:
             return [entry.base_url for entry in pool]
         return [self.config.server.base_url]
+
+    async def _ensure_sse(self, base_url: str) -> None:
+        """Start an event-stream consumer for a base if it has none.
+
+        Isolated projects run on their own dynamic listener (not a configured
+        base), so their events only arrive once we subscribe to that base too.
+        """
+        base = base_url.rstrip("/")
+        if base in self._sse_tasks:
+            return
+        client = self.router.client_for_base(base)
+        self._clients[base] = client
+        self._sse_tasks[base] = asyncio.ensure_future(self._consume_events(base, client))
+
+    async def _stop_sse(self, base: str) -> None:
+        task = self._sse_tasks.pop(base, None)
+        self._clients.pop(base, None)
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+
+    async def _sync_sse(self) -> None:
+        """Keep the consumer set equal to the configured bases + active leases."""
+        desired = {base.rstrip("/") for base in self._base_urls()} | self.router.leases.bases()
+        for base in list(self._sse_tasks):
+            if base not in desired:
+                await self._stop_sse(base)
 
     # -- inbound -----------------------------------------------------------
     async def _on_item(self, item: IncomingItem) -> None:
@@ -387,6 +413,9 @@ class TetherApp:
         self._turns[sid] = engine
         engine.route.active_turn_sender = engine.inbound.sender.id
         engine.activated_at = time.monotonic()
+        # An isolated project lives on its own dynamic base; subscribe before the
+        # prompt so none of this turn's events are missed.
+        await self._ensure_sse(engine.route.server_base)
         await engine.start()
 
     async def _discard(self, engine: TurnEngine) -> None:
@@ -678,7 +707,7 @@ class TetherApp:
         try:
             while self._running:
                 await asyncio.sleep(interval)
-                for _base, client in self._clients:
+                for _base, client in self._clients.items():
                     try:
                         await self._restore_hitl(client)
                     except Exception:  # noqa: BLE001
@@ -689,6 +718,8 @@ class TetherApp:
                         log.info("leases_reclaimed", count=len(reclaimed))
                 except Exception:  # noqa: BLE001
                     log.exception("lease_reclaim_failed")
+                with contextlib.suppress(Exception):
+                    await self._sync_sse()
         except asyncio.CancelledError:  # pragma: no cover - shutdown
             raise
 

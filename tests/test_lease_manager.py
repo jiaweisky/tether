@@ -61,3 +61,12 @@ async def test_release_all_on_shutdown():
     await leases.release_all()
     assert sorted(provider.released) == ["p1", "p2"]
     assert leases.count == 0
+
+
+@pytest.mark.asyncio
+async def test_bases_returns_distinct_lease_bases():
+    leases = LeaseManager(FakeProvider(), ttl_s=10)
+    await leases.register("k1", ProjectLease("p1", server_base="http://a/"))
+    await leases.register("k2", ProjectLease("p2", server_base="http://a"))
+    await leases.register("k3", ProjectLease("p3", server_base="http://b"))
+    assert leases.bases() == {"http://a", "http://b"}

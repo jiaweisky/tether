@@ -23,7 +23,7 @@ import shutil
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 import httpx
 
@@ -123,7 +123,7 @@ class AgentdControlProvider:
     ) -> ProjectLease:
         self._require_configured()
         name = _project_name(conv)
-        request = {
+        request: dict[str, Any] = {
             "name": name,
             "kind": transport,
             # The view lives at <base_dir>/<name>; keep the state root outside it.
@@ -138,6 +138,10 @@ class AgentdControlProvider:
                 "cow": {"mode": self.config.projects.cow.mode},
             },
         }
+        if self.config.projects.inbound_permissions:
+            request["inboundPermissions"] = [
+                rule.model_dump() for rule in self.config.projects.inbound_permissions
+            ]
         data = await self._create(request, retry=True)
         server_base = data.get("server_base")
         if not server_base:
@@ -255,6 +259,12 @@ class LeaseManager:
     def get(self, key: str) -> ProjectLease | None:
         entry = self._leases.get(key)
         return entry[0] if entry else None
+
+    def bases(self) -> set[str]:
+        """The distinct server bases currently leased."""
+        return {
+            lease.server_base.rstrip("/") for lease, _ in self._leases.values() if lease.server_base
+        }
 
     def touch(self, key: str) -> None:
         entry = self._leases.get(key)

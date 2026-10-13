@@ -86,6 +86,7 @@
 | 2026-10-13 | §8.3 added the **stale-turn watchdog** (`sessions.turn_watchdog_s`, default 30s): a Turn ends only on the live `session.status idle` (no SSE replay), so a missed idle would block the conversation's queue forever; the bridge now cross-checks active Turns against `GET /api/session/active` and finishes those whose session is gone. §9 config updated. |
 | 2026-10-13 | §7.4 marked **per-type platform media size limits as deferred — not to be implemented without an explicit instruction** (not device-verified, and the link fallback already handles rejection). |
 | 2026-10-13 | **Simplified project isolation to one axis** (§2.8, D20, §9, §14 M6): `projects.mode: shared | isolated` replaces the capability-driven `auto`/`on_conflict`/switch guards and the `provider` enum. `shared` reuses the configured base; `isolated` leases a per-conversation view via agentd's control API (`source_directory` + `control_url`, impl `none/copy/worktree/overlay`); an isolated lease is re-acquired (fresh view + session) on first use after a restart. |
+| 2026-10-13 | §4.3/§2.8/§9: isolated instances run on their own base, so the bridge now **subscribes to each lease's `/api/event`** (started before the first prompt, stopped on release; HITL poll covers them), and passes a tool policy via the new `projects.inbound_permissions` (agentd `ProjectRequest.inboundPermissions`) since agentd's default is read-only. Verified all four implementations (`none`/`copy`/`worktree`/`overlay`) and an end-to-end WeCom turn (view edited, source untouched). |
 
 ---
 
@@ -424,6 +425,8 @@ isolated:  group A ──► view A (worktree / overlay / copy)
 
 - `shared` uses the configured base(s) directly — `server.pool` if present, otherwise the single `server.base_url`.
 - `isolated` uses agentd's control API (`POST/GET/DELETE /admin/projects`, §2.9) and needs `control_url` + `source_directory`.
+- **Isolation implementation** (`projects.isolation`): `copy` (full copy), `worktree` (`git worktree`; source must be a git repo), `overlay` (CoW: `clonefile` on macOS / `reflink` on Linux; needs `cow.base_readonly`), and `none` — **`none` is not isolation**: the instance serves the source directory itself (no `baseDir`), so view edits hit the source. Use it only to give a conversation its own *server* without a separate filesystem.
+- **Tool policy**: agentd's default inbound policy is **read-only**; a writable isolated agent needs `projects.inbound_permissions` (passed to the control API as `inboundPermissions`) — e.g. `bash`/`write`/`edit` at `ask` (HITL) or `allow`.
 - **Startup validation**: `shared` requires a base; `isolated` requires `control_url` + `source_directory`.
 - **Snapshots**: not needed for `shared`; optional per view for `isolated`.
 
@@ -1064,6 +1067,7 @@ Choose **one** persistent SSE connection to `/api/event` (one per agentd base), 
   `session.next.text.delta`, `session.status`, and all HITL events (`permission.v2.asked`
   / `question.v2.asked`) — none of these are present in durable replay.
 - The bridge service is single-process, multi-session; a global subscription + `sessionID → Route` routing table is sufficient, avoiding one connection per session.
+- **Isolated projects need extra streams**: an isolated project instance is its own agentd server (its own `/api/event`), which is **not** one of the configured bases. The bridge therefore ALSO subscribes to `lease.server_base` for every active isolated lease — started before that turn's first prompt, stopped when the lease is released — and the HITL fallback poll covers those bases too.
 
 SSE frame format (`docs/DESIGN-HTTP.md` §6.3):
 
@@ -1739,6 +1743,7 @@ projects:
   control_url: null                   # e.g. http://127.0.0.1:9090
   control_token: null                 # bearer for the control API (optional on loopback)
   source_directory: null              # the project to derive views from (absolute)
+  inbound_permissions: []             # mode=isolated: tool policy for the instance ([] = agentd read-only default)
 
 sessions:
   idle_reset_s: 0                     # when >0, automatically reset the Conversation when idle
