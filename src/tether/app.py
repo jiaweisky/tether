@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import hashlib
 import time
+from collections.abc import Awaitable
 from typing import Any, Literal
 
 from .agent.client import HttpAgentClient
@@ -53,6 +54,11 @@ from .util.logging import get_logger
 
 log = get_logger("tether.app")
 
+# A turn is only considered stale (by the watchdog) after it has been active for
+# at least this long, so a just-started turn whose prompt has not yet reached
+# agentd is not mistaken for a dead one.
+_WATCHDOG_GRACE_S = 10.0
+
 
 class TetherApp:
     def __init__(
@@ -82,6 +88,7 @@ class TetherApp:
         self._sse_tasks: list[asyncio.Task[None]] = []
         self._clients: list[tuple[str, HttpAgentClient]] = []
         self._janitor_task: asyncio.Task[None] | None = None
+        self._watchdog_task: asyncio.Task[None] | None = None
         self._running = False
         self._stopped = False
         self._accepting = True
@@ -113,6 +120,7 @@ class TetherApp:
             self._clients.append((base_url, client))
             self._sse_tasks.append(asyncio.ensure_future(self._consume_events(base_url, client)))
         self._janitor_task = asyncio.ensure_future(self._janitor())
+        self._watchdog_task = asyncio.ensure_future(self._watchdog_loop())
         log.info("tether_started", connectors=list(self.connectors))
 
     async def stop(self) -> None:
@@ -128,12 +136,17 @@ class TetherApp:
             task.cancel()
         if self._janitor_task is not None:
             self._janitor_task.cancel()
+        if self._watchdog_task is not None:
+            self._watchdog_task.cancel()
         for task in self._sse_tasks:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
         if self._janitor_task is not None:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._janitor_task
+        if self._watchdog_task is not None:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._watchdog_task
         log.info("stop_streams_closed", elapsed_ms=_ms_since(started))
         for engine in list(self._turns.values()):
             # Default: just stop streaming and leave the turn on agentd so a
@@ -364,6 +377,7 @@ class TetherApp:
         sid = engine.route.session_id
         self._turns[sid] = engine
         engine.route.active_turn_sender = engine.inbound.sender.id
+        engine.activated_at = time.monotonic()
         await engine.start()
 
     async def _discard(self, engine: TurnEngine) -> None:
@@ -373,6 +387,9 @@ class TetherApp:
             await self._activate(queue[0])
 
     async def _on_turn_finished(self, engine: TurnEngine) -> None:
+        # A finished turn has no answerable interactions: any still-pending entry
+        # (an interrupted/expired ask) is stale and must not shadow later ones.
+        engine.route.pending_interactions.clear()
         queue = self._remove_engine(engine)
         if queue and engine.route.session_id not in self._turns:
             await self._activate(queue[0])
@@ -434,17 +451,34 @@ class TetherApp:
             if pending.kind == "permission":
                 replies = ["once", "always", "reject"]
                 if 0 <= index < len(replies):
-                    await client.reply_permission(route.session_id, rid, reply=replies[index])
-                    route.pending_interactions.pop(rid, None)
-                    await self.router.save(route)
-                    return True
+                    reply = client.reply_permission(route.session_id, rid, reply=replies[index])
+                    if await self._answer_pending(route, rid, reply):
+                        return True
+                    continue
             else:
                 if 0 <= index < len(pending.options):
-                    await client.reply_question(route.session_id, rid, [[pending.options[index]]])
-                    route.pending_interactions.pop(rid, None)
-                    await self.router.save(route)
-                    return True
+                    reply = client.reply_question(route.session_id, rid, [[pending.options[index]]])
+                    if await self._answer_pending(route, rid, reply):
+                        return True
+                    continue
         return False
+
+    async def _answer_pending(self, route: Route, rid: str, reply: Awaitable[None]) -> bool:
+        """Send a pending-interaction reply; drop it on success or when stale.
+
+        Returns True if agentd accepted the reply; False if it no longer has the
+        interaction (already answered / expired), in which case the stale entry is
+        dropped so it cannot shadow later ones.
+        """
+        try:
+            await reply
+            accepted = True
+        except AgentError as exc:  # already answered/expired on agentd
+            log.warning("stale_interaction_dropped", request=rid, error=exc.code)
+            accepted = False
+        route.pending_interactions.pop(rid, None)
+        await self.router.save(route)
+        return accepted
 
     # -- SSE consumption + reconciliation ----------------------------------
     async def _consume_events(self, base_url: str, client: HttpAgentClient) -> None:
@@ -483,6 +517,55 @@ class TetherApp:
         if event.type == SESSION_STATUS:
             status = (event.data or {}).get("status") or {}
             log.debug("status_without_turn", session=sid, status=status)
+
+    async def _watchdog_loop(self) -> None:
+        interval = self.config.sessions.turn_watchdog_s
+        if interval <= 0:
+            return
+        while self._running:
+            await asyncio.sleep(interval)
+            try:
+                await self._recover_stale_turns()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - the watchdog must never die
+                log.exception("turn_watchdog_failed")
+
+    async def _recover_stale_turns(self) -> None:
+        """Finish turns the bridge thinks are running but agentd no longer has.
+
+        A turn ends only on the live ``session.status idle`` event, which the
+        global SSE does not replay. If that event is lost (a reconnect gap, an
+        agentd restart, or a second bridge instance taking the connection) the
+        turn would otherwise stay active and block the conversation's queue
+        forever. Here we cross-check each active turn against agentd and finish
+        the ones whose session is no longer running.
+        """
+        now = time.monotonic()
+        by_base: dict[str, list[TurnEngine]] = {}
+        for engine in self._turns.values():
+            # Too new to judge: the prompt may not have started on agentd yet.
+            if not engine.activated_at or now - engine.activated_at < _WATCHDOG_GRACE_S:
+                continue
+            by_base.setdefault(engine.route.server_base, []).append(engine)
+        for base, engines in by_base.items():
+            try:
+                active = await self.router.client_for_base(base).active_sessions()
+            except AgentError as exc:
+                log.warning("turn_watchdog_probe_failed", base=base, error=exc.code)
+                continue
+            for engine in engines:
+                if engine.route.session_id in active:
+                    continue
+                log.warning(
+                    "stale_turn_recovered",
+                    session=engine.route.session_id,
+                    conversation=engine.route.key,
+                )
+                try:
+                    await engine.finish()
+                except Exception:  # noqa: BLE001 - one bad turn must not kill the watchdog
+                    log.exception("stale_turn_finish_failed", session=engine.route.session_id)
 
     async def _reconcile(self, base_url: str, client: HttpAgentClient) -> None:
         """Recover live state after the event stream reconnects."""

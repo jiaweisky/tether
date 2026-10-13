@@ -115,6 +115,10 @@ class SessionsConfig(BaseModel):
     # interactions. Default false so a bridge restart does not disturb a turn or
     # consume a parked permission (it resumes after restart).
     interrupt_on_shutdown: bool = False
+    # Cross-check active turns against agentd every N seconds and finish any whose
+    # session is no longer running (a lost `session.status idle` would otherwise
+    # block the conversation forever). 0 disables the watchdog.
+    turn_watchdog_s: int = 30
 
 
 class DedupConfig(BaseModel):

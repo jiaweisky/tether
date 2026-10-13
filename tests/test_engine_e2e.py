@@ -521,3 +521,58 @@ async def test_refresh_identity_description_only_override(tmp_path):
     identity = await app.router.refresh_identity(route, conn)
     assert identity.name == "Assistant"
     assert identity.description == "自定义描述"
+
+
+@pytest.mark.asyncio
+async def test_watchdog_recovers_stale_turn_and_drains_queue(tmp_path):
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("hi", message_id="m1"))
+    sid = client.prompts[0]["sid"]
+    engine = app._turns[sid]
+    # A second message queues behind the (phantom) active turn.
+    await app._on_message(inbound("again", message_id="m2"))
+    assert app._turn_queue.get(sid)
+
+    # agentd reports the session as no longer running, and the turn is old.
+    client.active = set()
+    engine.activated_at -= 1000
+    await app._recover_stale_turns()
+
+    # The stale turn was finished and the queued turn activated (2nd prompt).
+    assert app._turns[sid] is not engine
+    assert len(client.prompts) == 2
+
+
+@pytest.mark.asyncio
+async def test_number_reply_to_stale_interaction_is_dropped(tmp_path):
+    from tether.engine.hitl import make_pending
+
+    app, conn, client = await make_app(tmp_path)
+    msg = inbound("hi", message_id="m1")
+    await app._on_message(msg)
+    route = await app.router.get(msg.conversation)
+    assert route is not None
+    route.pending_interactions["per_1"] = make_pending(
+        "permission", owner="u1", scope="initiator", request_id="per_1"
+    )
+    # agentd no longer has this interaction.
+    client.permission_reply_error = "not_found"
+    await app._on_message(inbound("1", message_id="m2"))
+    assert "per_1" not in route.pending_interactions
+
+
+@pytest.mark.asyncio
+async def test_turn_finish_clears_pending_interactions(tmp_path):
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("hi", message_id="m1"))
+    sid = client.prompts[0]["sid"]
+    await app._route_event(
+        Event("p1", PERMISSION_ASKED, {"id": "per_1", "sessionID": sid, "action": "bash"})
+    )
+    route = await app.router.get_by_session(sid)
+    assert route is not None and route.pending_interactions
+    # The turn ends (idle): the leftover pending interaction must be cleared.
+    await app._route_event(
+        Event("d1", SESSION_STATUS, {"sessionID": sid, "status": {"type": "idle"}})
+    )
+    assert not route.pending_interactions

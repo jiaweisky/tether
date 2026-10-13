@@ -45,6 +45,7 @@ sessions:
   max_active_routes: 1000
   validate_session: true      # on the first message after a restart, verify the session still exists (and recreate it if not)
   interrupt_on_shutdown: false  # false = leave in-progress turns/parked interactions to agentd so a restart can resume them
+  turn_watchdog_s: 30         # finish an active turn whose agentd session is gone (lost idle); 0 disables
 
 dedup:
   ttl_s: 600

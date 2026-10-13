@@ -95,6 +95,9 @@ class TurnEngine:
         self._sent_ref: SentRef | None = None
         self._placeholder_sent = False
         self._ended = False
+        # Set by the app when the engine becomes the conversation's active turn;
+        # used by the watchdog to tell a genuinely running turn from a stale one.
+        self.activated_at: float = 0.0
         self._timers: dict[str, asyncio.Task[None]] = {}
         self._can_stream = connector.supports_streaming(route.conversation)
         self.controller = StreamingController(

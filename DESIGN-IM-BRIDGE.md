@@ -83,6 +83,7 @@
 | 2026-10-12 | §8.5 shutdown: default is now to **leave in-progress turns/parked interactions on agentd** (`sessions.interrupt_on_shutdown: false`) so a restart resumes them; `true` restores interrupt+reject. Stale card clicks (already answered/expired) are ignored; answering an interaction after a restart attaches a resumed turn engine. §9 updated |
 | 2026-10-13 | §2.6/§5.1/§9 identity: the bot name/description come from the platform **only where the API exposes them** (Feishu `GET /open-apis/bot/v3/info` → `app_name` + application `description`; QQ `botpy` `robot.name`; personal WeChat nickname). **WeCom provides neither** — its callback carries only `aibotid` (confirmed against the official callback schema and captured frames) — so `identity.display_name`/`description` are **required** for WeCom and **optional overrides** elsewhere (configured wins, else the platform's). Inferring the name from an inline `@name` in message text was rejected as fragile. |
 | 2026-10-13 | Added **§8.6 Message Recall** and decision **D23**: recall is best-effort and platform-dependent — where a platform emits a recall event (Feishu `im.message.recalled_v1`) the Connector maps it to `ConnectorEvent(kind="recall")` and the core drops a queued turn / interrupts an in-flight one (never unsends an already-sent reply); a platform without the event (WeCom long connection) is a no-op. §3.2 `ConnectorEvent.kind` gained `recall`; §14 M7 lists it. |
+| 2026-10-13 | §8.3 added the **stale-turn watchdog** (`sessions.turn_watchdog_s`, default 30s): a Turn ends only on the live `session.status idle` (no SSE replay), so a missed idle would block the conversation's queue forever; the bridge now cross-checks active Turns against `GET /api/session/active` and finishes those whose session is gone. §9 config updated. |
 
 ---
 
@@ -1688,6 +1689,7 @@ See §4.5. Core points:
   4. `GET /api/permission` / `GET /api/question` → restore pending HITL.
 - SSE overflow (`event: error` + `subscriber_overflow`) → log it and run the reconciliation flow.
 - **Session recovery (lost agentd state)**: the IM↔session mapping is persisted by the bridge (`routes`), keyed by `Conversation.key`; agentd holds only session ids. If agentd is restarted with a **fresh state directory**, a persisted `session_id` no longer exists. On the **first use of a loaded route** (`sessions.validate_session`), the bridge verifies it with `GET /api/session/{id}` and, on `not_found`, creates a new session for the same `Conversation.key` and updates the route (re-injecting identity). A `not_found` on `prompt` is also recovered reactively, covering a session lost mid-run. This keeps a conversation working instead of failing permanently.
+- **Stale-turn watchdog (`sessions.turn_watchdog_s`)**: a Turn ends **only** on the live `session.status idle` event, and the global SSE has **no replay** — so a single missed idle (a reconnect gap, an agentd restart, or a second bridge instance taking the connection) would leave the Turn "active" and **block that conversation's queue forever**. Every N seconds the bridge cross-checks each active Turn against `GET /api/session/active` and, for any whose session is **no longer running** (after a short grace period, so a just-started Turn is not raced), finishes it — flushing the partial snapshot and draining the queue. `0` disables it.
 
 ### 8.4 Backpressure and Rate Limiting
 
@@ -1777,6 +1779,7 @@ sessions:
   max_active_routes: 1000
   validate_session: true              # on the first message after a restart, verify a loaded route's session still exists; recreate it if gone (§8.3)
   interrupt_on_shutdown: false        # false = leave in-progress turns/parked interactions to agentd (restart-resumable, §8.5)
+  turn_watchdog_s: 30                 # cross-check active turns vs agentd and finish stale ones (§8.3); 0 disables
 
 dedup:
   ttl_s: 600                          # TTL of the inbound message / card callback dedup cache (§8.2)
