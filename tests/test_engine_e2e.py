@@ -788,3 +788,25 @@ async def test_status_command_reports_and_redacts(tmp_path):
     assert "group" in group and "agent=build" in group
     assert "agentd:" not in group and "workdir:" not in group
     assert "context:" not in group and "project:" not in group
+
+
+@pytest.mark.asyncio
+async def test_tool_edits_send_only_the_final_file_version(tmp_path):
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+
+    doc = tmp_path / "doc.md"
+    doc.write_text("v1")
+    edit = {"sessionID": sid, "structured": {"files": [{"file": str(doc), "status": "modified"}]}}
+    await app._route_event(Event("t1", TOOL_SUCCESS, edit))
+    doc.write_text("v2")
+    await app._route_event(Event("t2", TOOL_SUCCESS, edit))
+    await app._route_event(
+        Event("t3", SESSION_STATUS, {"sessionID": sid, "status": {"type": "idle"}})
+    )
+
+    media = [m for m in conn.messages if m["kind"] == "media"]
+    # An edit-tool file is delivered, and only once, with its final content.
+    assert len(media) == 1
+    assert media[0]["media"].data == b"v2"

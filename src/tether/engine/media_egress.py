@@ -77,21 +77,27 @@ _STRUCTURED_FILE_OPERATIONS = ("write", "edit")
 
 
 def structured_file_paths(structured: Any) -> list[str]:
-    """File paths a mutation tool reports in its structured output.
+    """Produced file paths named in a tool's structured output.
 
-    The agent's ``write``/``edit`` tools name the produced file in
-    ``structured.resource`` (``outputPaths`` is often empty), so the bridge must
-    read it to deliver the file the user asked for.
+    ``write`` names the file in ``structured.resource``/``target`` (its
+    ``operation`` is ``write``); ``edit``/``apply_patch`` instead report a
+    ``structured.files`` list where each entry carries ``file``.
     """
     if not isinstance(structured, dict):
         return []
-    if structured.get("operation") not in _STRUCTURED_FILE_OPERATIONS:
-        return []
-    return [
-        value
-        for key in ("resource", "target")
-        if isinstance((value := structured.get(key)), str) and value
-    ]
+    out: list[str] = []
+    files = structured.get("files")
+    if isinstance(files, list):
+        for item in files:
+            path = item.get("file") if isinstance(item, dict) else None
+            if isinstance(path, str) and path:
+                out.append(path)
+    if structured.get("operation") in _STRUCTURED_FILE_OPERATIONS:
+        for key in ("resource", "target"):
+            value = structured.get(key)
+            if isinstance(value, str) and value:
+                out.append(value)
+    return out
 
 
 def extract_file_parts(data: Any) -> list[RichMedia]:

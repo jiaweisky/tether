@@ -100,6 +100,7 @@ class TurnEngine:
         self.conv = route.conversation
         self.usage = Usage(context_limit=route.context_limit or config.model.context_limit)
         self.media: list[RichMedia] = []
+        self._media_paths: dict[str, None] = {}
         self._media_seen: set[str] = set()
         self._sent_ref: SentRef | None = None
         self._placeholder_sent = False
@@ -224,12 +225,26 @@ class TurnEngine:
         await self._reject_pending_permissions()
 
     async def _drain_media(self) -> None:
-        for media in self.media:
+        produced = list(self.media)
+        produced += files_from_paths(
+            list(self._media_paths),
+            base_dir=self.working_dir,
+            max_bytes=self.config.media.max_bytes,
+        )
+        seen: set[str] = set()
+        for media in produced:
+            key = media.name or media.url or ""
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
             try:
                 await self.media_egress.send(self.conv, media)
             except Exception:  # noqa: BLE001
                 log.warning("media_egress_failed", kind=media.kind)
         self.media.clear()
+        self._media_paths.clear()
+        self._media_seen.clear()
 
     async def _reject_pending_permissions(self) -> None:
         for request_id, pending in list(self.route.pending_interactions.items()):
@@ -276,24 +291,23 @@ class TurnEngine:
             self.controller.clear_tool()
 
     def _collect_media(self, data: dict[str, Any]) -> None:
-        """Collect media a tool produced: inline parts plus files by path.
+        """Collect media a tool produced.
 
-        Tool results may embed file parts (``content``) or name files on disk
-        (``outputPaths``). Either way the bytes reach the user instead of the
-        agent's "saved to <path>" text alone. Duplicates are dropped.
+        Inline file parts (``content``) are snapshotted now; files named on disk
+        (``outputPaths`` / ``structured``) are only *recorded* and read at drain
+        time, so a file edited several times in one turn is sent once, with its
+        final content.
         """
-        produced = extract_file_parts(data.get("content"))
-        paths = list(data.get("outputPaths") or []) + structured_file_paths(data.get("structured"))
-        produced += files_from_paths(
-            paths, base_dir=self.working_dir, max_bytes=self.config.media.max_bytes
-        )
-        for media in produced:
+        for media in extract_file_parts(data.get("content")):
             key = media.name or media.url or ""
             if key and key in self._media_seen:
                 continue
             if key:
                 self._media_seen.add(key)
             self.media.append(media)
+        paths = list(data.get("outputPaths") or []) + structured_file_paths(data.get("structured"))
+        for path in paths:
+            self._media_paths[path] = None
 
     async def _on_tool_failed(self, data: dict[str, Any]) -> None:
         self.controller.push_text(f"\n\n⚠️ A tool failed: {_short(data.get('error'))}\n")
