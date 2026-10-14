@@ -294,7 +294,74 @@ class TetherApp:
                 f"🆔 your id: `{msg.sender.id}`\nconversation: `{msg.conversation.key}`",
             )
             return True
+        if command == "status":
+            await self._handle_status(msg, connector)
+            return True
         return False
+
+    async def _handle_status(self, msg: InboundMessage, connector: IMConnector) -> None:
+        """`/status`: a read-only snapshot of the conversation and the bridge.
+
+        The reply is visible to the whole conversation, so it is redacted by
+        conversation type — a group shows only session/turn basics (no context,
+        project or server details) and shortens the session id.
+        """
+        conv = msg.conversation
+        group = conv.is_group
+        route = await self.router.get(conv)
+        lines = [f"📊 Status · {connector.name}{' · group' if group else ''}"]
+        if route is None:
+            lines.append("session: (none yet)")
+        else:
+            engine = self._turns.get(route.session_id)
+            sid = _short_id(route.session_id) if group else route.session_id
+            lines.append(f"session: {sid}   agent={route.agent}   model={route.model or '?'}")
+            if group:
+                lines.append(f"participants: {len(route.participants)}")
+            else:
+                lines.append(f"conversation: {conv.key}")
+                lines.extend(self._direct_status_lines(route, engine))
+            state = "parked" if route.pending_interactions else ("running" if engine else "idle")
+            lines.append(f"turn: {state}   waiting: {self._waiting(route)}")
+            pending = _pending_summary(route.pending_interactions)
+            if pending:
+                lines.append(f"waiting on: {pending}")
+        lines.append(
+            f"uptime: {_human_duration(metrics.uptime_s())}"
+            f"   active_turns={int(metrics.gauges.get('active_turns', 0))}"
+        )
+        await self._notice(connector, conv, "\n".join(lines))
+
+    def _direct_status_lines(self, route: Route, engine: TurnEngine | None) -> list[str]:
+        """Detail shown only in a direct chat (never visible to a group)."""
+        limit = route.context_limit or self.config.model.context_limit
+        used = engine.usage.context_tokens if engine is not None else None
+        context = f"context: {_human_tokens(used)} / {_human_tokens(limit)}"
+        if engine is not None and (engine.usage.input_tokens or engine.usage.output_tokens):
+            usage = engine.usage
+            context += (
+                f"   last: {_human_tokens(usage.input_tokens)} in /"
+                f" {_human_tokens(usage.output_tokens)} out /"
+                f" {_human_tokens(usage.cached_tokens)} cached"
+            )
+        lines = [context]
+        workdir = self.router.working_directory(route)
+        if workdir:
+            lines.append(f"workdir: {workdir}")
+        if self.config.projects.mode == "isolated":
+            lines.append(
+                f"project: {route.project_id or '?'} (isolated/{self.config.projects.isolation})"
+            )
+        lines.append(f"agentd: {route.server_base}")
+        if route.bot_name:
+            lines.append(f"identity: {route.bot_name}")
+        return lines
+
+    def _waiting(self, route: Route) -> int:
+        """Turns queued behind the one currently running, if any."""
+        queue = self._turn_queue.get(route.session_id) or []
+        running = 1 if self._turns.get(route.session_id) is not None else 0
+        return max(0, len(queue) - running)
 
     async def _on_interaction(self, item: IncomingInteraction) -> None:
         connector = self.connectors.get(item.conversation.channel)
@@ -1006,6 +1073,38 @@ def _interaction_label(value: dict[str, Any]) -> str:
         answer = value.get("answer") or []
         return "✅ " + (", ".join(str(a) for a in answer) if answer else "Answered")
     return "✅ Handled"
+
+
+def _short_id(sid: str) -> str:
+    return f"{sid[:8]}…" if len(sid) > 8 else sid
+
+
+def _human_tokens(count: int | None) -> str:
+    if not count:
+        return "-"
+    if count >= 1_000_000:
+        return f"{count / 1_000_000:.1f}M"
+    if count >= 1000:
+        return f"{count / 1000:.1f}k"
+    return str(count)
+
+
+def _human_duration(seconds: float) -> str:
+    hours, rem = divmod(int(seconds), 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}h{minutes}m"
+    if minutes:
+        return f"{minutes}m{secs}s"
+    return f"{secs}s"
+
+
+def _pending_summary(pending: dict[str, Any]) -> str:
+    counts: dict[str, int] = {}
+    for item in pending.values():
+        kind = getattr(item, "kind", "?")
+        counts[kind] = counts.get(kind, 0) + 1
+    return ", ".join(kind if n == 1 else f"{kind} ×{n}" for kind, n in counts.items())
 
 
 def _form_answers(specs: list[dict[str, Any]], form: dict[str, Any]) -> list[list[str]]:

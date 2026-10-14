@@ -102,3 +102,16 @@ def test_admins_are_a_superset_for_commands():
     assert not hitl.command_authorized(
         Sender(id="stranger"), conv, config, active_turn_sender="other"
     )
+
+
+def test_parse_status_command():
+    cmd = parse_command("/status")
+    assert cmd is not None and cmd.kind == "status"
+
+
+def test_command_is_recognized_after_a_leading_mention():
+    # Group messages keep the bot mention in the text.
+    assert parse_command("@Bot /stop").kind == "stop"
+    assert parse_command("@荔小枝 /new").kind == "new"
+    assert parse_command("@_user_1 /status").kind == "status"
+    assert parse_command("@Bot hello there") is None

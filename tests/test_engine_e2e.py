@@ -770,3 +770,21 @@ async def test_config_hot_reload_applies_admins(tmp_path):
     app._reload_config()
 
     assert app.config.group.admins == ["u9"]
+
+
+@pytest.mark.asyncio
+async def test_status_command_reports_and_redacts(tmp_path):
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("hi"))
+    await app._on_message(inbound("/status", message_id="m2"))
+    direct = conn.last_text()
+    assert "Status" in direct
+    assert "agent=build" in direct
+    assert "agentd:" in direct and "context:" in direct
+
+    await app._on_message(inbound("hi", kind="group", conv_id="g1", message_id="m3"))
+    await app._on_message(inbound("/status", kind="group", conv_id="g1", message_id="m4"))
+    group = conn.last_text()
+    assert "group" in group and "agent=build" in group
+    assert "agentd:" not in group and "workdir:" not in group
+    assert "context:" not in group and "project:" not in group

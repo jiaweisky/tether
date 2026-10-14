@@ -148,7 +148,6 @@ class GroupConfig(BaseModel):
     admins: list[str] = Field(default_factory=list)
     hitl_scope: HitlScope = "initiator"
     command_scope: CommandScope = "initiator"
-    queue_backup_hint: bool = True
 
 
 class IdentityConfig(BaseModel):

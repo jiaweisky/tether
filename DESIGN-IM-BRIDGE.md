@@ -105,6 +105,7 @@
 | 2026-10-13 | §2.5/§6.6/§9: added `/whoami` (reply with the sender's platform id, so an operator can discover the id to add as admin), made `group.admins` a **superset for commands** (an admin may always run `/stop`/`/new`, even when not the initiator), and added **config hot-reload** (`reload: true`) that watches `config.yaml` and re-applies a safe subset (`group`/`access`/`permissions`/`commands`/`identity`/`sessions`/`media`) without a restart (channels/credentials/server still need one). |
 | 2026-10-14 | §5.1 WeCom **quoted messages** are now parsed: a reply/quote is delivered as a normal message plus a `quote` field, so a quoted **media** becomes an attachment and a quoted **text** is prefixed (`[quoting] …`). Per the official receive-message scenarios, a group only delivers text/mixed/quote (image/file/voice/video are **单聊-only**), so a file in a group is only reachable by *quoting* it — which this fixes. |
 | 2026-10-14 | §7/§9 **`media.inline_limit_bytes` default 10 MB → 256 KB**: inlining a multi-MB image as a base64 data URL in the prompt ballooned the context and made agentd auto-compact in a loop. Only genuinely small media is inlined now; larger media uses a provider file upload (when configured) or is spooled. |
+| 2026-10-14 | §2.5/§6.6 added **`/status`** (read-only snapshot: session/agent/model, context usage, project mode + working dir, agentd base, turn state, queued turns, pending interactions, uptime). No command scope — the reply is visible to the whole conversation, so it is **redacted by conversation type**: a group hides the agentd base and working directory and shortens the session id. Removed the never-implemented `group.queue_backup_hint` config field. |
 
 ---
 
@@ -311,7 +312,7 @@ and by default does not know who said it. The bridge therefore injects a speaker
 - **HITL `group.hitl_scope`**: `initiator` (default, only that turn's initiator) / `participants` (any group member) /
   `admins` (**configured admins**, not a platform role). A click by an unauthorized person is **ignored with a reply hint**, and produces no side effect
   (to prevent others from approving dangerous operations on the initiator's behalf).
-- **Commands**: `/stop` cancels the current turn; `/new` starts a fresh agent session for the conversation (interrupt, drop queued turns, delete + recreate the agentd session; the project/view is untouched); `/whoami` replies with the sender's platform id (to discover an id to add as admin). `/stop` in a group defaults to **only that turn's initiator** (`command_scope: initiator`, configurable to `admins`); `/new` is **admin-only** (`group.admins`) — with an empty list it has no effect. **Admins are a superset**: a configured admin may always run a command. In direct chat unauthorized persons are ignored with a hint.
+- **Commands**: `/stop` cancels the current turn; `/new` starts a fresh agent session for the conversation (interrupt, drop queued turns, delete + recreate the agentd session; the project/view is untouched); `/whoami` replies with the sender's platform id (to discover an id to add as admin); `/status` replies with a read-only snapshot (session/agent/model, context usage, project mode + working dir, agentd base, turn state, queued turns, pending interactions, uptime) — redacted in a group (no agentd base / working dir, short session id). `/stop` in a group defaults to **only that turn's initiator** (`command_scope: initiator`, configurable to `admins`); `/new` is **admin-only** (`group.admins`) — with an empty list it has no effect. **Admins are a superset**: a configured admin may always run a command. In direct chat unauthorized persons are ignored with a hint.
 
 **(4) Context and cost**
 
@@ -1826,7 +1827,6 @@ group:                                # group chat multi-user semantics (§2.5)
   admins: []                          # allowlist of group admin user ids (platforms mostly do not provide roles, §2.5(3))
   hitl_scope: initiator               # initiator | participants | admins (admins = the list above)
   command_scope: initiator            # initiator | admins — who may execute /stop (§6.6)
-  queue_backup_hint: true             # hint "there are N more ahead" when the queue backs up
 
 # Bot identity synchronization (§2.6 / §4.8)
 identity:
