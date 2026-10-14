@@ -558,3 +558,45 @@ async def test_more_than_three_questions_is_unsupported():
     )
     with pytest.raises(Unsupported):
         await connector.send_card(conv, card)
+
+
+@pytest.mark.asyncio
+async def test_text_reply_quoting_a_file_becomes_an_attachment():
+    _, sdk, items = await start_connector()
+    frame = {
+        "cmd": "aibot_msg_callback",
+        "headers": {"req_id": "r9"},
+        "body": {
+            "msgtype": "text",
+            "msgid": "m9",
+            "chatid": "g1",
+            "chattype": "group",
+            "from": {"userid": "u1"},
+            "text": {"content": "@Bot "},
+            "quote": {"msgtype": "file", "file": {"url": "https://x/f", "aeskey": "k"}},
+        },
+    }
+    await sdk.emit("message.text", frame)
+    message = items[0]
+    assert message.attachments and message.attachments[0].kind == "file"
+    assert message.attachments[0].handle == {"url": "https://x/f", "aeskey": "k"}
+
+
+@pytest.mark.asyncio
+async def test_text_reply_quoting_text_prefixes_the_quote():
+    _, sdk, items = await start_connector()
+    frame = {
+        "cmd": "aibot_msg_callback",
+        "headers": {"req_id": "r10"},
+        "body": {
+            "msgtype": "text",
+            "msgid": "m10",
+            "chatid": "u1",
+            "chattype": "single",
+            "from": {"userid": "u1"},
+            "text": {"content": "yes do it"},
+            "quote": {"msgtype": "text", "text": {"content": "should I?"}},
+        },
+    }
+    await sdk.emit("message.text", frame)
+    assert items[0].text == "[quoting] should I?\nyes do it"

@@ -292,14 +292,19 @@ class WeComConnector(BaseConnector):
         conv = self._conversation(frame)
         self._frames[conv.key] = frame
         body = _body(frame)
+        quote_text, quote_media = self._quote_parts(body)
+        text = str(_get(body, "text", "content", default="")).strip()
+        if quote_text:
+            text = f"[quoting] {quote_text}\n{text}".rstrip()
         await self.emit(
             InboundMessage(
                 channel=self.name,
                 message_id=self._message_id(frame),
                 conversation=conv,
                 sender=self._sender(body),
-                text=str(_get(body, "text", "content", default="")),
+                text=text,
                 mentions=self._mentions(body),
+                attachments=quote_media,
                 raw=frame,
             )
         )
@@ -310,14 +315,15 @@ class WeComConnector(BaseConnector):
         body = _body(frame)
         msgtype = str(body.get("msgtype", "file"))
         kind = {"image": "image", "file": "file", "voice": "voice"}.get(msgtype, "file")
+        quote_text, quote_media = self._quote_parts(body)
         await self.emit(
             InboundMessage(
                 channel=self.name,
                 message_id=self._message_id(frame),
                 conversation=conv,
                 sender=self._sender(body),
-                text="",
-                attachments=[self._attachment(body, msgtype, kind)],
+                text=quote_text,
+                attachments=[self._attachment(body, msgtype, kind), *quote_media],
                 raw=frame,
             )
         )
@@ -331,7 +337,10 @@ class WeComConnector(BaseConnector):
         # model cannot consume it anyway). Only fall back to the audio when no
         # text was recognised, so the ingest pipeline can spool it.
         text = str(_get(body, "voice", "content", default="") or "")
-        attachments = []
+        quote_text, quote_media = self._quote_parts(body)
+        if not text:
+            text = quote_text
+        attachments = list(quote_media)
         if not text and _get(body, "voice", "url"):
             attachments.append(self._attachment(body, "voice", "voice"))
         await self.emit(
@@ -351,24 +360,18 @@ class WeComConnector(BaseConnector):
         self._frames[conv.key] = frame
         body = _body(frame)
         items = _get(body, "mixed", "msg_item", default=None) or body.get("msg_item") or []
-        texts: list[str] = []
-        attachments = []
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            item_type = item.get("msgtype")
-            if item_type == "text":
-                texts.append(str(_get(item, "text", "content", default="")))
-            elif item_type in ("image", "file", "voice"):
-                attachments.append(self._attachment(item, item_type, item_type))
+        text, attachments = self._mixed_parts(items)
+        quote_text, quote_media = self._quote_parts(body)
+        if quote_text:
+            text = f"{text}\n[quoting] {quote_text}".strip()
         await self.emit(
             InboundMessage(
                 channel=self.name,
                 message_id=self._message_id(frame),
                 conversation=conv,
                 sender=self._sender(body),
-                text="\n".join(t for t in texts if t),
-                attachments=attachments,
+                text=text,
+                attachments=[*attachments, *quote_media],
                 raw=frame,
             )
         )
@@ -575,6 +578,40 @@ class WeComConnector(BaseConnector):
         if isinstance(headers, dict) and headers.get("req_id"):
             return str(headers["req_id"])
         return ""
+
+    def _quote_parts(self, body: dict) -> tuple[str, list[Attachment]]:
+        """A referenced ("quoted") message: its text and any media attachment.
+
+        A WeCom reply/quote is delivered inside the message body's ``quote``
+        field, carrying the same shape as a normal message, so a quoted file
+        must be turned into an attachment or it is lost.
+        """
+        quote = body.get("quote")
+        if not isinstance(quote, dict):
+            return "", []
+        qtype = str(quote.get("msgtype") or "")
+        if qtype == "text":
+            section = quote.get("text") or {}
+            return str(section.get("content") or ""), []
+        if qtype in ("image", "file", "voice", "video"):
+            kind = {"image": "image", "voice": "voice", "video": "video"}.get(qtype, "file")
+            return "", [self._attachment(quote, qtype, kind)]
+        if qtype == "mixed":
+            return self._mixed_parts(_get(quote, "mixed", "msg_item", default=None) or [])
+        return "", []
+
+    def _mixed_parts(self, items: Any) -> tuple[str, list[Attachment]]:
+        texts: list[str] = []
+        attachments: list[Attachment] = []
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            item_type = item.get("msgtype")
+            if item_type == "text":
+                texts.append(str(_get(item, "text", "content", default="")))
+            elif item_type in ("image", "file", "voice"):
+                attachments.append(self._attachment(item, item_type, item_type))
+        return "\n".join(t for t in texts if t), attachments
 
     def _attachment(self, body: dict, msgtype: str, kind: str) -> Attachment:
         section = body.get(msgtype) or {}
