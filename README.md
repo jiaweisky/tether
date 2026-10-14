@@ -14,7 +14,7 @@ compaction live in the Go process. Tether does four things:
 3. Experience polishing (streaming, Markdown degradation, tool progress, usage).
 4. Media transport in both directions with graceful degradation.
 
-The full design lives in [`DESIGN-IM-BRIDGE.md`](./DESIGN-IM-BRIDGE.md).
+The full design lives in [`docs/DESIGN-IM-BRIDGE.md`](./docs/DESIGN-IM-BRIDGE.md).
 
 ## Status
 
