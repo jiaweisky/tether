@@ -54,23 +54,28 @@ def files_from_paths(paths: Any, *, base_dir: str | None, max_bytes: int) -> lis
         if not isinstance(raw, str) or not raw:
             continue
         path = Path(raw) if os.path.isabs(raw) else Path(base_dir or ".").joinpath(raw)
-        try:
-            if not path.is_file() or path.stat().st_size > max_bytes:
-                continue
-            data = path.read_bytes()
-        except OSError:
-            log.warning("output_file_unreadable", path=raw)
-            continue
-        mime = sniff_mime(data, path.name, None)
-        out.append(
-            RichMedia(
-                kind=normalize_media_kind(_media_kind(mime, path.name)),
-                data=data,
-                mime=mime,
-                name=path.name,
-            )
-        )
+        media = read_path_media(path, max_bytes)
+        if media is not None:
+            out.append(media)
     return out
+
+
+def read_path_media(path: Path, max_bytes: int) -> RichMedia | None:
+    """Read one file into a :class:`RichMedia`, or ``None`` if unusable."""
+    try:
+        if not path.is_file() or path.stat().st_size > max_bytes:
+            return None
+        data = path.read_bytes()
+    except OSError:
+        log.warning("output_file_unreadable", path=str(path))
+        return None
+    mime = sniff_mime(data, path.name, None)
+    return RichMedia(
+        kind=normalize_media_kind(media_kind(mime, path.name)),
+        data=data,
+        mime=mime,
+        name=path.name,
+    )
 
 
 _STRUCTURED_FILE_OPERATIONS = ("write", "edit")
@@ -136,7 +141,7 @@ def _file_part_to_media(node: dict[str, Any]) -> RichMedia:
     name = node.get("name")
     decoded = _decode_data_url(uri)
     return RichMedia(
-        kind=normalize_media_kind(_media_kind(mime, name)),
+        kind=normalize_media_kind(media_kind(mime, name)),
         url=None if uri.startswith("data:") else uri or None,
         data=decoded[0] if decoded else None,
         mime=str(mime) if mime else None,
@@ -155,7 +160,7 @@ def _decode_data_url(uri: str) -> tuple[bytes, str | None] | None:
         return None
 
 
-def _media_kind(mime: Any, name: Any) -> str:
+def media_kind(mime: Any, name: Any) -> str:
     value = str(mime or "")
     for prefix in ("image", "audio", "video"):
         if value.startswith(f"{prefix}/"):

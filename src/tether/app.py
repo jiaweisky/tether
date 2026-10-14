@@ -32,8 +32,8 @@ from .agent.events import (
 from .config import Config, load_config, validate_startup
 from .connector import IMConnector, build_connectors
 from .engine import hitl
-from .engine.commands import help_text, parse_command, unescape_command
-from .engine.media_egress import MediaEgress
+from .engine.commands import Command, help_text, parse_command, unescape_command
+from .engine.media_egress import MediaEgress, read_path_media
 from .engine.media_ingest import MediaIngest
 from .engine.projects import build_provider
 from .engine.prompt import PromptComposer
@@ -56,6 +56,7 @@ from .render.renderer import DefaultRenderer
 from .store.sqlite import RouteStore
 from .util.dedup import DedupCache
 from .util.logging import get_logger
+from .util.path_policy import PathPolicy, resolve_under
 
 log = get_logger("tether.app")
 
@@ -285,13 +286,13 @@ class TetherApp:
 
     async def _handle_command(self, msg: InboundMessage, connector: IMConnector) -> bool:
         """Handle a local command; return whether the message was consumed."""
-        command = _command(msg.text, self.config.commands.prefix)
+        command = parse_command(msg.text, self.config.commands.prefix)
         if command is None:
             return False
         try:
             await self._run_command(command, msg, connector)
         except Exception:  # noqa: BLE001 - a command must never fail silently
-            log.exception("command_failed", command=command)
+            log.exception("command_failed", command=command.kind)
             await self._notice(
                 connector,
                 msg.conversation,
@@ -300,21 +301,23 @@ class TetherApp:
         return True
 
     async def _run_command(
-        self, command: str, msg: InboundMessage, connector: IMConnector
+        self, command: Command, msg: InboundMessage, connector: IMConnector
     ) -> None:
-        if command == "stop":
+        if command.kind == "stop":
             await self._handle_stop(msg, connector)
-        elif command == "new":
+        elif command.kind == "new":
             await self._handle_new(msg, connector)
-        elif command == "whoami":
+        elif command.kind == "whoami":
             await self._notice(
                 connector,
                 msg.conversation,
                 f"🆔 your id: `{msg.sender.id}`\nconversation: `{msg.conversation.key}`",
             )
-        elif command == "status":
+        elif command.kind == "status":
             await self._handle_status(msg, connector)
-        elif command == "help":
+        elif command.kind == "send":
+            await self._handle_send(msg, connector, command.args)
+        elif command.kind == "help":
             await self._notice(
                 connector, msg.conversation, help_text(self.config.commands.prefix)
             )
@@ -654,6 +657,27 @@ class TetherApp:
             )
             return
         await self._notice(connector, route.conversation, "🆕 Started a new conversation.")
+
+    async def _handle_send(
+        self, msg: InboundMessage, connector: IMConnector, args: str
+    ) -> None:
+        """`/send <path>`: deliver a project file to this conversation.
+
+        The path is joined to the project directory when relative, resolved, and
+        checked against ``media.outbound.patterns`` — the same egress policy that
+        gates auto-forwarded files. A missing or blocked file is reported, not sent.
+        """
+        conv = msg.conversation
+        route = await self.router.get(conv)
+        if route is None:
+            await self._notice(connector, conv, "ℹ️ No project here yet — send a message first.")
+            return
+        workdir = self.router.working_directory(route)
+        result = _resolve_outbound_file(args, workdir, self.config)
+        if isinstance(result, str):
+            await self._notice(connector, conv, result)
+            return
+        await MediaEgress(self.config, connector).send(conv, result)
 
     # -- config hot-reload -------------------------------------------------
     async def _watch_config(self) -> None:
@@ -1181,9 +1205,31 @@ def _mtime(path: str) -> float:
         return 0.0
 
 
-def _command(text: str, prefix: str) -> str | None:
-    command = parse_command(text, prefix)
-    return command.kind if command else None
+def _strip_quotes(text: str) -> str:
+    """Drop one pair of matching surrounding quotes (``"/a b.md"`` → ``/a b.md``)."""
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
+        return text[1:-1]
+    return text
+
+
+def _resolve_outbound_file(args: str, workdir: str | None, config: Config) -> RichMedia | str:
+    """Resolve and policy-check a `/send` target.
+
+    Returns the media to deliver, or a user-facing error string. A plain helper so
+    the resolve/check/read steps stay out of the async handler.
+    """
+    path = resolve_under(_strip_quotes(args), workdir)
+    name = path.name
+    if not path.is_file():
+        return f"⚠️ No such file: `{name}`."
+    if not PathPolicy(config.media.outbound.patterns).allowed(path, working_dir=workdir):
+        metrics.inc("media_outbound_blocked")
+        log.warning("media_outbound_blocked", path=str(path))
+        return f"⚠️ Not sent: `{name}` — outside the allowed send paths."
+    media = read_path_media(path, config.media.max_bytes)
+    if media is None:
+        return f"⚠️ `{name}` is too large or could not be read."
+    return media
 
 
 def _media_key(media: RichMedia) -> tuple:

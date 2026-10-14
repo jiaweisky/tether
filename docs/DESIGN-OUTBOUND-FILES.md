@@ -1,6 +1,8 @@
 # Tether — outbound file delivery design
 
-> Status: **design only, not implemented**.
+> Status: **implemented** — `media.outbound.auto_files`/`patterns`, the `PathPolicy` (`util/path_policy.py`),
+> the drain-time gate in `engine/turn.py`, and the explicit `/send <path>` command (`engine/commands.py` + `app.py`);
+> enforced command matching became format-aware to accept the `/send` argument.
 > Scope: how the bridge (Tether) decides **whether** and **when** to deliver a file produced by
 > the agent to the IM conversation it is serving.
 > Relationship: this is a focused companion to `DESIGN-IM-BRIDGE.md` (which covers media in

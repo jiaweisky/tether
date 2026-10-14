@@ -49,6 +49,16 @@ async def make_app(tmp_path, config: Config | None = None, connector=None):
     return app, conn, client
 
 
+def egress_config(tmp_path) -> Config:
+    """Config that auto-forwards produced files inside ``tmp_path``."""
+    return Config.model_validate(
+        {
+            "server": {"working_directory": str(tmp_path)},
+            "media": {"outbound": {"auto_files": True, "patterns": ["{working_dir}/**"]}},
+        }
+    )
+
+
 class NonStreamingConnector(FakeConnector):
     """A channel that cannot refresh a message in place (like WeCom with no frame)."""
 
@@ -621,7 +631,7 @@ async def test_continuation_after_question_opens_new_message(tmp_path):
 
 @pytest.mark.asyncio
 async def test_tool_output_file_is_sent_to_the_user(tmp_path):
-    app, conn, client = await make_app(tmp_path)
+    app, conn, client = await make_app(tmp_path, config=egress_config(tmp_path))
     await app._on_message(inbound("hi"))
     sid = client.prompts[0]["sid"]
 
@@ -690,7 +700,7 @@ async def test_multi_question_form_card_and_submit(tmp_path):
 
 @pytest.mark.asyncio
 async def test_written_file_reported_in_structured_output_is_sent(tmp_path):
-    app, conn, client = await make_app(tmp_path)
+    app, conn, client = await make_app(tmp_path, config=egress_config(tmp_path))
     await app._on_message(inbound("hi"))
     sid = client.prompts[0]["sid"]
 
@@ -823,6 +833,105 @@ async def test_a_command_with_extra_words_is_forwarded_not_intercepted(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_send_command_delivers_an_allowed_file(tmp_path):
+    config = Config.model_validate(
+        {
+            "server": {"working_directory": str(tmp_path)},
+            "media": {"outbound": {"patterns": ["{working_dir}/**"]}},
+        }
+    )
+    app, conn, client = await make_app(tmp_path, config=config)
+    await app._on_message(inbound("hi"))
+    (tmp_path / "report.csv").write_text("a,b\n")
+    await app._on_message(inbound("/send report.csv", message_id="m2"))
+
+    media = [m for m in conn.messages if m["kind"] == "media"]
+    assert media and media[-1]["media"].name == "report.csv"
+    assert len(client.prompts) == 1  # /send is not forwarded to the agent
+
+
+@pytest.mark.asyncio
+async def test_send_command_accepts_a_quoted_path_with_spaces(tmp_path):
+    config = Config.model_validate(
+        {
+            "server": {"working_directory": str(tmp_path)},
+            "media": {"outbound": {"patterns": ["{working_dir}/**"]}},
+        }
+    )
+    app, conn, client = await make_app(tmp_path, config=config)
+    await app._on_message(inbound("hi"))
+    (tmp_path / "a b.csv").write_text("x")
+    await app._on_message(inbound('/send "a b.csv"', message_id="m2"))
+
+    media = [m for m in conn.messages if m["kind"] == "media"]
+    assert media and media[-1]["media"].name == "a b.csv"
+    assert len(client.prompts) == 1
+
+
+@pytest.mark.asyncio
+async def test_send_command_blocks_a_disallowed_file(tmp_path):
+    (tmp_path / "docs").mkdir()
+    config = Config.model_validate(
+        {
+            "server": {"working_directory": str(tmp_path)},
+            "media": {"outbound": {"patterns": [f"{tmp_path}/docs/**"]}},
+        }
+    )
+    app, conn, _client = await make_app(tmp_path, config=config)
+    await app._on_message(inbound("hi"))
+    (tmp_path / "secret.csv").write_text("x")
+    await app._on_message(inbound("/send secret.csv", message_id="m2"))
+
+    assert not [m for m in conn.messages if m["kind"] == "media"]
+    assert "Not sent" in conn.last_text()
+
+
+@pytest.mark.asyncio
+async def test_send_command_reports_a_missing_file(tmp_path):
+    config = Config.model_validate(
+        {
+            "server": {"working_directory": str(tmp_path)},
+            "media": {"outbound": {"patterns": ["{working_dir}/**"]}},
+        }
+    )
+    app, conn, _client = await make_app(tmp_path, config=config)
+    await app._on_message(inbound("hi"))
+    await app._on_message(inbound("/send nope.csv", message_id="m2"))
+
+    assert "No such file" in conn.last_text()
+
+
+@pytest.mark.asyncio
+async def test_auto_forwarded_file_outside_patterns_is_blocked(tmp_path):
+    (tmp_path / "allowed").mkdir()
+    config = Config.model_validate(
+        {
+            "server": {"working_directory": str(tmp_path)},
+            "media": {"outbound": {"auto_files": True, "patterns": [f"{tmp_path}/allowed/**"]}},
+        }
+    )
+    app, conn, client = await make_app(tmp_path, config=config)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+
+    produced = tmp_path / "secret.csv"
+    produced.write_text("x")
+    await app._route_event(
+        Event(
+            "t1",
+            TOOL_SUCCESS,
+            {"tool": "write", "sessionID": sid, "outputPaths": [str(produced)]},
+        )
+    )
+    await app._route_event(
+        Event("t2", SESSION_STATUS, {"sessionID": sid, "status": {"type": "idle"}})
+    )
+
+    assert not [m for m in conn.messages if m["kind"] == "media"]
+    assert "Not sent" in conn.last_text()
+
+
+@pytest.mark.asyncio
 async def test_config_hot_reload_applies_admins(tmp_path):
     from tether.config import load_config
 
@@ -858,7 +967,7 @@ async def test_status_command_reports_and_redacts(tmp_path):
 
 @pytest.mark.asyncio
 async def test_tool_edits_send_only_the_final_file_version(tmp_path):
-    app, conn, client = await make_app(tmp_path)
+    app, conn, client = await make_app(tmp_path, config=egress_config(tmp_path))
     await app._on_message(inbound("hi"))
     sid = client.prompts[0]["sid"]
 

@@ -16,6 +16,8 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from .util.path_policy import compile_rules
+
 # ``$$`` (a literal ``$``) or ``${VAR}`` / ``${VAR:-default}``.
 _ENV_REF = re.compile(r"\$\$|\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
@@ -190,6 +192,22 @@ class MediaOutboundConfig(BaseModel):
         default_factory=_default_media_sources
     )
     image_max_bytes: int = 10485760
+    # WHEN: auto-forward files the agent writes/edits. Off by default — during
+    # development, edits are usually incidental, not something to push to chat.
+    auto_files: bool = False
+    # WHETHER: ordered glob patterns matched against a file's resolved absolute
+    # path. Default-deny — a file is sent only when the last matching pattern is a
+    # positive one. Empty = no path may be sent (only the explicit /send command).
+    patterns: list[str] = Field(default_factory=list)
+
+    @field_validator("patterns")
+    @classmethod
+    def _valid_patterns(cls, patterns: list[str]) -> list[str]:
+        try:
+            compile_rules(patterns, None)
+        except re.error as exc:
+            raise ValueError(f"invalid glob pattern: {exc}") from exc
+        return patterns
 
 
 class MediaConfig(BaseModel):

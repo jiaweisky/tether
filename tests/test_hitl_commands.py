@@ -25,6 +25,16 @@ def test_command_requires_an_exact_match():
     assert parse_command("/helpme") is None
 
 
+def test_parse_send_command_with_argument():
+    cmd = parse_command("/send docs/x.md")
+    assert cmd is not None and cmd.kind == "send" and cmd.args == "docs/x.md"
+
+
+def test_send_command_requires_an_argument():
+    assert parse_command("/send") is None
+    assert parse_command("/send   ") is None
+
+
 def test_permission_value_roundtrip():
     value = hitl.encode_value("permission", "ses_1", "per_1", reply="once")
     decoded = hitl.decode_value(value)
@@ -134,8 +144,9 @@ def test_parse_help_command():
 
 def test_help_text_lists_every_command():
     text = help_text()
-    for kind in ("stop", "new", "whoami", "status", "help"):
-        assert f"`/{kind}`" in text
+    for kind in ("stop", "new", "whoami", "status", "send", "help"):
+        assert f"/{kind}" in text
+    assert "/send <path>" in text
 
 
 def test_help_text_reflects_the_configured_prefix():

@@ -108,6 +108,7 @@
 | 2026-10-14 | §2.5/§6.6 added **`/status`** (read-only snapshot: session/agent/model, context usage, project mode + working dir, agentd base, turn state, queued turns, pending interactions, uptime). No command scope — the reply is visible to the whole conversation, so it is **redacted by conversation type**: a group hides the agentd base and working directory and shortens the session id. Removed the never-implemented `group.queue_backup_hint` config field. |
 | 2026-10-14 | §7.3 tool-produced files: `edit`/`apply_patch` report produced files as ``structured.files[].file`` (the ``write`` tool uses ``structured.resource``/``target``); the collector only understood the latter, so an edited document was **never** forwarded (only its initial ``write`` was). `structured_file_paths` now reads both shapes. Path-based files are also **read at drain time** now, so a file edited several times in one turn is delivered once, with its **final** content. (Outbound egress still has no directory allow-list — tracked as a gap.) |
 | 2026-10-14 | §2.5(3)/§6.6 command layer synced with the implementation: added **`/help`** (lists each command's name, usage and description); interception is now an **exact match** of `<prefix><name>` (after an optional leading `@` mention), so `/stop now` / `/status of the build` are **forwarded to the model** instead of being hijacked; to send a literal command as text, **double the prefix** (`//help` → `/help`, while `// TODO` / `//server/share` stay untouched); and every command now replies readably on unauthorized/idle/no-op/failure (nothing silently swallowed). This supersedes the earlier §6.6 "the only command is `/stop`" text and its "no `/new` / `/status` / `/help`" bullet (the change log had already recorded the re-introductions). |
+| 2026-10-14 | §6.6/§7.3/§9 implemented **outbound file delivery** per the companion `docs/DESIGN-OUTBOUND-FILES.md`: path-based files the tools name (`write`/`edit`/`apply_patch`/`outputPaths`) are **no longer auto-forwarded** (`media.outbound.auto_files`, default `false`) and are gated by a **default-deny glob allow-list** (`media.outbound.patterns`, matched against the file's resolved absolute path; `{working_dir}` expands per conversation). A new **`/send <path>`** command (§6.6) pulls one file on demand through the same policy; a blocked candidate is skipped, logged (`media_outbound_blocked` + counter) and reported to the user by **file name only**. Command matching became **format-aware** — the parser now reads arguments (`CommandSpec.usage`), so `/send <path>` accepts an argument while argument-less commands stay exact. |
 
 ---
 
@@ -314,7 +315,7 @@ and by default does not know who said it. The bridge therefore injects a speaker
 - **HITL `group.hitl_scope`**: `initiator` (default, only that turn's initiator) / `participants` (any group member) /
   `admins` (**configured admins**, not a platform role). A click by an unauthorized person is **ignored with a reply hint**, and produces no side effect
   (to prevent others from approving dangerous operations on the initiator's behalf).
-- **Commands** (handled locally by the bridge, never forwarded; a message is a command only when it is *exactly* `<prefix><name>` after an optional leading `@` mention — see §6.6): `/stop` cancels the current turn; `/new` starts a fresh agent session for the conversation (interrupt, drop queued turns, delete + recreate the agentd session; the project/view is untouched); `/whoami` replies with the sender's platform id (to discover an id to add as admin); `/status` replies with a read-only snapshot (session/agent/model, context usage, project mode + working dir, agentd base, turn state, queued turns, pending interactions, uptime) — redacted in a group (no agentd base / working dir, short session id); `/help` lists the commands. Because matching is exact, `/stop now` and `/status of the build` are **forwarded to the model**, not redirected; to send a literal command as text, **double the prefix** (`//help` → `/help`). `/stop` in a group defaults to **only that turn's initiator** (`command_scope: initiator`, configurable to `admins`); `/new` is **admin-only** (`group.admins`). **Admins are a superset**: a configured admin may always run a command. Every outcome replies with a short readable notice (nothing is silently swallowed).
+- **Commands** (handled locally by the bridge, never forwarded; a message is a command only when it is *exactly* `<prefix><name>` after an optional leading `@` mention — see §6.6): `/stop` cancels the current turn; `/new` starts a fresh agent session for the conversation (interrupt, drop queued turns, delete + recreate the agentd session; the project/view is untouched); `/whoami` replies with the sender's platform id (to discover an id to add as admin); `/status` replies with a read-only snapshot (session/agent/model, context usage, project mode + working dir, agentd base, turn state, queued turns, pending interactions, uptime) — redacted in a group (no agentd base / working dir, short session id); `/send <path>` delivers one file on demand (joined to the project dir when relative, then gated by `media.outbound.patterns`, §7.3); `/help` lists the commands. Because matching is exact, `/stop now` and `/status of the build` are **forwarded to the model**, not redirected; to send a literal command as text, **double the prefix** (`//help` → `/help`). `/stop` in a group defaults to **only that turn's initiator** (`command_scope: initiator`, configurable to `admins`); `/new` is **admin-only** (`group.admins`). **Admins are a superset**: a configured admin may always run a command. Every outcome replies with a short readable notice (nothing is silently swallowed).
 
 **(4) Context and cost**
 
@@ -1560,16 +1561,20 @@ Key points:
   - `/status` — reply with a read-only snapshot (session/agent/model, context usage, project mode + working dir, agentd base, turn
     state, queued turns, pending interactions, uptime); **redacted by conversation type** (a group hides the agentd base and working
     directory and shortens the session id).
+  - `/send <path>` — deliver one file to this conversation on demand. The path is joined to the project directory when relative, then
+    `resolve()`d and checked against `media.outbound.patterns` (§7.3); a missing, too-large or **disallowed** path is reported, never
+    sent. Open to any participant — the `patterns` policy is the gate.
   - `/help` — list the commands (name, usage, description).
-- **Exact match**: a message is a command **only** when it is *exactly* `<prefix><name>` — after dropping any leading `@` mention and
-  surrounding whitespace, case-insensitively. `/stop` is a command; `/stop now` and `/status of the build` are **not** — they are
-  forwarded to the model as ordinary messages, so natural language that merely starts with a command word is never hijacked.
+- **Matching**: a message is a command only when, after dropping any leading `@` mention and surrounding whitespace, it is exactly
+  `<prefix><name>` (case-insensitively). A command that declares an argument (`/send <path>`) additionally accepts trailing text, while
+  an argument-less one does not: `/stop` is a command but `/stop now` and `/status of the build` are **not** — they are forwarded to
+  the model as ordinary messages, so natural language that merely starts with a command word is never hijacked.
 - **Escaping**: to send a literal command as text, **double the prefix** — `//help` is delivered to the model as `/help`. Only a doubled
   prefix followed by a real command is collapsed; `// TODO`, `//server/share`, `//help me` are forwarded untouched.
 - **Authorization**: `/stop` in a group defaults to **only that Turn's initiator** (`command_scope: initiator`, configurable to
-  `admins`); `/new` is admin-only (`group.admins`); `/whoami` / `/status` / `/help` are open to anyone. **Admins are a superset** — a
-  configured admin may always run a command. Every terminal outcome (unauthorized, idle, no-op, failure) replies with a short readable
-  notice; a command never fails silently.
+  `admins`); `/new` is admin-only (`group.admins`); `/whoami` / `/status` / `/help` / `/send` are open to anyone (for `/send` the
+  `patterns` policy is the real gate). **Admins are a superset** — a configured admin may always run a command. Every terminal outcome
+  (unauthorized, idle, no-op, failure) replies with a short readable notice; a command never fails silently.
 - In a group chat where the platform only delivers @ messages, a command naturally also requires an @ trigger (see §2.5).
 - **No Conversation lifecycle commands**: there is no `/reset` / `/compact` / `/agent` / `/model` — in IM, "one Conversation is one agent
   session"; context growth is left to agentd's automatic compaction; switching agent/model is **operations** work handled through
@@ -1659,6 +1664,11 @@ See the §4.4 decision tree. Core points:
 See §4.5. Core points:
 
 - Send only media **explicitly produced by the agent** (tool file parts); by default do not send all changed files.
+- **Outbound file policy** (`media.outbound.auto_files` / `patterns`; see the companion **`docs/DESIGN-OUTBOUND-FILES.md`**): path-based files the tools name
+  (`write`/`edit`/`apply_patch` / `outputPaths`) are **not** auto-forwarded by default (`auto_files: false`) and, when they are, must match an ordered,
+  default-deny glob allow-list (`patterns`) matched against the file's **resolved absolute path**. A disallowed candidate is skipped, logged
+  (`media_outbound_blocked`) and reported to the user by **file name only**. A user can pull one file on demand with **`/send <path>`** (§6.6), which reuses the
+  same policy; inline file parts (a tool result that already carries bytes) are explicit media and remain unaffected.
 - `file` (a provider reference) cannot be downloaded directly → by default send an explanation; a provider downloader can optionally be configured.
 - Image exceeds the IM limit: compress/scale with Pillow; video/audio over the limit: reject and give a link (optional ffmpeg transcoding).
 - Attach a human-readable description to each piece of media when possible.
@@ -1885,6 +1895,8 @@ media:
   outbound:
     sources: [tool_media]             # tool_media | changed_files
     image_max_bytes: 10485760
+    auto_files: false                 # auto-forward files the agent writes/edits (off; see docs/DESIGN-OUTBOUND-FILES.md)
+    patterns: []                      # default-deny glob allow-list; e.g. ["{working_dir}/**", "!**/.env"]
 
 permissions:
   # How *Tether* handles the agent's "allow tool? once|always|reject" ask, per

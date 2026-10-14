@@ -77,3 +77,8 @@ def test_wecom_accepts_per_channel_identity():
         }
     )
     validate_startup(config)  # no raise
+
+
+def test_invalid_outbound_pattern_is_rejected():
+    with pytest.raises(ValueError):
+        Config.model_validate({"media": {"outbound": {"patterns": ["[z-a]"]}}})

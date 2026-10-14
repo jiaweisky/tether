@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-CommandKind = Literal["stop", "new", "whoami", "status", "help"]
+CommandKind = Literal["stop", "new", "whoami", "status", "send", "help"]
 
 
 @dataclass(frozen=True)
@@ -28,9 +28,12 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("new", "Start a fresh agent session (admins only)."),
     CommandSpec("whoami", "Show your sender id and this conversation."),
     CommandSpec("status", "Show a snapshot of the conversation and the bridge."),
+    CommandSpec(
+        "send", "Send a file from the project to this conversation.", usage="<path>"
+    ),
     CommandSpec("help", "List the available commands."),
 )
-_KINDS: dict[str, CommandKind] = {spec.name: spec.name for spec in COMMANDS}
+_SPECS: dict[str, CommandSpec] = {spec.name: spec for spec in COMMANDS}
 
 
 def help_text(prefix: str = "/") -> str:
@@ -42,33 +45,39 @@ def help_text(prefix: str = "/") -> str:
             form += f" {spec.usage}"
         lines.append(f"`{form}` — {spec.description}")
     lines.append(f"In a group, mention the bot first (e.g. `@bot {prefix}stop`).")
-    lines.append(
-        f"To send a literal command as text, double the prefix "
-        f"(`{prefix}{prefix}help` sends `{prefix}help`)."
-    )
     return "\n".join(lines)
 
 
 @dataclass
 class Command:
     kind: CommandKind
+    args: str = ""
 
 
 def parse_command(text: str, prefix: str = "/") -> Command | None:
     """Return the command encoded in ``text``, or ``None`` for plain messages.
 
-    A message is a command only when it is *exactly* ``<prefix><name>`` (after
-    dropping leading mentions and surrounding whitespace, case-insensitively):
-    ``/stop`` is a command, but ``/stop now`` and ``/status of build`` are not.
+    An argument-less command matches only when it appears *exactly* (``/stop`` is a
+    command; ``/stop now`` and ``/status of build`` are plain messages). A command
+    that declares ``usage`` also accepts trailing text as its argument (``/send
+    <path>``; ``/send`` alone is not a command).
     """
     stripped = _strip_leading_mentions(text.strip())
     if not stripped.startswith(prefix):
         return None
     body = stripped[len(prefix) :].strip()
-    kind = _KINDS.get(body.lower())
-    if kind is None:
+    parts = body.split(maxsplit=1)
+    spec = _SPECS.get(parts[0].lower()) if parts else None
+    if spec is None:
         return None
-    return Command(kind=kind)
+    tail = parts[1].strip() if len(parts) > 1 else ""
+    if spec.usage:
+        if not tail:
+            return None
+        return Command(kind=spec.name, args=tail)
+    if tail:
+        return None
+    return Command(kind=spec.name)
 
 
 def unescape_command(text: str, prefix: str = "/") -> tuple[str, bool]:
