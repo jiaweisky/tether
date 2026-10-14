@@ -15,6 +15,7 @@ import json
 import os
 import time
 from collections.abc import Awaitable
+from dataclasses import replace
 from typing import Any, Literal
 
 from .agent.client import HttpAgentClient
@@ -31,6 +32,7 @@ from .agent.events import (
 from .config import Config, load_config, validate_startup
 from .connector import IMConnector, build_connectors
 from .engine import hitl
+from .engine.commands import help_text, parse_command, unescape_command
 from .engine.media_egress import MediaEgress
 from .engine.media_ingest import MediaIngest
 from .engine.projects import build_provider
@@ -262,7 +264,10 @@ class TetherApp:
         if connector is None:
             return
         await connector.transcribe_voice(msg)
-        if await self._handle_command(msg, connector):
+        text, escaped = unescape_command(msg.text, self.config.commands.prefix)
+        if escaped:
+            msg = replace(msg, text=text)
+        elif await self._handle_command(msg, connector):
             return
         try:
             route = await self.router.get_or_create(msg.conversation, title=_title(msg))
@@ -281,23 +286,38 @@ class TetherApp:
     async def _handle_command(self, msg: InboundMessage, connector: IMConnector) -> bool:
         """Handle a local command; return whether the message was consumed."""
         command = _command(msg.text, self.config.commands.prefix)
+        if command is None:
+            return False
+        try:
+            await self._run_command(command, msg, connector)
+        except Exception:  # noqa: BLE001 - a command must never fail silently
+            log.exception("command_failed", command=command)
+            await self._notice(
+                connector,
+                msg.conversation,
+                "⚠️ Something went wrong running that command; please try again.",
+            )
+        return True
+
+    async def _run_command(
+        self, command: str, msg: InboundMessage, connector: IMConnector
+    ) -> None:
         if command == "stop":
             await self._handle_stop(msg, connector)
-            return True
-        if command == "new":
+        elif command == "new":
             await self._handle_new(msg, connector)
-            return True
-        if command == "whoami":
+        elif command == "whoami":
             await self._notice(
                 connector,
                 msg.conversation,
                 f"🆔 your id: `{msg.sender.id}`\nconversation: `{msg.conversation.key}`",
             )
-            return True
-        if command == "status":
+        elif command == "status":
             await self._handle_status(msg, connector)
-            return True
-        return False
+        elif command == "help":
+            await self._notice(
+                connector, msg.conversation, help_text(self.config.commands.prefix)
+            )
 
     async def _handle_status(self, msg: InboundMessage, connector: IMConnector) -> None:
         """`/status`: a read-only snapshot of the conversation and the bridge.
@@ -570,8 +590,10 @@ class TetherApp:
         self._bump("turns")
 
     async def _handle_stop(self, msg: InboundMessage, connector: IMConnector) -> None:
-        route = await self.router.get(msg.conversation)
+        conv = msg.conversation
+        route = await self.router.get(conv)
         if route is None:
+            await self._notice(connector, conv, "ℹ️ Nothing to stop — this conversation is idle.")
             return
         if not hitl.command_authorized(
             msg.sender,
@@ -580,26 +602,35 @@ class TetherApp:
             active_turn_sender=route.active_turn_sender,
         ):
             await self._notice(
-                connector, route.conversation, "Only the requester may stop this turn."
+                connector,
+                route.conversation,
+                "🔒 Only the person who started this turn, or an admin, can stop it.",
             )
             return
         engine = self._turns.get(route.session_id)
-        if engine is not None:
-            await engine.cancel()
-        await self._notice(connector, route.conversation, "🛑 Stopped.")
+        if engine is None:
+            await self._notice(
+                connector, route.conversation, "ℹ️ Nothing to stop — this turn already finished."
+            )
+            return
+        await engine.cancel()
+        await self._notice(connector, route.conversation, "🛑 Stopped the current turn.")
 
     async def _handle_new(self, msg: InboundMessage, connector: IMConnector) -> None:
         """`/new`: start a fresh agent session for this conversation.
 
-        Only configured admins may run it; with no admins configured nobody can,
-        so the command has no effect. The project/view is left untouched.
+        Only configured admins may run it; the project/view is left untouched.
         """
-        route = await self.router.get(msg.conversation)
-        if route is None:
-            return
+        conv = msg.conversation
         if msg.sender.id not in self.config.group.admins:
             await self._notice(
-                connector, route.conversation, "🔒 Only admins may start a new conversation."
+                connector, conv, "🔒 Only admins can start a new conversation."
+            )
+            return
+        route = await self.router.get(conv)
+        if route is None:
+            await self._notice(
+                connector, conv, "ℹ️ Nothing to reset yet — just send a message to start."
             )
             return
         old = route.session_id
@@ -619,7 +650,7 @@ class TetherApp:
             await self._notice(
                 connector,
                 route.conversation,
-                "⚠️ Could not start a new conversation; please retry.",
+                "⚠️ Could not start a new conversation; please try again.",
             )
             return
         await self._notice(connector, route.conversation, "🆕 Started a new conversation.")
@@ -1151,8 +1182,6 @@ def _mtime(path: str) -> float:
 
 
 def _command(text: str, prefix: str) -> str | None:
-    from .engine.commands import parse_command
-
     command = parse_command(text, prefix)
     return command.kind if command else None
 

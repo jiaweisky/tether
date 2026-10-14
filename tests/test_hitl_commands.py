@@ -1,18 +1,28 @@
 from __future__ import annotations
 
+from typing import get_args
+
 from tether.agent.events import PendingPermission, PendingQuestion
 from tether.config import Config
 from tether.engine import hitl
-from tether.engine.commands import parse_command
+from tether.engine.commands import COMMANDS, CommandKind, help_text, parse_command, unescape_command
 from tether.models import Conversation, Sender
 
 
 def test_parse_stop_command():
     cmd = parse_command("/stop")
     assert cmd is not None and cmd.kind == "stop"
+    assert parse_command("  /stop  ") is not None  # surrounding whitespace is fine
+    assert parse_command("/STOP") is not None  # case-insensitive
     assert parse_command("hello") is None
     assert parse_command("/unknown") is None
-    assert parse_command("  /stop now ") is not None
+
+
+def test_command_requires_an_exact_match():
+    assert parse_command("/stop now") is None
+    assert parse_command("/status of the build") is None
+    assert parse_command("/help me") is None
+    assert parse_command("/helpme") is None
 
 
 def test_permission_value_roundtrip():
@@ -115,3 +125,44 @@ def test_command_is_recognized_after_a_leading_mention():
     assert parse_command("@荔小枝 /new").kind == "new"
     assert parse_command("@_user_1 /status").kind == "status"
     assert parse_command("@Bot hello there") is None
+
+
+def test_parse_help_command():
+    cmd = parse_command("/help")
+    assert cmd is not None and cmd.kind == "help"
+
+
+def test_help_text_lists_every_command():
+    text = help_text()
+    for kind in ("stop", "new", "whoami", "status", "help"):
+        assert f"`/{kind}`" in text
+
+
+def test_help_text_reflects_the_configured_prefix():
+    text = help_text("!")
+    assert "`!stop`" in text
+    assert "/stop" not in text
+
+
+def test_unescape_command_collapses_a_doubled_prefix():
+    assert unescape_command("//help") == ("/help", True)
+    assert unescape_command("@bot //new") == ("@bot /new", True)
+    assert unescape_command("/help") == ("/help", False)
+    assert unescape_command("hello") == ("hello", False)
+
+
+def test_unescape_command_leaves_plain_text_untouched():
+    assert unescape_command("// TODO") == ("// TODO", False)
+    assert unescape_command("//server/share") == ("//server/share", False)
+    assert unescape_command("//help me") == ("//help me", False)
+
+
+def test_unescape_command_honours_the_configured_prefix():
+    assert unescape_command("!!help", "!") == ("!help", True)
+    assert unescape_command("!help", "!") == ("!help", False)
+
+
+def test_the_command_catalog_matches_the_kind_literal():
+    names = [spec.name for spec in COMMANDS]
+    assert len(names) == len(set(names)), "a command name is listed twice"
+    assert set(names) == set(get_args(CommandKind)), "COMMANDS and CommandKind drifted"

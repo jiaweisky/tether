@@ -106,6 +106,8 @@
 | 2026-10-14 | §5.1 WeCom **quoted messages** are now parsed: a reply/quote is delivered as a normal message plus a `quote` field, so a quoted **media** becomes an attachment and a quoted **text** is prefixed (`[quoting] …`). Per the official receive-message scenarios, a group only delivers text/mixed/quote (image/file/voice/video are **单聊-only**), so a file in a group is only reachable by *quoting* it — which this fixes. |
 | 2026-10-14 | §7/§9 **`media.inline_limit_bytes` default 10 MB → 256 KB**: inlining a multi-MB image as a base64 data URL in the prompt ballooned the context and made agentd auto-compact in a loop. Only genuinely small media is inlined now; larger media uses a provider file upload (when configured) or is spooled. |
 | 2026-10-14 | §2.5/§6.6 added **`/status`** (read-only snapshot: session/agent/model, context usage, project mode + working dir, agentd base, turn state, queued turns, pending interactions, uptime). No command scope — the reply is visible to the whole conversation, so it is **redacted by conversation type**: a group hides the agentd base and working directory and shortens the session id. Removed the never-implemented `group.queue_backup_hint` config field. |
+| 2026-10-14 | §7.3 tool-produced files: `edit`/`apply_patch` report produced files as ``structured.files[].file`` (the ``write`` tool uses ``structured.resource``/``target``); the collector only understood the latter, so an edited document was **never** forwarded (only its initial ``write`` was). `structured_file_paths` now reads both shapes. Path-based files are also **read at drain time** now, so a file edited several times in one turn is delivered once, with its **final** content. (Outbound egress still has no directory allow-list — tracked as a gap.) |
+| 2026-10-14 | §2.5(3)/§6.6 command layer synced with the implementation: added **`/help`** (lists each command's name, usage and description); interception is now an **exact match** of `<prefix><name>` (after an optional leading `@` mention), so `/stop now` / `/status of the build` are **forwarded to the model** instead of being hijacked; to send a literal command as text, **double the prefix** (`//help` → `/help`, while `// TODO` / `//server/share` stay untouched); and every command now replies readably on unauthorized/idle/no-op/failure (nothing silently swallowed). This supersedes the earlier §6.6 "the only command is `/stop`" text and its "no `/new` / `/status` / `/help`" bullet (the change log had already recorded the re-introductions). |
 
 ---
 
@@ -227,7 +229,7 @@ There are also several requirement-driven **supporting designs**: bot identity s
 Platform callback/SDK event
   → Connector normalization → InboundMessage{text, attachments, mentions, conversation, sender}
   → Router: does the conversation have an Agent Session? No → create /api/session
-  → Command parsing (only `/stop`) → if matched, handle locally; otherwise:
+  → Command parsing (exact `<prefix><name>`; see §6.6) → if matched, handle locally; otherwise:
   → MediaIngest: attachment download → choose transport (inline/file/url/spool) → files[]
   → AgentClient.prompt(sessionID, {prompt, id, delivery, files})
   → 202 {queued:true} (turn executes asynchronously)
@@ -259,7 +261,7 @@ AgentClient's global SSE (/api/event)
 ### 2.5 Conversation Forms: Direct Chat and Multi-user Group Chat
 
 Both forms are driven by **platform delivery**: which messages the platform pushes to the bot is decided by the platform (the `direct_delivery` /
-`group_delivery` fact in §3.3), and **the bridge forwards a message to the agent as soon as it receives it, without a second trigger filter**; commands (only `/stop`) are intercepted locally by the bridge
+`group_delivery` fact in §3.3), and **the bridge forwards a message to the agent as soon as it receives it, without a second trigger filter**; commands (§6.6) are intercepted locally by the bridge
 (not forwarded). The mapping is uniformly **one IM conversation = one agent session** (the key includes topic/thread).
 
 **Direct chat (direct) — 1 user ↔ bot**
@@ -312,7 +314,7 @@ and by default does not know who said it. The bridge therefore injects a speaker
 - **HITL `group.hitl_scope`**: `initiator` (default, only that turn's initiator) / `participants` (any group member) /
   `admins` (**configured admins**, not a platform role). A click by an unauthorized person is **ignored with a reply hint**, and produces no side effect
   (to prevent others from approving dangerous operations on the initiator's behalf).
-- **Commands**: `/stop` cancels the current turn; `/new` starts a fresh agent session for the conversation (interrupt, drop queued turns, delete + recreate the agentd session; the project/view is untouched); `/whoami` replies with the sender's platform id (to discover an id to add as admin); `/status` replies with a read-only snapshot (session/agent/model, context usage, project mode + working dir, agentd base, turn state, queued turns, pending interactions, uptime) — redacted in a group (no agentd base / working dir, short session id). `/stop` in a group defaults to **only that turn's initiator** (`command_scope: initiator`, configurable to `admins`); `/new` is **admin-only** (`group.admins`) — with an empty list it has no effect. **Admins are a superset**: a configured admin may always run a command. In direct chat unauthorized persons are ignored with a hint.
+- **Commands** (handled locally by the bridge, never forwarded; a message is a command only when it is *exactly* `<prefix><name>` after an optional leading `@` mention — see §6.6): `/stop` cancels the current turn; `/new` starts a fresh agent session for the conversation (interrupt, drop queued turns, delete + recreate the agentd session; the project/view is untouched); `/whoami` replies with the sender's platform id (to discover an id to add as admin); `/status` replies with a read-only snapshot (session/agent/model, context usage, project mode + working dir, agentd base, turn state, queued turns, pending interactions, uptime) — redacted in a group (no agentd base / working dir, short session id); `/help` lists the commands. Because matching is exact, `/stop now` and `/status of the build` are **forwarded to the model**, not redirected; to send a literal command as text, **double the prefix** (`//help` → `/help`). `/stop` in a group defaults to **only that turn's initiator** (`command_scope: initiator`, configurable to `admins`); `/new` is **admin-only** (`group.admins`). **Admins are a superset**: a configured admin may always run a command. Every outcome replies with a short readable notice (nothing is silently swallowed).
 
 **(4) Context and cost**
 
@@ -1550,14 +1552,28 @@ Key points:
 ### 6.6 Interactive Controls and Commands
 
 - **HITL card**: see §4.6.
-- **The only command `/stop`** (prefix configurable via `commands.prefix`, default `/`): cancels the currently executing Turn
-  (`POST …/interrupt` + reject pending permissions), intercepted **locally** by the bridge and not forwarded to the model. Within a group, by default only
-  **the initiator of that Turn** (`command_scope: initiator`) is allowed; only when set to `admins` does it also include the configured admins
-  (`group.admins`). A one-on-one chat means the person themself.
-  In a group chat, if the platform only delivers @ messages, `/stop` naturally also requires an @ trigger (see §2.5).
-- **No Conversation lifecycle commands are provided**: there is no `/new`, `/reset`, `/compact`, `/agent`, `/model`, `/status`,
-  `/help` — in IM, "one Conversation is one agent session"; context growth is left to agentd's automatic compaction; switching
-  agent/model is **operations** work handled through deployment configuration, not switched in the chat.
+- **Commands** (prefix configurable via `commands.prefix`, default `/`) are parsed and handled **locally** by the bridge, never forwarded to the model:
+  - `/stop` — cancel the currently executing Turn (`POST …/interrupt` + reject pending permissions).
+  - `/new` — start a fresh agent session for the conversation (interrupt the running turn, drop queued turns, delete and recreate the
+    agentd session; the project/view is untouched). **Admin-only** (`group.admins`).
+  - `/whoami` — reply with the sender's platform id (so an operator can discover the id to add as admin).
+  - `/status` — reply with a read-only snapshot (session/agent/model, context usage, project mode + working dir, agentd base, turn
+    state, queued turns, pending interactions, uptime); **redacted by conversation type** (a group hides the agentd base and working
+    directory and shortens the session id).
+  - `/help` — list the commands (name, usage, description).
+- **Exact match**: a message is a command **only** when it is *exactly* `<prefix><name>` — after dropping any leading `@` mention and
+  surrounding whitespace, case-insensitively. `/stop` is a command; `/stop now` and `/status of the build` are **not** — they are
+  forwarded to the model as ordinary messages, so natural language that merely starts with a command word is never hijacked.
+- **Escaping**: to send a literal command as text, **double the prefix** — `//help` is delivered to the model as `/help`. Only a doubled
+  prefix followed by a real command is collapsed; `// TODO`, `//server/share`, `//help me` are forwarded untouched.
+- **Authorization**: `/stop` in a group defaults to **only that Turn's initiator** (`command_scope: initiator`, configurable to
+  `admins`); `/new` is admin-only (`group.admins`); `/whoami` / `/status` / `/help` are open to anyone. **Admins are a superset** — a
+  configured admin may always run a command. Every terminal outcome (unauthorized, idle, no-op, failure) replies with a short readable
+  notice; a command never fails silently.
+- In a group chat where the platform only delivers @ messages, a command naturally also requires an @ trigger (see §2.5).
+- **No Conversation lifecycle commands**: there is no `/reset` / `/compact` / `/agent` / `/model` — in IM, "one Conversation is one agent
+  session"; context growth is left to agentd's automatic compaction; switching agent/model is **operations** work handled through
+  deployment configuration, not switched in the chat.
 
 ### 6.7 Runtime Status and Usage Display
 
@@ -1607,7 +1623,7 @@ bot  <final answer + 📊 usage line>           ← sent all at once after it en
   who are @-mentioned are preserved as `@{name}` according to configuration, to help the agent understand the reference.
 - **Make clear "who is being answered"**: when replying, @ the initiator (if capability allows) or quote their message; this matters especially when multiple users ask in succession.
 - **No cross-user steer** (§2.5(2)): B's messages are not injected into A's Turn; when the queue backs up, hint "there are N more ahead".
-- **Permission/command boundaries**: by default only the initiator can click the HITL card (`group.hitl_scope: initiator`); the only `/stop`
+- **Permission/command boundaries**: by default only the initiator can click the HITL card (`group.hitl_scope: initiator`); the `/stop`
   command is by default limited to that Turn's **initiator** (`group.command_scope: initiator`; configurable to `admins`), see §6.6.
 - **Speaker-tag anti-forgery**: the `[{name}]:` tag injected into a group shared Conversation is generated by the bridge, which also cleans up forged
   prefixes of the same kind in the body, to prevent users from impersonating others' instructions.
@@ -1890,7 +1906,7 @@ permissions:
   poll_interval_s: 30                 # HITL fallback polling (§4.3)
 
 commands:
-  prefix: "/"                         # command prefix (only /stop, §6.6)
+  prefix: "/"                         # command prefix (§6.6)
 
 access:                               # inbound allowlist (§10.1)
   allow_users: []                     # allowed user ids (empty = unrestricted)
@@ -2061,7 +2077,7 @@ tether/                             # independent uv project (Tether)
 │   │   ├── hitl.py                 # permission/question → card / text fallback
 │   │   ├── media_ingest.py         # inbound media decision (§4.4)
 │   │   ├── media_egress.py         # outbound media collection and sending (§4.5)
-│   │   └── commands.py             # /stop (the only command)
+│   │   └── commands.py             # /stop /new /whoami /status /help (§6.6)
 │   ├── connectors/
 │   │   ├── wecom/connector.py      # MVP
 │   │   ├── feishu/connector.py

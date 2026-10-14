@@ -156,7 +156,7 @@ async def test_stop_command_interrupts(tmp_path):
     sid = client.prompts[0]["sid"]
     await app._on_message(inbound("/stop", message_id="m2"))
     assert sid in client.interrupted
-    assert conn.last_text() == "🛑 Stopped."
+    assert conn.last_text() == "🛑 Stopped the current turn."
 
 
 @pytest.mark.asyncio
@@ -749,11 +749,77 @@ async def test_new_command_is_rejected_without_admin(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_stop_with_no_conversation_says_nothing_to_stop(tmp_path):
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("/stop"))
+    assert "Nothing to stop" in conn.last_text()
+    assert not client.prompts  # never forwarded to the agent
+
+
+@pytest.mark.asyncio
+async def test_new_with_no_conversation_says_nothing_to_reset(tmp_path):
+    config = Config.model_validate({"group": {"admins": ["u1"]}})
+    app, conn, _client = await make_app(tmp_path, config=config)
+    await app._on_message(inbound("/new"))
+    assert "Nothing to reset" in conn.last_text()
+
+
+@pytest.mark.asyncio
+async def test_a_failing_command_replies_friendly_and_is_not_forwarded(tmp_path, monkeypatch):
+    app, conn, client = await make_app(tmp_path)
+
+    async def boom(msg, connector):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(app, "_handle_status", boom)
+    await app._on_message(inbound("/status"))
+    assert "went wrong" in conn.last_text()
+    assert not client.prompts
+
+
+@pytest.mark.asyncio
 async def test_whoami_command_replies_with_the_sender_id(tmp_path):
     app, conn, client = await make_app(tmp_path)
     await app._on_message(inbound("/whoami"))
     assert "u1" in conn.last_text()
     assert not client.prompts  # the command is not forwarded to the agent
+
+
+@pytest.mark.asyncio
+async def test_help_command_lists_commands_and_is_not_forwarded(tmp_path):
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("/help"))
+    text = conn.last_text()
+    for kind in ("stop", "new", "whoami", "status", "help"):
+        assert f"/{kind}" in text
+    assert not client.prompts
+
+
+@pytest.mark.asyncio
+async def test_double_prefix_forwards_a_literal_command_to_the_agent(tmp_path):
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("//help"))
+    assert client.prompts, "escaped text must reach the agent"
+    assert "/help" in client.prompts[0]["prompt"]
+    assert "Commands (prefix" not in conn.last_text()
+
+
+@pytest.mark.asyncio
+async def test_double_prefix_stop_does_not_interrupt(tmp_path):
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("hi"))
+    await app._on_message(inbound("//stop", message_id="m2"))
+    assert client.interrupted == []
+    assert "/stop" in client.prompts[-1]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_a_command_with_extra_words_is_forwarded_not_intercepted(tmp_path):
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("/status of the build"))
+    assert client.prompts, "a near-miss must reach the agent"
+    assert "/status of the build" in client.prompts[0]["prompt"]
+    assert "Status" not in conn.last_text()  # no bridge status reply
 
 
 @pytest.mark.asyncio
