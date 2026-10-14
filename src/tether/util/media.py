@@ -7,7 +7,7 @@ import mimetypes
 import re
 from pathlib import Path
 
-_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
+_UNSAFE = re.compile(r"[^\w.-]+")
 _MAX_NAME = 180
 
 

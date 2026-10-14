@@ -14,16 +14,19 @@ from tether.models import Attachment, MediaBytes
 class FakeConnector:
     name = "fake"
 
-    def __init__(self, data: bytes, *, fail: bool = False) -> None:
+    def __init__(
+        self, data: bytes, *, fail: bool = False, download_name: str | None = None
+    ) -> None:
         self._data = data
         self._fail = fail
+        self._download_name = download_name
         self.downloads = 0
 
     async def download(self, att: Attachment) -> MediaBytes:
         self.downloads += 1
         if self._fail:
             raise RuntimeError("download failed")
-        return MediaBytes(data=self._data, mime=att.mime, name=att.name)
+        return MediaBytes(data=self._data, mime=att.mime, name=self._download_name or att.name)
 
 
 def _ingest(tmp_path, connector) -> MediaIngest:
@@ -85,3 +88,13 @@ async def test_spool_failure_is_reported_not_raised(tmp_path):
     result = await ingest.ingest("ses_1", [att], model_inputs={"image", "text"})
     assert not result.spooled
     assert any("Could not save" in note for note in result.notes)
+
+
+@pytest.mark.asyncio
+async def test_downloaded_filename_used_when_message_has_none(tmp_path):
+    connector = FakeConnector(b"xlsx-bytes", download_name="季度报表.xlsx")
+    ingest = _ingest(tmp_path, connector)
+    att = Attachment(kind="file", name=None, handle={"url": "x"})
+    result = await ingest.ingest("ses_1", [att], model_inputs={"image", "text"})
+    assert result.spooled
+    assert result.spooled[0].endswith("_季度报表.xlsx")

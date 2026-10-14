@@ -62,38 +62,47 @@ class MediaIngest:
         self, sid: str, attachment: Attachment, inputs: set[str], result: IngestResult
     ) -> None:
         kind = normalize_media_kind(attachment.kind)
-        label = attachment.name or kind
         max_bytes = self.config.media.max_bytes
+        declared_name = attachment.name or kind
         if _declared_too_large(attachment.size, max_bytes):
-            _note_too_large(result, label)
+            _note_too_large(result, declared_name)
             return
-        media = await self._download(attachment, label, result)
+        media = await self._download(attachment, declared_name, result)
         if media is None:
             return
+        # Some platforms only reveal the file name on download (e.g. via a
+        # Content-Disposition header), so prefer it over the message's name.
+        name = media.name or attachment.name
         data = media.data
         if len(data) > max_bytes:
-            _note_too_large(result, label)
+            _note_too_large(result, name or kind)
             return
 
         if kind not in inputs:
             # The model cannot consume this modality; keep the bytes on disk so a
             # tool can still reach them instead of dropping the attachment.
             self._spool(
-                attachment,
                 data,
                 result,
+                name=name,
                 reason=f"{kind} is not supported by the model",
                 hint="kept on disk for a tool",
             )
             return
 
-        mime = sniff_mime(data, attachment.name, media.mime or attachment.mime)
+        mime = sniff_mime(data, name, media.mime or attachment.mime)
+        await self._deliver_supported(sid, data, mime, name, result)
+
+    async def _deliver_supported(
+        self, sid: str, data: bytes, mime: str, name: str | None, result: IngestResult
+    ) -> None:
+        """Place media the model can consume: inline, upload, else spool."""
         if len(data) <= self.config.media.inline_limit_bytes:
-            result.files.append(_inline_file(data, mime, attachment.name))
+            result.files.append(_inline_file(data, mime, name))
             return
-        if await self._try_provider_upload(sid, data, mime, attachment.name, result):
+        if await self._try_provider_upload(sid, data, mime, name, result):
             return
-        self._spool(attachment, data, result, reason="large media; no upload channel")
+        self._spool(data, result, name=name, reason="large media; no upload channel")
 
     async def _download(
         self, attachment: Attachment, label: str, result: IngestResult
@@ -129,17 +138,17 @@ class MediaIngest:
 
     def _spool(
         self,
-        attachment: Attachment,
         data: bytes,
         result: IngestResult,
         *,
         reason: str,
+        name: str | None = None,
         hint: str = "read it with a tool",
     ) -> None:
-        label = attachment.name or reason
+        label = name or reason
         try:
             root = resolve_spool_dir(self.config.media.spool_dir, self.working_dir)
-            path = spool_path(root, data, attachment.name)
+            path = spool_path(root, data, name)
             path.write_bytes(data)
         except OSError as exc:  # noqa: BLE001 - a disk failure must not break the turn
             log.warning("media_spool_failed", error=str(exc))
