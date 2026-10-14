@@ -60,6 +60,12 @@ def files_from_paths(paths: Any, *, base_dir: str | None, max_bytes: int) -> lis
     return out
 
 
+def record_blocked(path: str) -> None:
+    """Log and count an outbound file the egress policy refused."""
+    log.warning("media_outbound_blocked", path=path)
+    metrics.inc("media_outbound_blocked")
+
+
 def read_path_media(path: Path, max_bytes: int) -> RichMedia | None:
     """Read one file into a :class:`RichMedia`, or ``None`` if unusable."""
     try:

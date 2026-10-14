@@ -928,7 +928,8 @@ async def test_auto_forwarded_file_outside_patterns_is_blocked(tmp_path):
     )
 
     assert not [m for m in conn.messages if m["kind"] == "media"]
-    assert "Not sent" in conn.last_text()
+    assert "Not sent" not in conn.last_text()  # auto-forwarded files are not reported
+    assert metrics.counters.get("media_outbound_blocked") == 1
 
 
 @pytest.mark.asyncio

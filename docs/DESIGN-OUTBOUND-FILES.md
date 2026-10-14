@@ -190,9 +190,10 @@ def outbound_allowed(path: str, rules: list[tuple[bool, re.Pattern]]) -> bool:
 ## 9. Blocked-file behaviour
 
 - **Skip**: the file is not read and not uploaded.
-- **Operator visibility**: `log.warning("media_outbound_blocked", path=<absolute path>)` and a
-  `media_outbound_blocked` counter.
-- **User notice** (sent at drain, several files merged into one line):
+- **Operator visibility** (both paths): `log.warning("media_outbound_blocked", path=<absolute path>)`
+  and a `media_outbound_blocked` counter.
+- **User notice — only for the explicit `/send`**: the user asked for *that* file, so a refusal must be
+  visible:
   ```
   ⚠️ Not sent: `国风皮肤抽奖需求梳理.md` — outside the allowed send paths
   ```
@@ -200,8 +201,11 @@ def outbound_allowed(path: str, rules: list[tuple[bool, re.Pattern]]) -> bool:
     full path stays in the log);
   - wording is neutral ("outside the allowed send paths"), not "permission" — the block is the
     bridge's egress policy, not an agentd tool-permission error.
-- The notice (like all outbound media) is emitted at **drain**; an interrupted/cancelled turn does
-  not drain, so nothing is sent (and no notice).
+- **Auto-forwarded files are silent**: under `auto_files: true`, a path-based file the tools name is
+  the bridge's *own* action, not a user request, so a disallowed one is skipped **without** a chat
+  notice (log + counter only) — no nagging the conversation about files nobody asked for.
+- `/send` replies immediately; auto-forwarded media is emitted at **drain**, so an interrupted turn
+  drains nothing (and a blocked auto-forwarded file produces no notice either way).
 
 ## 10. Startup validation
 
@@ -230,7 +234,8 @@ automatically; no per-mode configuration.
 3. `**/*/a.txt` and `/etc/*.config` forms match as expected.
 4. **Escape**: `<wd>/../../etc/passwd` and a symlink pointing outside → blocked after `resolve()`.
 5. Inline file parts are unaffected by `patterns`.
-6. Blocked file → `media_outbound_blocked` (log + counter) and one merged user notice.
+6. Blocked `/send` → `media_outbound_blocked` (log + counter) and a user notice; a blocked
+   auto-forwarded file → **log + counter only, no notice**.
 7. Invalid pattern → startup error.
 8. `auto_files: false` (default) → an edited file is **not** auto-sent; `auto_files: true` with a
    matching pattern → sent, and only once per turn with the final content.
@@ -247,5 +252,5 @@ automatically; no per-mode configuration.
 | DOF-2 | **No auto-forward by default** (`auto_files: false`); delivery is explicit via `/send` | During development, edits are incidental; auto-pushing every created/edited file is noisy |
 | DOF-3 | `patterns` are **glob + `!`**, ordered, last-match-wins, matched against the **resolved absolute path**, with a `{working_dir}` template | Expressive (files or directories, allow + deny) yet predictable; `resolve()` closes `..`/symlink escapes |
 | DOF-4 | The rule governs **path-based** files only; **inline file parts** are explicit media and always forwarded | Paths are the bridge's own filesystem access; inline bytes were already chosen by the tool |
-| DOF-5 | A blocked file is **skipped**, logged/metriced, and the user gets a **name-only notice** | The user must know delivery did not happen, without leaking server paths into a group |
+| DOF-5 | A blocked file is **skipped** and logged/metriced; a **name-only notice** is sent **only for an explicit `/send`** (auto-forwarded files are silent) | The user must know an explicit request did not happen, without leaking server paths into a group; auto-forwarding is the bridge's own action and should not nag the chat |
 | DOF-6 | The policy is a Tether concern, **independent of** agentd's tool permissions | Writing a file and delivering it are different decisions, owned by different layers |

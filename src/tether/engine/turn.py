@@ -64,6 +64,7 @@ from .media_egress import (
     MediaEgress,
     extract_file_parts,
     files_from_paths,
+    record_blocked,
     structured_file_paths,
 )
 from .streaming import RateLimited, StreamingController
@@ -227,8 +228,7 @@ class TurnEngine:
 
     async def _drain_media(self) -> None:
         produced = list(self.media)  # explicit tool media: always forwarded
-        path_files, blocked = self._auto_path_files()
-        produced += path_files
+        produced += self._auto_path_files()
         seen: set[str] = set()
         for media in produced:
             key = media.name or media.url or ""
@@ -240,43 +240,31 @@ class TurnEngine:
                 await self.media_egress.send(self.conv, media)
             except Exception:  # noqa: BLE001
                 log.warning("media_egress_failed", kind=media.kind)
-        if blocked:
-            await self._notice_blocked(blocked)
         self.media.clear()
         self._media_paths.clear()
         self._media_seen.clear()
 
-    def _auto_path_files(self) -> tuple[list[RichMedia], list[str]]:
-        """Files named by tools on disk, when ``auto_files`` is on, plus blocked names.
+    def _auto_path_files(self) -> list[RichMedia]:
+        """Files named by tools on disk, when auto-forwarding is enabled.
 
         Path-based files are opt-in (``media.outbound.auto_files``) and must match
-        ``media.outbound.patterns``; a disallowed candidate is reported, not read.
+        ``media.outbound.patterns``. A disallowed candidate is skipped **silently**
+        (auto-forwarding is the bridge's own action, not a user request) but logged
+        and counted for the operator.
         """
         if not self.config.media.outbound.auto_files:
-            return [], []
+            return []
         policy = PathPolicy(self.config.media.outbound.patterns)
         allowed: list[str] = []
-        blocked: list[str] = []
         for raw in self._media_paths:
             real = resolve_under(raw, self.working_dir)
             if policy.allowed(real, working_dir=self.working_dir):
                 allowed.append(str(real))
             else:
-                log.warning("media_outbound_blocked", path=str(real))
-                metrics.inc("media_outbound_blocked")
-                blocked.append(real.name)
-        files = files_from_paths(
+                record_blocked(str(real))
+        return files_from_paths(
             allowed, base_dir=self.working_dir, max_bytes=self.config.media.max_bytes
         )
-        return files, blocked
-
-    async def _notice_blocked(self, names: list[str]) -> None:
-        listing = ", ".join(f"`{name}`" for name in names)
-        text = f"⚠️ Not sent: {listing} — outside the allowed send paths"
-        try:
-            await self.connector.send(self.conv, OutboundPlan(segments=[TextSegment(text=text)]))
-        except Exception:  # noqa: BLE001 - a notice must not break the turn
-            log.warning("media_blocked_notice_failed")
 
     async def _reject_pending_permissions(self) -> None:
         for request_id, pending in list(self.route.pending_interactions.items()):

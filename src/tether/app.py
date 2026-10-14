@@ -33,7 +33,7 @@ from .config import Config, load_config, validate_startup
 from .connector import IMConnector, build_connectors
 from .engine import hitl
 from .engine.commands import Command, help_text, parse_command, unescape_command
-from .engine.media_egress import MediaEgress, read_path_media
+from .engine.media_egress import MediaEgress, read_path_media, record_blocked
 from .engine.media_ingest import MediaIngest
 from .engine.projects import build_provider
 from .engine.prompt import PromptComposer
@@ -1223,8 +1223,7 @@ def _resolve_outbound_file(args: str, workdir: str | None, config: Config) -> Ri
     if not path.is_file():
         return f"⚠️ No such file: `{name}`."
     if not PathPolicy(config.media.outbound.patterns).allowed(path, working_dir=workdir):
-        metrics.inc("media_outbound_blocked")
-        log.warning("media_outbound_blocked", path=str(path))
+        record_blocked(str(path))
         return f"⚠️ Not sent: `{name}` — outside the allowed send paths."
     media = read_path_media(path, config.media.max_bytes)
     if media is None:
