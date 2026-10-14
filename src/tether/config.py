@@ -194,7 +194,10 @@ class MediaOutboundConfig(BaseModel):
 
 
 class MediaConfig(BaseModel):
-    inline_limit_bytes: int = 10485760
+    # Only genuinely small media is inlined as a base64 data URL in the prompt;
+    # anything larger would bloat the context, so it uses a provider file upload
+    # (when available) or is spooled instead.
+    inline_limit_bytes: int = 262144
     max_bytes: int = 52428800
     spool_dir: str = "{working_dir}/.tether/spool"
     fetch_url_outbound: bool = False

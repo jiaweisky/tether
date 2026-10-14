@@ -69,6 +69,8 @@ _LIFECYCLE_EVENTS = ("connected", "authenticated", "disconnected", "reconnecting
 
 # Our normalized media kinds -> WeCom media types.
 _MEDIA_TYPES = {"image": "image", "audio": "voice", "video": "video", "file": "file"}
+# Inbound WeCom message/media type -> our normalized kind.
+_KIND_BY_TYPE = {"image": "image", "voice": "voice", "video": "video", "file": "file"}
 _CHUNK_SIZE = 512 * 1024
 _MAX_CHUNKS = 100
 
@@ -84,9 +86,6 @@ class WeComSDK(Protocol):
     ) -> Any: ...
     async def reply_welcome(self, frame: Any, body: dict) -> Any: ...
     async def reply_template_card(self, frame: Any, card: dict) -> Any: ...
-    async def reply_stream_with_card(
-        self, frame: Any, stream_id: str, content: str, finish: bool, template_card: dict
-    ) -> Any: ...
     async def update_template_card(self, frame: Any, card: dict) -> Any: ...
     async def send_message(self, chatid: str, body: dict) -> Any: ...
     async def download_file(self, url: str, aes_key: str | None) -> tuple[bytes, str | None]: ...
@@ -142,11 +141,6 @@ class AibotSDK:
 
     async def reply_template_card(self, frame, card) -> Any:
         return await self._ensure_client().reply_template_card(frame, card)
-
-    async def reply_stream_with_card(self, frame, stream_id, content, finish, template_card) -> Any:
-        return await self._ensure_client().reply_stream_with_card(
-            frame, stream_id, content, finish=finish, template_card=template_card
-        )
 
     async def update_template_card(self, frame, card) -> Any:
         return await self._ensure_client().update_template_card(frame, card)
@@ -234,6 +228,11 @@ def _wecom_media_type(kind: str) -> str:
     return _MEDIA_TYPES.get(normalize_media_kind(kind), "file")
 
 
+def _kind_for(msgtype: str) -> str:
+    """Map an inbound WeCom message/media type to our normalized kind."""
+    return _KIND_BY_TYPE.get(msgtype, "file")
+
+
 def _filename(name: str | None, mime: str | None, fallback: str) -> str:
     """Ensure an upload has a filename with an extension.
 
@@ -267,17 +266,32 @@ class WeComConnector(BaseConnector):
 
     # -- lifecycle ---------------------------------------------------------
     async def _connect(self) -> None:
-        self._sdk.on("message.text", self._on_text)
-        self._sdk.on("message.image", self._on_media)
-        self._sdk.on("message.file", self._on_media)
-        self._sdk.on("message.voice", self._on_voice)
-        self._sdk.on("message.mixed", self._on_mixed)
+        self._sdk.on("message", self._on_frame)
         self._sdk.on("event.enter_chat", self._on_enter_chat)
         self._sdk.on("event.template_card_event", self._on_card_event)
         self._sdk.on("event.feedback_event", self._on_feedback)
         for event in _LIFECYCLE_EVENTS:
             self._sdk.on(event, self._on_lifecycle)
         await self._sdk.connect()
+
+    async def _on_frame(self, frame: Any) -> None:
+        """Dispatch an inbound message callback by its ``msgtype``.
+
+        The SDK's typed ``message.<type>`` events omit ``video`` (its enum lacks
+        it), but the generic ``message`` event carries every callback, so route
+        by type here to avoid dropping a supported kind.
+        """
+        handlers = {
+            "text": self._on_text,
+            "image": self._on_media,
+            "file": self._on_media,
+            "video": self._on_media,
+            "voice": self._on_voice,
+            "mixed": self._on_mixed,
+        }
+        handler = handlers.get(str(_body(frame).get("msgtype") or ""))
+        if handler is not None:
+            await handler(frame)
 
     async def _disconnect(self) -> None:
         self._sdk.disconnect()
@@ -293,9 +307,7 @@ class WeComConnector(BaseConnector):
         self._frames[conv.key] = frame
         body = _body(frame)
         quote_text, quote_media = self._quote_parts(body)
-        text = str(_get(body, "text", "content", default="")).strip()
-        if quote_text:
-            text = f"[quoting] {quote_text}\n{text}".rstrip()
+        text = _with_quote(str(_get(body, "text", "content", default="")).strip(), quote_text)
         await self.emit(
             InboundMessage(
                 channel=self.name,
@@ -314,7 +326,7 @@ class WeComConnector(BaseConnector):
         self._frames[conv.key] = frame
         body = _body(frame)
         msgtype = str(body.get("msgtype", "file"))
-        kind = {"image": "image", "file": "file", "voice": "voice"}.get(msgtype, "file")
+        kind = _kind_for(msgtype)
         quote_text, quote_media = self._quote_parts(body)
         await self.emit(
             InboundMessage(
@@ -362,15 +374,13 @@ class WeComConnector(BaseConnector):
         items = _get(body, "mixed", "msg_item", default=None) or body.get("msg_item") or []
         text, attachments = self._mixed_parts(items)
         quote_text, quote_media = self._quote_parts(body)
-        if quote_text:
-            text = f"{text}\n[quoting] {quote_text}".strip()
         await self.emit(
             InboundMessage(
                 channel=self.name,
                 message_id=self._message_id(frame),
                 conversation=conv,
                 sender=self._sender(body),
-                text=text,
+                text=_with_quote(text, quote_text),
                 attachments=[*attachments, *quote_media],
                 raw=frame,
             )
@@ -460,12 +470,12 @@ class WeComConnector(BaseConnector):
         stream_id: str | None = None,
         text: str | None = None,
     ) -> SentRef:
-        """Send an interaction card with fallbacks.
+        """Send an interaction card as a standalone passive reply.
 
-        WeCom binds a message to a single reply mode, so a card attached to an
-        already-open text stream (``stream_with_template_card``) can be rejected.
-        Try, in order: attach to the stream, a standalone passive card, then a
-        proactive card — so the user always gets the selectable options.
+        The streamed-card combination is delivered unreliably by the
+        long-connection bot, so every card is sent on its own: a passive reply
+        to the inbound frame, then a proactive push as a fallback. ``stream_id``
+        and ``text`` are accepted for interface compatibility and ignored.
         """
         payload = _card_payload(card)
         frame = self._frames.get(conv.key)
@@ -594,10 +604,10 @@ class WeComConnector(BaseConnector):
             section = quote.get("text") or {}
             return str(section.get("content") or ""), []
         if qtype in ("image", "file", "voice", "video"):
-            kind = {"image": "image", "voice": "voice", "video": "video"}.get(qtype, "file")
-            return "", [self._attachment(quote, qtype, kind)]
+            return "", [self._attachment(quote, qtype, _kind_for(qtype))]
         if qtype == "mixed":
-            return self._mixed_parts(_get(quote, "mixed", "msg_item", default=None) or [])
+            items = _get(quote, "mixed", "msg_item", default=None) or quote.get("msg_item") or []
+            return self._mixed_parts(items)
         return "", []
 
     def _mixed_parts(self, items: Any) -> tuple[str, list[Attachment]]:
@@ -610,7 +620,7 @@ class WeComConnector(BaseConnector):
             if item_type == "text":
                 texts.append(str(_get(item, "text", "content", default="")))
             elif item_type in ("image", "file", "voice"):
-                attachments.append(self._attachment(item, item_type, item_type))
+                attachments.append(self._attachment(item, item_type, _kind_for(item_type)))
         return "\n".join(t for t in texts if t), attachments
 
     def _attachment(self, body: dict, msgtype: str, kind: str) -> Attachment:
@@ -655,6 +665,13 @@ class WeComConnector(BaseConnector):
 
 def _body(frame: Any) -> dict:
     return frame.get("body") or {} if isinstance(frame, dict) else {}
+
+
+def _with_quote(text: str, quote_text: str) -> str:
+    """Prefix the referenced ("quoted") text, if any, above the message text."""
+    if not quote_text:
+        return text
+    return f"[quoting] {quote_text}\n{text}".rstrip()
 
 
 def _get(obj: Any, *keys: str, default: Any = None) -> Any:
@@ -759,7 +776,7 @@ def _selection_form(payload: dict, value: str) -> dict[str, Any]:
     selected indices resolve back to option labels here.
     """
     items = (payload.get("selected_items") or {}).get("selected_item") or []
-    specs = _specs(value)
+    specs = _question_specs(value)
     if not specs or not items:
         return {}
     form: dict[str, Any] = {}
@@ -784,7 +801,8 @@ def _selection_form(payload: dict, value: str) -> dict[str, Any]:
     return form
 
 
-def _specs(value: str) -> list[dict]:
+def _question_specs(value: str) -> list[dict]:
+    """The question specs encoded in a form's submit key (``{"specs": [...]}``)."""
     try:
         data = json.loads(value)
     except (ValueError, TypeError):

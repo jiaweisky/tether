@@ -262,19 +262,7 @@ class TetherApp:
         if connector is None:
             return
         await connector.transcribe_voice(msg)
-        command = _command(msg.text, self.config.commands.prefix)
-        if command == "stop":
-            await self._handle_stop(msg, connector)
-            return
-        if command == "new":
-            await self._handle_new(msg, connector)
-            return
-        if command == "whoami":
-            await self._notice(
-                connector,
-                msg.conversation,
-                f"🆔 your id: `{msg.sender.id}`\nconversation: `{msg.conversation.key}`",
-            )
+        if await self._handle_command(msg, connector):
             return
         try:
             route = await self.router.get_or_create(msg.conversation, title=_title(msg))
@@ -289,6 +277,24 @@ class TetherApp:
         if await self._maybe_answer_pending(route, msg, connector):
             return
         await self._start_turn(route, msg, connector)
+
+    async def _handle_command(self, msg: InboundMessage, connector: IMConnector) -> bool:
+        """Handle a local command; return whether the message was consumed."""
+        command = _command(msg.text, self.config.commands.prefix)
+        if command == "stop":
+            await self._handle_stop(msg, connector)
+            return True
+        if command == "new":
+            await self._handle_new(msg, connector)
+            return True
+        if command == "whoami":
+            await self._notice(
+                connector,
+                msg.conversation,
+                f"🆔 your id: `{msg.sender.id}`\nconversation: `{msg.conversation.key}`",
+            )
+            return True
+        return False
 
     async def _on_interaction(self, item: IncomingInteraction) -> None:
         connector = self.connectors.get(item.conversation.channel)
@@ -539,14 +545,24 @@ class TetherApp:
             await self.router.client_for(route).delete_session(old)
         except AgentError as exc:
             log.warning("session_delete_failed", session=old, error=exc.code)
-        await self.router.recreate_session(route)
+        try:
+            await self.router.recreate_session(route)
+        except Exception as exc:  # noqa: BLE001 - surface a failed reset to the user
+            log.warning("session_recreate_failed", session=old, error=str(exc))
+            await self._notice(
+                connector,
+                route.conversation,
+                "⚠️ Could not start a new conversation; please retry.",
+            )
+            return
         await self._notice(connector, route.conversation, "🆕 Started a new conversation.")
 
     # -- config hot-reload -------------------------------------------------
     async def _watch_config(self) -> None:
         """Apply runtime-safe config changes when ``config.yaml`` changes."""
         path = self._config_path
-        assert path is not None
+        if path is None:
+            return
         while self._running:
             await asyncio.sleep(2.0)
             mtime = _mtime(path)
@@ -556,7 +572,8 @@ class TetherApp:
 
     def _reload_config(self) -> None:
         path = self._config_path
-        assert path is not None
+        if path is None:
+            return
         try:
             updated = load_config(path)
         except Exception:  # noqa: BLE001 - keep running on a broken file

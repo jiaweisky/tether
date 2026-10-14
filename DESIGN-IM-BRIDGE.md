@@ -104,6 +104,7 @@
 | 2026-10-13 | §2.5/§6.6 **re-introduced `/new`** (start a fresh agent session for the conversation): it interrupts the running turn, drops queued turns, deletes the old agentd session and recreates one; the **project/view is untouched**. Restricted to the configured `group.admins` (no platform role API), so with an empty list the command has **no effect**. `/stop` stays `command_scope: initiator`; this supersedes the earlier "remove `/new`" (2026-10-10). |
 | 2026-10-13 | §2.5/§6.6/§9: added `/whoami` (reply with the sender's platform id, so an operator can discover the id to add as admin), made `group.admins` a **superset for commands** (an admin may always run `/stop`/`/new`, even when not the initiator), and added **config hot-reload** (`reload: true`) that watches `config.yaml` and re-applies a safe subset (`group`/`access`/`permissions`/`commands`/`identity`/`sessions`/`media`) without a restart (channels/credentials/server still need one). |
 | 2026-10-14 | §5.1 WeCom **quoted messages** are now parsed: a reply/quote is delivered as a normal message plus a `quote` field, so a quoted **media** becomes an attachment and a quoted **text** is prefixed (`[quoting] …`). Per the official receive-message scenarios, a group only delivers text/mixed/quote (image/file/voice/video are **单聊-only**), so a file in a group is only reachable by *quoting* it — which this fixes. |
+| 2026-10-14 | §7/§9 **`media.inline_limit_bytes` default 10 MB → 256 KB**: inlining a multi-MB image as a base64 data URL in the prompt ballooned the context and made agentd auto-compact in a loop. Only genuinely small media is inlined now; larger media uses a provider file upload (when configured) or is spooled. |
 
 ---
 
@@ -1861,7 +1862,7 @@ streaming:
   max_chars_override: null            # override max_text_chars from Capabilities
 
 media:
-  inline_limit_bytes: 10485760        # 10MB
+  inline_limit_bytes: 262144          # 256KB — larger media uses provider upload or spool
   max_bytes: 52428800                 # inbound download / outbound fetch limit (50MB, §7.6)
   spool_dir: "{working_dir}/.tether/spool"   # inside the working directory by default (reachable by agent read, §4.4/§10.4)
   fetch_url_outbound: false           # whether to allow the bridge to proxy-fetch url sources (includes SSRF protection)

@@ -27,7 +27,6 @@ class FakeWeComSDK:
         self.connected = False
         self.streams: list[tuple[str, str, bool]] = []
         self.cards: list[dict] = []
-        self.stream_cards: list[tuple[str, str, dict]] = []
         self.card_updates: list[dict] = []
         self.sent: list[tuple[str, dict]] = []
         self.welcome: list[dict] = []
@@ -57,9 +56,6 @@ class FakeWeComSDK:
 
     async def reply_template_card(self, frame, card):
         self.cards.append(card)
-
-    async def reply_stream_with_card(self, frame, stream_id, content, finish, template_card=None):
-        self.stream_cards.append((stream_id, content, template_card))
 
     async def send_message(self, chatid, body):
         self.sent.append((chatid, body))
@@ -118,10 +114,10 @@ def text_frame(text: str = "hi", *, chatid: str = "u1", chattype: str = "single"
 async def test_handlers_registered_and_text_inbound():
     _, sdk, items = await start_connector()
     assert sdk.connected
-    for event in ("message.text", "message.image", "message.mixed", "event.template_card_event"):
+    for event in ("message", "event.template_card_event"):
         assert event in sdk.handlers
 
-    await sdk.emit("message.text", text_frame("hello"))
+    await sdk.emit("message", text_frame("hello"))
     assert len(items) == 1
     message = items[0]
     assert isinstance(message, InboundMessage)
@@ -133,7 +129,7 @@ async def test_handlers_registered_and_text_inbound():
 @pytest.mark.asyncio
 async def test_group_conversation_and_speaker():
     _, sdk, items = await start_connector()
-    await sdk.emit("message.text", text_frame("hi all", chatid="g1", chattype="group"))
+    await sdk.emit("message", text_frame("hi all", chatid="g1", chattype="group"))
     conv = items[0].conversation
     assert conv.kind == "group"
     assert conv.id == "g1"
@@ -147,8 +143,8 @@ async def test_missing_msgid_falls_back_to_request_id():
     second = text_frame("b")
     second["body"].pop("msgid")
     second["headers"]["req_id"] = "r2"
-    await sdk.emit("message.text", first)
-    await sdk.emit("message.text", second)
+    await sdk.emit("message", first)
+    await sdk.emit("message", second)
     assert [m.message_id for m in items] == ["r1", "r2"]
 
 
@@ -158,14 +154,14 @@ async def test_streaming_requires_an_inbound_frame():
     proactive = Conversation(channel="wecom", kind="direct", id="u9")
     # No inbound frame yet: WeCom cannot stream, so the engine sends one-shot.
     assert connector.supports_streaming(proactive) is False
-    await sdk.emit("message.text", text_frame("hi"))
+    await sdk.emit("message", text_frame("hi"))
     assert connector.supports_streaming(items[0].conversation) is True
 
 
 @pytest.mark.asyncio
 async def test_text_reply_streams_via_frame():
     connector, sdk, items = await start_connector()
-    await sdk.emit("message.text", text_frame("hi"))
+    await sdk.emit("message", text_frame("hi"))
     conv = items[0].conversation
     await connector.send(conv, OutboundPlan(segments=[TextSegment(text="answer")], final=True))
     assert sdk.streams == [("stream-0", "answer", True)]
@@ -174,7 +170,7 @@ async def test_text_reply_streams_via_frame():
 @pytest.mark.asyncio
 async def test_streaming_interim_then_final():
     connector, sdk, items = await start_connector()
-    await sdk.emit("message.text", text_frame("hi"))
+    await sdk.emit("message", text_frame("hi"))
     conv = items[0].conversation
     ref = await connector.send(
         conv, OutboundPlan(segments=[TextSegment(text="partial")], final=False)
@@ -225,7 +221,7 @@ async def test_card_event_becomes_interaction():
 @pytest.mark.asyncio
 async def test_send_card_is_a_standalone_passive_reply():
     connector, sdk, items = await start_connector()
-    await sdk.emit("message.text", text_frame("hi"))
+    await sdk.emit("message", text_frame("hi"))
     conv = items[0].conversation
     await connector.send_card(
         conv, Card(title="t", body="b", buttons=[Button(text="Go", value="v")])
@@ -251,7 +247,7 @@ async def test_download_uses_aeskey_handle():
 @pytest.mark.asyncio
 async def test_outbound_media_uploads_and_replies():
     connector, sdk, items = await start_connector()
-    await sdk.emit("message.text", text_frame("hi"))
+    await sdk.emit("message", text_frame("hi"))
     conv = items[0].conversation
     plan = OutboundPlan(
         segments=[
@@ -293,7 +289,7 @@ async def test_enter_chat_sends_welcome():
 @pytest.mark.asyncio
 async def test_card_event_does_not_replace_reply_frame():
     connector, sdk, items = await start_connector()
-    await sdk.emit("message.text", text_frame("hi"))
+    await sdk.emit("message", text_frame("hi"))
     conv = items[0].conversation
     card_frame = {
         "headers": {"req_id": "event-req"},
@@ -340,7 +336,7 @@ async def test_acknowledge_updates_the_clicked_card():
 @pytest.mark.asyncio
 async def test_outbound_media_falls_back_to_proactive_when_reply_fails():
     connector, sdk, items = await start_connector()
-    await sdk.emit("message.text", text_frame("hi"))
+    await sdk.emit("message", text_frame("hi"))
     conv = items[0].conversation
 
     async def boom(*args, **kwargs):
@@ -380,7 +376,7 @@ def voice_frame(*, content: str | None, url: str | None = "https://x/v") -> dict
 @pytest.mark.asyncio
 async def test_voice_with_recognized_text_skips_audio():
     _, sdk, items = await start_connector()
-    await sdk.emit("message.voice", voice_frame(content="你好"))
+    await sdk.emit("message", voice_frame(content="你好"))
     message = items[0]
     assert message.text == "你好"
     assert message.attachments == []
@@ -389,7 +385,7 @@ async def test_voice_with_recognized_text_skips_audio():
 @pytest.mark.asyncio
 async def test_voice_without_text_attaches_audio():
     _, sdk, items = await start_connector()
-    await sdk.emit("message.voice", voice_frame(content=None))
+    await sdk.emit("message", voice_frame(content=None))
     message = items[0]
     assert message.text == ""
     assert message.attachments and message.attachments[0].kind == "voice"
@@ -398,7 +394,7 @@ async def test_voice_without_text_attaches_audio():
 @pytest.mark.asyncio
 async def test_outbound_media_derives_filename_from_mime():
     connector, sdk, items = await start_connector()
-    await sdk.emit("message.text", text_frame("hi"))
+    await sdk.emit("message", text_frame("hi"))
     conv = items[0].conversation
     plan = OutboundPlan(
         segments=[MediaSegment(media=RichMedia(kind="image", data=b"png", mime="image/png"))]
@@ -410,7 +406,7 @@ async def test_outbound_media_derives_filename_from_mime():
 @pytest.mark.asyncio
 async def test_single_multi_choice_question_becomes_vote_card():
     connector, sdk, items = await start_connector()
-    await sdk.emit("message.text", text_frame("hi"))
+    await sdk.emit("message", text_frame("hi"))
     conv = items[0].conversation
     card = Card(
         title="Pick",
@@ -429,7 +425,7 @@ async def test_single_multi_choice_question_becomes_vote_card():
 @pytest.mark.asyncio
 async def test_multiple_single_choice_questions_become_multiple_card():
     connector, sdk, items = await start_connector()
-    await sdk.emit("message.text", text_frame("hi"))
+    await sdk.emit("message", text_frame("hi"))
     conv = items[0].conversation
     card = Card(
         title="Q",
@@ -450,7 +446,7 @@ async def test_multiple_single_choice_questions_become_multiple_card():
 @pytest.mark.asyncio
 async def test_mixed_multi_question_is_unsupported():
     connector, sdk, items = await start_connector()
-    await sdk.emit("message.text", text_frame("hi"))
+    await sdk.emit("message", text_frame("hi"))
     conv = items[0].conversation
     card = Card(
         title="Q",
@@ -548,7 +544,7 @@ async def test_multiple_submit_decodes_selected_labels():
 @pytest.mark.asyncio
 async def test_more_than_three_questions_is_unsupported():
     connector, sdk, items = await start_connector()
-    await sdk.emit("message.text", text_frame("hi"))
+    await sdk.emit("message", text_frame("hi"))
     conv = items[0].conversation
     card = Card(
         title="Q",
@@ -576,7 +572,7 @@ async def test_text_reply_quoting_a_file_becomes_an_attachment():
             "quote": {"msgtype": "file", "file": {"url": "https://x/f", "aeskey": "k"}},
         },
     }
-    await sdk.emit("message.text", frame)
+    await sdk.emit("message", frame)
     message = items[0]
     assert message.attachments and message.attachments[0].kind == "file"
     assert message.attachments[0].handle == {"url": "https://x/f", "aeskey": "k"}
@@ -598,5 +594,25 @@ async def test_text_reply_quoting_text_prefixes_the_quote():
             "quote": {"msgtype": "text", "text": {"content": "should I?"}},
         },
     }
-    await sdk.emit("message.text", frame)
+    await sdk.emit("message", frame)
     assert items[0].text == "[quoting] should I?\nyes do it"
+
+
+@pytest.mark.asyncio
+async def test_video_message_becomes_an_attachment():
+    _, sdk, items = await start_connector()
+    frame = {
+        "cmd": "aibot_msg_callback",
+        "headers": {"req_id": "rv"},
+        "body": {
+            "msgtype": "video",
+            "msgid": "mv",
+            "chatid": "u1",
+            "chattype": "single",
+            "from": {"userid": "u1"},
+            "video": {"url": "https://x/v", "aeskey": "k"},
+        },
+    }
+    await sdk.emit("message", frame)
+    message = items[0]
+    assert message.attachments and message.attachments[0].kind == "video"
