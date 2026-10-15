@@ -2184,6 +2184,8 @@ Common commands: `uv sync --extra wecom`, `uv run tether --config config.yaml`,
 Platform capabilities **cannot rely on documentation alone**; for each platform integrated, verify item by item with a real device + sandbox, and backfill the results into the capability table in §3.3
 (replace `pending integration testing`/`unknown` with determined values). Unified scripts/fixtures go in `tests/live/<platform>/`, not run in CI by default.
 
+> **Runnable per-item checklist:** `docs/VERIFY-CAPABILITIES.md` (trigger / expected / where to observe / which table to backfill, per platform).
+
 Confirm item by item for each platform:
 
 1. **Delivery**: In direct chat, is it pushed without @-mention? In group chat, is it pushed only on @, and **is it pushed on non-@**? (determines `direct_delivery` /
