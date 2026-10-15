@@ -52,11 +52,13 @@ from .models import (
     Sender,
     TextSegment,
 )
+from .render.markdown import render_markdown
 from .render.renderer import DefaultRenderer
 from .store.sqlite import RouteStore
 from .util.dedup import DedupCache
 from .util.logging import get_logger
 from .util.path_policy import PathPolicy, resolve_under
+from .util.redact import redact_secrets
 
 log = get_logger("tether.app")
 
@@ -317,6 +319,8 @@ class TetherApp:
             await self._handle_status(msg, connector)
         elif command.kind == "send":
             await self._handle_send(msg, connector, command.args)
+        elif command.kind == "config":
+            await self._handle_config(msg, connector, command.args)
         elif command.kind == "help":
             await self._notice(
                 connector, msg.conversation, help_text(self.config.commands.prefix)
@@ -343,7 +347,8 @@ class TetherApp:
                 lines.append(f"participants: {len(route.participants)}")
             else:
                 lines.append(f"conversation: {conv.key}")
-                lines.extend(self._direct_status_lines(route, engine))
+                info = await self._agentd_info(route.server_base)
+                lines.extend(self._direct_status_lines(route, engine, info))
             state = "parked" if route.pending_interactions else ("running" if engine else "idle")
             lines.append(f"turn: {state}   waiting: {self._waiting(route)}")
             pending = _pending_summary(route.pending_interactions)
@@ -355,7 +360,20 @@ class TetherApp:
         )
         await self._notice(connector, conv, "\n".join(lines))
 
-    def _direct_status_lines(self, route: Route, engine: TurnEngine | None) -> list[str]:
+    async def _agentd_info(self, base_url: str) -> dict[str, Any] | None:
+        """agentd `GET /api/info` (version/pid), or ``None`` when unreachable.
+
+        Bounded by a short timeout so a hung agentd never stalls `/status`.
+        """
+        try:
+            call = self.router.client_for_base(base_url).get_info()
+            return await asyncio.wait_for(call, timeout=2.0)
+        except (AgentError, TimeoutError):
+            return None
+
+    def _direct_status_lines(
+        self, route: Route, engine: TurnEngine | None, info: dict[str, Any] | None
+    ) -> list[str]:
         """Detail shown only in a direct chat (never visible to a group)."""
         limit = route.context_limit or self.config.model.context_limit
         used = engine.usage.context_tokens if engine is not None else None
@@ -375,7 +393,7 @@ class TetherApp:
             lines.append(
                 f"project: {route.project_id or '?'} (isolated/{self.config.projects.isolation})"
             )
-        lines.append(f"agentd: {route.server_base}")
+        lines.append(_agentd_line(route.server_base, info))
         if route.bot_name:
             lines.append(f"identity: {route.bot_name}")
         return lines
@@ -678,6 +696,62 @@ class TetherApp:
             await self._notice(connector, conv, result)
             return
         await MediaEgress(self.config, connector).send(conv, result)
+
+    async def _handle_config(self, msg: InboundMessage, connector: IMConnector, args: str) -> None:
+        """`/config [--all]`: show configuration (admins, direct chat).
+
+        Default: just the agentd server the conversation is using. `--all`: the
+        (redacted) bridge config plus the full agentd config.
+        """
+        conv = msg.conversation
+        if conv.is_group:
+            await self._notice(connector, conv, "🔒 `/config` is available in a direct chat only.")
+            return
+        if msg.sender.id not in self.config.group.admins:
+            await self._notice(connector, conv, "🔒 Only admins can view the configuration.")
+            return
+        option = args.strip()
+        if option not in ("", "--all"):
+            await self._notice(connector, conv, f"⚠️ Unknown option: `{option}` (use `--all`).")
+            return
+        route = await self.router.get(conv)
+        base = route.server_base if route is not None else self.config.server.base_url
+        payload: dict[str, Any] = {
+            "agentd": await self._agentd_config(base, all_=(option == "--all"))
+        }
+        if option == "--all":
+            payload = {"tether": redact_secrets(self.config.model_dump(mode="json")), **payload}
+        await self._send_config(connector, conv, payload)
+
+    async def _send_config(
+        self, connector: IMConnector, conv: Conversation, payload: dict[str, Any]
+    ) -> None:
+        """Send ``payload`` as one or more ```json code blocks (markdown-rendered)."""
+        dump = json.dumps(payload, indent=2, ensure_ascii=False, default=str)
+        for chunk in _config_chunks(dump, connector.capabilities.max_text_chars):
+            body, _ = render_markdown(chunk, connector.capabilities.markdown)
+            await self._notice(connector, conv, body)
+
+    async def _agentd_config(self, base_url: str, *, all_: bool) -> dict[str, Any]:
+        """The agentd server this conversation uses, or its full config with ``all_``.
+
+        Bounded by a timeout so a hung agentd cannot stall the reply.
+        """
+        client = self.router.client_for_base(base_url)
+        try:
+            info = await asyncio.wait_for(client.get_info(), timeout=5.0)
+            if all_:
+                config = await asyncio.wait_for(client.get_config(), timeout=5.0)
+                return {"base_url": base_url, "info": info, "config": config}
+            name = _current_server_name(info)
+            config = await asyncio.wait_for(
+                client.get_config(section="servers", server=name), timeout=5.0
+            )
+            servers = config.get("config", {}).get("servers") or []
+            return {"base_url": base_url, "info": info, "servers": servers}
+        except (AgentError, TimeoutError) as exc:
+            code = exc.code if isinstance(exc, AgentError) else "timeout"
+            return {"base_url": base_url, "error": str(code)}
 
     # -- config hot-reload -------------------------------------------------
     async def _watch_config(self) -> None:
@@ -1203,6 +1277,53 @@ def _mtime(path: str) -> float:
         return os.path.getmtime(path)
     except OSError:
         return 0.0
+
+
+def _current_server_name(info: dict[str, Any]) -> str | None:
+    """The single agentd server name reported for this listener, if unambiguous."""
+    names = info.get("servers") or []
+    return names[0] if len(names) == 1 else None
+
+
+def _config_chunks(dump: str, limit: int) -> list[str]:
+    """Wrap a JSON dump into one or more fenced code blocks within ``limit`` chars.
+
+    Splitting before fencing keeps each message a valid, self-contained code block
+    (a raw char-split by the connector would break the fence).
+    """
+    if limit <= 0:  # the channel imposes no length limit
+        return [f"```json\n{dump}\n```"]
+    body_limit = max(1, limit - len("```json\n") - len("\n```"))
+    pieces: list[str] = []
+    current = ""
+    for line in dump.splitlines(keepends=True):
+        while len(line) > body_limit:
+            if current:
+                pieces.append(current)
+                current = ""
+            pieces.append(line[:body_limit])
+            line = line[body_limit:]
+        if len(current) + len(line) > body_limit:
+            pieces.append(current)
+            current = line
+        else:
+            current += line
+    if current or not pieces:
+        pieces.append(current)
+    return [f"```json\n{piece}\n```" for piece in pieces]
+
+
+def _agentd_line(base: str, info: dict[str, Any] | None) -> str:
+    """The `/status` ``agentd:`` line, with version/pid when reachable."""
+    if info is None:
+        return f"agentd: {base} (unreachable)"
+    bits: list[str] = []
+    if info.get("version"):
+        bits.append(f"v{info['version']}")
+    if info.get("pid"):
+        bits.append(f"pid {info['pid']}")
+    suffix = f" · {' · '.join(bits)}" if bits else ""
+    return f"agentd: {base}{suffix}"
 
 
 def _strip_quotes(text: str) -> str:

@@ -73,6 +73,19 @@ class HttpAgentClient:
         data = await self._request("GET", "/api/health")
         return bool(data.get("healthy")) if isinstance(data, dict) else False
 
+    async def get_config(
+        self, *, section: str | None = None, server: str | None = None
+    ) -> dict[str, Any]:
+        """agentd's redacted effective configuration (`GET /api/config`)."""
+        params = {k: v for k, v in (("section", section), ("server", server)) if v}
+        data = await self._request("GET", "/api/config", params=params)
+        return data if isinstance(data, dict) else {}
+
+    async def get_info(self) -> dict[str, Any]:
+        """agentd's server info (`GET /api/info`): version, pid, addresses."""
+        data = await self._request("GET", "/api/info")
+        return data if isinstance(data, dict) else {}
+
     async def list_agents(self) -> list[AgentInfo]:
         data = await self._request("GET", "/api/agent") or []
         return [

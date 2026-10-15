@@ -5,6 +5,7 @@ import asyncio
 import pytest
 from fakes import FakeAgentClient
 
+from tether.agent.errors import AgentError
 from tether.agent.events import (
     ATTACHMENT_OMITTED,
     PERMISSION_ASKED,
@@ -833,6 +834,52 @@ async def test_a_command_with_extra_words_is_forwarded_not_intercepted(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_config_command_is_admin_only_and_direct_only(tmp_path):
+    config = Config.model_validate(
+        {"group": {"admins": ["u1"]}, "server": {"token": "s3cr3t-value"}}
+    )
+    app, conn, client = await make_app(tmp_path, config=config)
+
+    await app._on_message(inbound("/config", kind="group", conv_id="g1"))
+    assert "direct chat" in conn.last_text()
+
+    await app._on_message(inbound("/config", sender_id="u2", message_id="m2"))
+    assert "admin" in conn.last_text().lower()
+
+    # default: only the current agentd server, not the bridge config
+    await app._on_message(inbound("/config", sender_id="u1", message_id="m3"))
+    default = "\n".join(m["text"] for m in conn.messages if m["kind"] == "text")
+    assert '"agentd"' in default and '"tether"' not in default
+
+    # --all: bridge + full agentd, with the bridge secret redacted
+    await app._on_message(inbound("/config --all", sender_id="u1", message_id="m4"))
+    every = "\n".join(m["text"] for m in conn.messages if m["kind"] == "text")
+    assert '"tether"' in every and '"agentd"' in every
+    assert "***" in every and "s3cr3t-value" not in every
+
+    # an unknown option is reported, not silently ignored
+    await app._on_message(inbound("/config --nope", sender_id="u1", message_id="m5"))
+    assert "Unknown option" in conn.last_text()
+    assert not client.prompts  # never forwarded to the agent
+
+
+def test_config_chunks_are_fenced_and_within_limit():
+    import json
+
+    from tether.app import _config_chunks
+
+    dump = json.dumps({"key": "v" * 200}, indent=2)
+    chunks = _config_chunks(dump, 80)
+    assert len(chunks) > 1
+    for chunk in chunks:
+        assert chunk.startswith("```json\n") and chunk.endswith("\n```")
+        assert len(chunk) <= 80
+    bodies = [c[len("```json\n") : -len("\n```")] for c in chunks]
+    assert "".join(bodies) == dump  # chunking is lossless
+    assert _config_chunks(dump, 0) == [f"```json\n{dump}\n```"]  # 0 = no limit
+
+
+@pytest.mark.asyncio
 async def test_send_command_delivers_an_allowed_file(tmp_path):
     config = Config.model_validate(
         {
@@ -957,6 +1004,7 @@ async def test_status_command_reports_and_redacts(tmp_path):
     assert "Status" in direct
     assert "agent=build" in direct
     assert "agentd:" in direct and "context:" in direct
+    assert "vtest" in direct and "pid 1" in direct  # agentd /api/info
 
     await app._on_message(inbound("hi", kind="group", conv_id="g1", message_id="m3"))
     await app._on_message(inbound("/status", kind="group", conv_id="g1", message_id="m4"))
@@ -964,6 +1012,19 @@ async def test_status_command_reports_and_redacts(tmp_path):
     assert "group" in group and "agent=build" in group
     assert "agentd:" not in group and "workdir:" not in group
     assert "context:" not in group and "project:" not in group
+
+
+@pytest.mark.asyncio
+async def test_status_shows_agentd_unreachable(tmp_path, monkeypatch):
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("hi"))
+
+    async def boom():
+        raise AgentError("unavailable", "down")
+
+    monkeypatch.setattr(client, "get_info", boom)
+    await app._on_message(inbound("/status", message_id="m2"))
+    assert "(unreachable)" in conn.last_text()
 
 
 @pytest.mark.asyncio

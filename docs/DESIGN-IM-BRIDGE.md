@@ -110,6 +110,8 @@
 | 2026-10-14 | §2.5(3)/§6.6 command layer synced with the implementation: added **`/help`** (lists each command's name, usage and description); interception is now an **exact match** of `<prefix><name>` (after an optional leading `@` mention), so `/stop now` / `/status of the build` are **forwarded to the model** instead of being hijacked; to send a literal command as text, **double the prefix** (`//help` → `/help`, while `// TODO` / `//server/share` stay untouched); and every command now replies readably on unauthorized/idle/no-op/failure (nothing silently swallowed). This supersedes the earlier §6.6 "the only command is `/stop`" text and its "no `/new` / `/status` / `/help`" bullet (the change log had already recorded the re-introductions). |
 | 2026-10-14 | §6.6/§7.3/§9 implemented **outbound file delivery** per the companion `docs/DESIGN-OUTBOUND-FILES.md`: path-based files the tools name (`write`/`edit`/`apply_patch`/`outputPaths`) are **no longer auto-forwarded** (`media.outbound.auto_files`, default `false`) and are gated by a **default-deny glob allow-list** (`media.outbound.patterns`, matched against the file's resolved absolute path; `{working_dir}` expands per conversation). A new **`/send <path>`** command (§6.6) pulls one file on demand through the same policy; a blocked candidate is skipped, logged (`media_outbound_blocked` + counter) and reported to the user by **file name only**. Command matching became **format-aware** — the parser now reads arguments (`CommandSpec.usage`), so `/send <path>` accepts an argument while argument-less commands stay exact. |
 | 2026-10-14 | §7.3/§9: the outbound block notice is now **`/send`-only**. An auto-forwarded file (`auto_files: true`) that `patterns` disallows is skipped **silently** (log + `media_outbound_blocked` counter only), since auto-forwarding is the bridge's own action, not a user request — only an explicit `/send` reports "Not sent". |
+| 2026-10-14 | §6.6/§2.5(3): added **`/config [--all]`** — an **admin-only, direct-chat-only** command. By default it shows only the **agentd server the conversation is using** (`GET /api/info` → `GET /api/config?section=servers&server=<name>`); `--all` adds the bridge's own config plus the full agentd config. The bridge's `Config` holds env-resolved secrets, so it is recursively **redacted** (`util/redact.py`, key-name blacklist); agentd's config is already redacted. Falls back to `server.base_url` when the conversation has no route yet. Output is a **` ```json ` code block** (split into self-contained blocks so a char-level chunk never breaks the fence), rendered per the channel's markdown level. |
+| 2026-10-15 | §6.6: `/status` now shows agentd **version/pid** in a direct chat, from agentd's `GET /api/info`; the line degrades to `(unreachable)` when agentd cannot be reached, and a group still hides it (unchanged redaction). |
 
 ---
 
@@ -316,7 +318,7 @@ and by default does not know who said it. The bridge therefore injects a speaker
 - **HITL `group.hitl_scope`**: `initiator` (default, only that turn's initiator) / `participants` (any group member) /
   `admins` (**configured admins**, not a platform role). A click by an unauthorized person is **ignored with a reply hint**, and produces no side effect
   (to prevent others from approving dangerous operations on the initiator's behalf).
-- **Commands** (handled locally by the bridge, never forwarded; a message is a command only when it is *exactly* `<prefix><name>` after an optional leading `@` mention — see §6.6): `/stop` cancels the current turn; `/new` starts a fresh agent session for the conversation (interrupt, drop queued turns, delete + recreate the agentd session; the project/view is untouched); `/whoami` replies with the sender's platform id (to discover an id to add as admin); `/status` replies with a read-only snapshot (session/agent/model, context usage, project mode + working dir, agentd base, turn state, queued turns, pending interactions, uptime) — redacted in a group (no agentd base / working dir, short session id); `/send <path>` delivers one file on demand (joined to the project dir when relative, then gated by `media.outbound.patterns`, §7.3); `/help` lists the commands. Because matching is exact, `/stop now` and `/status of the build` are **forwarded to the model**, not redirected; to send a literal command as text, **double the prefix** (`//help` → `/help`). `/stop` in a group defaults to **only that turn's initiator** (`command_scope: initiator`, configurable to `admins`); `/new` is **admin-only** (`group.admins`). **Admins are a superset**: a configured admin may always run a command. Every outcome replies with a short readable notice (nothing is silently swallowed).
+- **Commands** (handled locally by the bridge, never forwarded; a message is a command only when it is *exactly* `<prefix><name>` after an optional leading `@` mention — see §6.6): `/stop` cancels the current turn; `/new` starts a fresh agent session for the conversation (interrupt, drop queued turns, delete + recreate the agentd session; the project/view is untouched); `/whoami` replies with the sender's platform id (to discover an id to add as admin); `/status` replies with a read-only snapshot (session/agent/model, context usage, project mode + working dir, agentd base + version/pid via `GET /api/info`, turn state, queued turns, pending interactions, uptime) — redacted in a group (no agentd base / working dir, short session id); `/send <path>` delivers one file on demand (joined to the project dir when relative, then gated by `media.outbound.patterns`, §7.3); `/config` shows the configuration (**admin-only, direct chat only**): by default the current **agentd server** (`/api/info` + `/api/config?section=servers`), with `--all` adding the redacted bridge config and the full agentd config; `/help` lists the commands. Because matching is exact, `/stop now` and `/status of the build` are **forwarded to the model**, not redirected; to send a literal command as text, **double the prefix** (`//help` → `/help`). `/stop` in a group defaults to **only that turn's initiator** (`command_scope: initiator`, configurable to `admins`); `/new` is **admin-only** (`group.admins`). **Admins are a superset**: a configured admin may always run a command. Every outcome replies with a short readable notice (nothing is silently swallowed).
 
 **(4) Context and cost**
 
@@ -1559,12 +1561,16 @@ Key points:
   - `/new` — start a fresh agent session for the conversation (interrupt the running turn, drop queued turns, delete and recreate the
     agentd session; the project/view is untouched). **Admin-only** (`group.admins`).
   - `/whoami` — reply with the sender's platform id (so an operator can discover the id to add as admin).
-  - `/status` — reply with a read-only snapshot (session/agent/model, context usage, project mode + working dir, agentd base, turn
-    state, queued turns, pending interactions, uptime); **redacted by conversation type** (a group hides the agentd base and working
-    directory and shortens the session id).
+  - `/status` — reply with a read-only snapshot (session/agent/model, context usage, project mode + working dir, agentd base + **version/pid**
+    via `GET /api/info`, turn state, queued turns, pending interactions, uptime); **redacted by conversation type** (a group hides the
+    agentd details and working directory and shortens the session id). If agentd is unreachable the agentd line says `(unreachable)`.
   - `/send <path>` — deliver one file to this conversation on demand. The path is joined to the project directory when relative, then
     `resolve()`d and checked against `media.outbound.patterns` (§7.3); a missing, too-large or **disallowed** path is reported, never
     sent. Open to any participant — the `patterns` policy is the gate.
+  - `/config [--all]` — show configuration for an operator. By default, just the **agentd server this conversation is using**
+    (`GET /api/config?section=servers&server=<name>` + `GET /api/info`); `--all` adds the bridge's own (redacted) config and the full
+    agentd config. **Admins only**, and **direct chat only**. The bridge's `Config` carries resolved secrets, so it is **redacted**;
+    agentd's config is already redacted.
   - `/help` — list the commands (name, usage, description).
 - **Matching**: a message is a command only when, after dropping any leading `@` mention and surrounding whitespace, it is exactly
   `<prefix><name>` (case-insensitively). A command that declares an argument (`/send <path>`) additionally accepts trailing text, while
@@ -1573,9 +1579,10 @@ Key points:
 - **Escaping**: to send a literal command as text, **double the prefix** — `//help` is delivered to the model as `/help`. Only a doubled
   prefix followed by a real command is collapsed; `// TODO`, `//server/share`, `//help me` are forwarded untouched.
 - **Authorization**: `/stop` in a group defaults to **only that Turn's initiator** (`command_scope: initiator`, configurable to
-  `admins`); `/new` is admin-only (`group.admins`); `/whoami` / `/status` / `/help` / `/send` are open to anyone (for `/send` the
-  `patterns` policy is the real gate). **Admins are a superset** — a configured admin may always run a command. Every terminal outcome
-  (unauthorized, idle, no-op, failure) replies with a short readable notice; a command never fails silently.
+  `admins`); `/new` is admin-only (`group.admins`); `/config` is admin-only **and** refused outside a direct chat; `/whoami` /
+  `/status` / `/help` / `/send` are open to anyone (for `/send` the `patterns` policy is the real gate). **Admins are a superset** — a
+  configured admin may always run a command. Every terminal outcome (unauthorized, idle, no-op, failure) replies with a short readable
+  notice; a command never fails silently.
 - In a group chat where the platform only delivers @ messages, a command naturally also requires an @ trigger (see §2.5).
 - **No Conversation lifecycle commands**: there is no `/reset` / `/compact` / `/agent` / `/model` — in IM, "one Conversation is one agent
   session"; context growth is left to agentd's automatic compaction; switching agent/model is **operations** work handled through

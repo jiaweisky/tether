@@ -11,16 +11,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-CommandKind = Literal["stop", "new", "whoami", "status", "send", "help"]
+CommandKind = Literal["stop", "new", "whoami", "status", "send", "config", "help"]
 
 
 @dataclass(frozen=True)
 class CommandSpec:
-    """A self-handled command: its word, optional argument syntax and purpose."""
+    """A self-handled command: its word, usage syntax and purpose.
+
+    ``optional`` marks a command whose argument is not required, so it also matches
+    with no trailing text (e.g. ``/config`` and ``/config --all``).
+    """
 
     name: CommandKind
     description: str
     usage: str = ""
+    optional: bool = False
 
 
 COMMANDS: tuple[CommandSpec, ...] = (
@@ -30,6 +35,13 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("status", "Show a snapshot of the conversation and the bridge."),
     CommandSpec(
         "send", "Send a file from the project to this conversation.", usage="<path>"
+    ),
+    CommandSpec(
+        "config",
+        "Show config — the current agentd server, or --all for the bridge + full agentd "
+        "(admins, direct chat only).",
+        usage="[--all]",
+        optional=True,
     ),
     CommandSpec("help", "List the available commands."),
 )
@@ -72,7 +84,7 @@ def parse_command(text: str, prefix: str = "/") -> Command | None:
         return None
     tail = parts[1].strip() if len(parts) > 1 else ""
     if spec.usage:
-        if not tail:
+        if not tail and not spec.optional:
             return None
         return Command(kind=spec.name, args=tail)
     if tail:

@@ -144,9 +144,16 @@ def test_parse_help_command():
 
 def test_help_text_lists_every_command():
     text = help_text()
-    for kind in ("stop", "new", "whoami", "status", "send", "help"):
+    for kind in ("stop", "new", "whoami", "status", "send", "config", "help"):
         assert f"/{kind}" in text
     assert "/send <path>" in text
+
+
+def test_parse_config_command():
+    default = parse_command("/config")
+    assert default is not None and default.kind == "config" and default.args == ""
+    every = parse_command("/config --all")
+    assert every is not None and every.args == "--all"
 
 
 def test_help_text_reflects_the_configured_prefix():

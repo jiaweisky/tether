@@ -53,6 +53,12 @@ class FakeAgentClient:
     async def agent_tools(self, agent: str):
         return self.tools
 
+    async def get_config(self, *, section=None, server=None):
+        return {"schemaVersion": 1, "sources": [], "config": {"models": [], "servers": []}}
+
+    async def get_info(self):
+        return {"version": "test", "pid": 1, "servers": ["fake"]}
+
     async def active_sessions(self):
         return {sid: {"type": "running"} for sid in self.active}
 
