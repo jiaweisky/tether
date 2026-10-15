@@ -85,6 +85,8 @@ class TetherApp:
         self.config = config
         self._config_path = config_path
         self._config_mtime = 0.0
+        # per-agentd-base cache: does that agentd expose a media uploader?
+        self._uploader_cache: dict[str, bool] = {}
         self.store = RouteStore(db_path)
         self._connectors_override = connectors
         self.provider = build_provider(config)
@@ -512,6 +514,7 @@ class TetherApp:
             connector,
             self.router.client_for(route),
             working_dir=working_dir,
+            uploader_available=await self._agentd_has_uploader(route.server_base),
         )
         model_inputs = await self._model_inputs(route)
         result = await ingest.ingest(route.session_id, msg.attachments, model_inputs=model_inputs)
@@ -753,6 +756,20 @@ class TetherApp:
             code = exc.code if isinstance(exc, AgentError) else "timeout"
             return {"base_url": base_url, "error": str(code)}
 
+    async def _agentd_has_uploader(self, base_url: str) -> bool:
+        """Whether the agentd at ``base_url`` exposes a media uploader (cached per base).
+
+        A failed probe is optimistically ``True``; a doomed upload then falls back to
+        downsampling, so a stale cache is at worst suboptimal, never incorrect.
+        """
+        key = base_url.rstrip("/")
+        cached = self._uploader_cache.get(key)
+        if cached is None:
+            servers = (await self._agentd_config(base_url, all_=False)).get("servers")
+            cached = True if servers is None else any(s.get("mediaUpload") for s in servers)
+            self._uploader_cache[key] = cached
+        return cached
+
     # -- config hot-reload -------------------------------------------------
     async def _watch_config(self) -> None:
         """Apply runtime-safe config changes when ``config.yaml`` changes."""
@@ -835,6 +852,8 @@ class TetherApp:
         backoff = self.config.server.sse_reconnect_ms / 1000.0
         failures = 0
         while self._running:
+            # A (re)connect is the natural point to re-check agentd's media uploader.
+            self._uploader_cache.pop(base_url.rstrip("/"), None)
             received = False
             try:
                 async for event in client.events():

@@ -16,6 +16,7 @@ dependencies = [
   "tenacity>=8",
   "structlog>=24",
   "filetype>=1.2",
+  "Pillow>=10",
   "python-dotenv>=1.0",
 ]
 
@@ -24,7 +25,6 @@ wecom = ["wecom-aibot-python-sdk>=1.0.2"]
 feishu = ["lark-oapi>=1.4"]
 qq = ["qq-botpy>=1.2"]
 wechat = ["wechatbot-sdk"]
-media = ["Pillow>=10"]
 dev = [
   "pytest>=8",
   "pytest-asyncio>=0.23",

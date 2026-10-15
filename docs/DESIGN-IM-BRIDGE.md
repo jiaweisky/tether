@@ -112,6 +112,8 @@
 | 2026-10-14 | §7.3/§9: the outbound block notice is now **`/send`-only**. An auto-forwarded file (`auto_files: true`) that `patterns` disallows is skipped **silently** (log + `media_outbound_blocked` counter only), since auto-forwarding is the bridge's own action, not a user request — only an explicit `/send` reports "Not sent". |
 | 2026-10-14 | §6.6/§2.5(3): added **`/config [--all]`** — an **admin-only, direct-chat-only** command. By default it shows only the **agentd server the conversation is using** (`GET /api/info` → `GET /api/config?section=servers&server=<name>`); `--all` adds the bridge's own config plus the full agentd config. The bridge's `Config` holds env-resolved secrets, so it is recursively **redacted** (`util/redact.py`, key-name blacklist); agentd's config is already redacted. Falls back to `server.base_url` when the conversation has no route yet. Output is a **` ```json ` code block** (split into self-contained blocks so a char-level chunk never breaks the fence), rendered per the channel's markdown level. |
 | 2026-10-15 | §6.6: `/status` now shows agentd **version/pid** in a direct chat, from agentd's `GET /api/info`; the line degrades to `(unreachable)` when agentd cannot be reached, and a group still hides it (unchanged redaction). |
+| 2026-10-15 | §13.1: added **`docs/VERIFY-CAPABILITIES.md`** — a runnable, per-platform checklist for the remaining `pending integration testing` cells (trigger / expected / observation / which table to backfill), covering WeCom and Feishu delivery, media in/out, rendering, streaming/editing, HITL, rate limits, proactive push and authorization data. |
+| 2026-10-15 | §7.2/§9 added **inbound downsampling**: over-limit media the model can consume is now **shrunk to fit `inline_limit_bytes`** and inlined, instead of spooling (which left images effectively invisible — the agent only got a path). Order: inline → agentd `file` (when the host configures a `MediaUploader`, probed once per agentd via `GET /api/config` and cached per base) → downsample (images via Pillow → JPEG; audio → MP3 / video → MP4 via `ffmpeg`; new **`media.downsample`**, default `true`) → spool. Downsampling only applies to modalities the model consumes. Motivation: a multi-MB image inlined under the old 10 MB limit had ballooned a group session to 2.4M tokens and broke every subsequent turn with a provider HTTP 400. |
 
 ---
 
@@ -1662,8 +1664,12 @@ outbound: the file part of event/message ──► MediaCollector(§4.5) ──�
 
 See the §4.4 decision tree. Core points:
 
-- Prefer `inline` (small files, modality supported); large files go via `file` (requires the agentd `MediaUploader`); when a publicly reachable
-  URL exists use `url`; if none fits, spool to a **controlled subdirectory inside the working directory** and note it in the prompt text (details in §4.4).
+- Prefer `inline` (small files, modality supported). For larger media, in order: (1) the agentd **`file`** channel when the host
+  configures a `MediaUploader` (probed once per agentd via `GET /api/config`, cached per base — a stale cache only costs an extra
+  downsample, never a failure); (2) else, if **`media.downsample`** is on (default), **shrink** the media to fit `inline_limit_bytes`
+  (image → JPEG via Pillow; audio → MP3 / video → MP4 via `ffmpeg`) and inline the result; (3) else spool to a **controlled subdirectory
+  inside the working directory** and note it in the prompt text (details in §4.4). Downsampling applies only to modalities the model
+  consumes — a text/image model never downscales video/audio.
 - Make `mime` as precise as possible (as given by the platform or sniffed by extension/magic); sanitize `name`.
 - Voice: if the model does not support audio, it can be spooled first; a speech-to-text subagent could also be connected in the future (not MVP).
 
@@ -1896,8 +1902,9 @@ streaming:
   max_chars_override: null            # override max_text_chars from Capabilities
 
 media:
-  inline_limit_bytes: 262144          # 256KB — larger media uses provider upload or spool
+  inline_limit_bytes: 262144          # 256KB — larger media uses provider upload, downsampling, or spool
   max_bytes: 52428800                 # inbound download / outbound fetch limit (50MB, §7.6)
+  downsample: true                    # shrink over-limit model-consumable media to fit inline_limit (§7.2)
   spool_dir: "{working_dir}/.tether/spool"   # inside the working directory by default (reachable by agent read, §4.4/§10.4)
   fetch_url_outbound: false           # whether to allow the bridge to proxy-fetch url sources (includes SSRF protection)
   outbound:

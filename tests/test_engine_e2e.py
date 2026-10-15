@@ -1047,3 +1047,31 @@ async def test_tool_edits_send_only_the_final_file_version(tmp_path):
     # An edit-tool file is delivered, and only once, with its final content.
     assert len(media) == 1
     assert media[0]["media"].data == b"v2"
+
+
+@pytest.mark.asyncio
+async def test_agentd_has_uploader_reads_config(tmp_path, monkeypatch):
+    app, conn, client = await make_app(tmp_path)
+    base = app.config.server.base_url
+
+    def wire(has_uploader):
+        view: dict = {"name": "http"}
+        if has_uploader:
+            view["mediaUpload"] = {"url": "https://example/upload"}
+
+        async def get_info():
+            return {"servers": ["http"]}
+
+        async def get_config(*, section=None, server=None):
+            return {"config": {"servers": [view]}}
+
+        monkeypatch.setattr(client, "get_info", get_info)
+        monkeypatch.setattr(client, "get_config", get_config)
+
+    wire(True)
+    assert await app._agentd_has_uploader(base) is True
+    assert await app._agentd_has_uploader(base) is True  # cached
+
+    app._uploader_cache.clear()  # e.g. after an agentd (re)connect
+    wire(False)
+    assert await app._agentd_has_uploader(base) is False

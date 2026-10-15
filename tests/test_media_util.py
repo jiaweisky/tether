@@ -1,6 +1,17 @@
 from __future__ import annotations
 
-from tether.util.media import safe_filename, spool_name
+import os
+from io import BytesIO
+
+from tether.util.media import downsample, safe_filename, spool_name
+
+
+def _noisy_png(width: int, height: int) -> bytes:
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.frombytes("RGB", (width, height), os.urandom(width * height * 3)).save(buffer, "PNG")
+    return buffer.getvalue()
 
 
 def test_safe_filename_keeps_unicode():
@@ -31,3 +42,21 @@ def test_safe_filename_truncates_long_names():
 def test_spool_name_is_content_addressed():
     assert spool_name(b"payload", "季度报表.xlsx").endswith("_季度报表.xlsx")
     assert spool_name(b"payload", None).endswith("_file")
+
+
+def test_downsample_image_fits_and_is_jpeg():
+    from PIL import Image
+
+    source = _noisy_png(1200, 900)
+    assert len(source) > 262144  # the input is genuinely over the limit
+    result = downsample(source, mime="image/png", max_bytes=262144)
+    assert result is not None
+    out, out_mime = result
+    assert out_mime == "image/jpeg"
+    assert 0 < len(out) <= 262144
+    assert out[:2] == b"\xff\xd8"  # JPEG magic
+    assert Image.open(BytesIO(out)).size[0] <= 1568
+
+
+def test_downsample_unknown_mime_returns_none():
+    assert downsample(b"whatever", mime="application/pdf", max_bytes=100) is None

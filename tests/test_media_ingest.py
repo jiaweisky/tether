@@ -98,3 +98,46 @@ async def test_downloaded_filename_used_when_message_has_none(tmp_path):
     result = await ingest.ingest("ses_1", [att], model_inputs={"image", "text"})
     assert result.spooled
     assert result.spooled[0].endswith("_季度报表.xlsx")
+
+
+def _noisy_png(width: int, height: int) -> bytes:
+    import os
+    from io import BytesIO
+
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.frombytes("RGB", (width, height), os.urandom(width * height * 3)).save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_large_image_is_downsampled_when_no_uploader(tmp_path):
+    ingest = MediaIngest(
+        Config(),
+        FakeConnector(_noisy_png(1200, 900)),
+        FakeAgentClient(),
+        working_dir=str(tmp_path),
+        uploader_available=False,
+    )
+    att = Attachment(kind="image", name="big.png", handle={"url": "x"})
+    result = await ingest.ingest("ses_1", [att], model_inputs={"image", "text"})
+    assert result.files and result.files[0]["mediaSource"] == "inline"
+    assert result.files[0]["uri"].startswith("data:image/jpeg;base64,")  # downsampled
+    assert not result.spooled
+
+
+@pytest.mark.asyncio
+async def test_large_image_spools_when_downsample_disabled(tmp_path):
+    config = Config()
+    config.media.downsample = False
+    ingest = MediaIngest(
+        config,
+        FakeConnector(_noisy_png(1200, 900)),
+        FakeAgentClient(),
+        working_dir=str(tmp_path),
+        uploader_available=False,
+    )
+    att = Attachment(kind="image", name="big.png", handle={"url": "x"})
+    result = await ingest.ingest("ses_1", [att], model_inputs={"image", "text"})
+    assert result.spooled and not result.files

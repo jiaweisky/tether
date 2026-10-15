@@ -218,6 +218,9 @@ class MediaConfig(BaseModel):
     max_bytes: int = 52428800
     spool_dir: str = "{working_dir}/.tether/spool"
     fetch_url_outbound: bool = False
+    # Shrink over-limit media the model can consume (image/video/audio) so it can be
+    # inlined instead of spooled, when agentd has no media uploader. On by default.
+    downsample: bool = True
     outbound: MediaOutboundConfig = Field(default_factory=MediaOutboundConfig)
 
     @model_validator(mode="after")
