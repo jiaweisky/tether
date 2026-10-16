@@ -7,16 +7,13 @@ import pytest
 import tether.connectors.feishu.connector as feishu_module
 from tether.connectors.feishu.connector import (
     FeishuConnector,
-    VoiceTranscription,
     _interactive_card,
 )
 from tether.models import (
-    Attachment,
     Button,
     Card,
     CardQuestion,
     Conversation,
-    InboundMessage,
     IncomingInteraction,
     OutboundPlan,
     Sender,
@@ -27,7 +24,6 @@ from tether.models import (
 class FakeFeishuSDK:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
-        self.transcript: str | None = None
 
     def start(self, on_message, on_card, on_recall):
         self.handlers = (on_message, on_card, on_recall)
@@ -58,12 +54,6 @@ class FakeFeishuSDK:
 
     def download(self, message_id, file_key, kind):
         return b"bytes"
-
-    def recognize(self, data, fmt, engine_type):
-        self.calls.append(("recognize", fmt, engine_type))
-        if self.transcript is None:
-            raise RuntimeError("asr unavailable")
-        return self.transcript
 
     def bot_info(self):
         return "MyBot", "An assistant"
@@ -227,104 +217,6 @@ def test_model_object_event_is_parsed():
     assert item.text == "@Bot hi"
     assert item.conversation.id == "oc_p2p"
     assert item.sender.id == "ou_user"
-
-
-def _voice(conv, message_id="om_v"):
-    return InboundMessage(
-        channel="feishu",
-        message_id=message_id,
-        conversation=conv,
-        sender=Sender(id="ou_1"),
-        text="",
-        attachments=[Attachment(kind="audio", handle={"message_id": message_id, "file_key": "fk"})],
-    )
-
-
-@pytest.mark.asyncio
-async def test_voice_transcription_replaces_audio(monkeypatch):
-    monkeypatch.setattr(feishu_module, "_has_ffmpeg", lambda: True)
-    monkeypatch.setattr(feishu_module, "_decode_pcm16", lambda data: b"pcm")
-    sdk = FakeFeishuSDK()
-    sdk.transcript = "打开空调"
-    conn = FeishuConnector(
-        app_id="a", app_secret="b", sdk=sdk, voice_transcription=VoiceTranscription()
-    )
-    conv = Conversation(channel="feishu", kind="direct", id="oc_1")
-    msg = _voice(conv)
-
-    await conn.transcribe_voice(msg)
-
-    assert msg.text == "打开空调"
-    assert msg.attachments == []
-
-
-@pytest.mark.asyncio
-async def test_voice_transcription_disabled_without_ffmpeg(monkeypatch):
-    monkeypatch.setattr(feishu_module, "_has_ffmpeg", lambda: False)
-    conn = FeishuConnector(
-        app_id="a",
-        app_secret="b",
-        sdk=FakeFeishuSDK(),
-        voice_transcription=VoiceTranscription(),
-    )
-    assert conn._voice is None
-
-
-@pytest.mark.asyncio
-async def test_voice_transcription_is_off_by_default():
-    sdk = FakeFeishuSDK()
-    sdk.transcript = "should not be used"
-    conn = FeishuConnector(app_id="a", app_secret="b", sdk=sdk)
-    msg = _voice(Conversation(channel="feishu", kind="direct", id="oc_1"))
-
-    await conn.transcribe_voice(msg)
-
-    assert msg.text == ""
-    assert len(msg.attachments) == 1
-    assert not any(call[0] == "recognize" for call in sdk.calls)
-
-
-@pytest.mark.asyncio
-async def test_voice_transcription_failure_keeps_audio_and_backs_off(monkeypatch):
-    monkeypatch.setattr(feishu_module, "_has_ffmpeg", lambda: True)
-    monkeypatch.setattr(feishu_module, "_decode_pcm16", lambda data: b"pcm")
-    sdk = FakeFeishuSDK()  # transcript is None -> recognize raises
-    conn = FeishuConnector(
-        app_id="a",
-        app_secret="b",
-        sdk=sdk,
-        voice_transcription=VoiceTranscription(cooldown_s=60),
-    )
-    conv = Conversation(channel="feishu", kind="direct", id="oc_1")
-    first = _voice(conv, "om_1")
-    second = _voice(conv, "om_2")
-
-    await conn.transcribe_voice(first)
-    await conn.transcribe_voice(second)  # within the cooldown window
-
-    assert first.text == "" and len(first.attachments) == 1
-    assert second.text == "" and len(second.attachments) == 1
-    assert len([call for call in sdk.calls if call[0] == "recognize"]) == 1
-
-
-@pytest.mark.asyncio
-async def test_voice_transcription_throttles_per_minute(monkeypatch):
-    monkeypatch.setattr(feishu_module, "_has_ffmpeg", lambda: True)
-    monkeypatch.setattr(feishu_module, "_decode_pcm16", lambda data: b"pcm")
-    sdk = FakeFeishuSDK()
-    sdk.transcript = "hi"
-    conn = FeishuConnector(
-        app_id="a",
-        app_secret="b",
-        sdk=sdk,
-        voice_transcription=VoiceTranscription(max_per_min=1),
-    )
-    conv = Conversation(channel="feishu", kind="direct", id="oc_1")
-
-    await conn.transcribe_voice(_voice(conv, "om_1"))
-    await conn.transcribe_voice(_voice(conv, "om_2"))
-
-    assert len([call for call in sdk.calls if call[0] == "recognize"]) == 1
 
 
 def test_inbound_video_uses_file_key_not_cover():

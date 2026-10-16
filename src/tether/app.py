@@ -279,7 +279,6 @@ class TetherApp:
         connector = self.connectors.get(msg.channel)
         if connector is None:
             return
-        await connector.transcribe_voice(msg)
         text, escaped = unescape_command(msg.text, self.config.commands.prefix)
         if escaped:
             msg = replace(msg, text=text)

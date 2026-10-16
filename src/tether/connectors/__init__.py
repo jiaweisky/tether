@@ -40,12 +40,10 @@ def _make_wecom(
     )
 
 
-def _make_feishu(*, app_id: str, app_secret: str, voice_transcription=None, **_):
+def _make_feishu(*, app_id: str, app_secret: str, **_):
     from .feishu.connector import FeishuConnector
 
-    return FeishuConnector(
-        app_id=app_id, app_secret=app_secret, voice_transcription=voice_transcription
-    )
+    return FeishuConnector(app_id=app_id, app_secret=app_secret)
 
 
 def _make_qq(*, appid: str, secret: str, **_):
@@ -76,23 +74,9 @@ def _build_wecom(channel: Any) -> IMConnector:
 
 
 def _build_feishu(channel: Any) -> IMConnector:
-    from .feishu.connector import VoiceTranscription
-
-    voice = channel.voice_transcription
-    transcription = (
-        VoiceTranscription(
-            engine_type=voice.engine_type,
-            format=voice.format,
-            max_per_min=voice.max_per_min,
-            cooldown_s=voice.cooldown_s,
-        )
-        if voice.enabled
-        else None
-    )
     return _make_feishu(
         app_id=_require(channel.app_id, "app_id", "feishu"),
         app_secret=_require(channel.app_secret, "app_secret", "feishu"),
-        voice_transcription=transcription,
     )
 
 

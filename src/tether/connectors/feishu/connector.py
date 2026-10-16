@@ -11,14 +11,8 @@ fake (no network, no thread).
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
-import shutil
-import subprocess
 import threading
-import time
-from collections import deque
-from dataclasses import dataclass
 from typing import Any, Protocol
 
 from ...capabilities import Capabilities, MarkdownLevel
@@ -77,19 +71,6 @@ _MEDIA_TYPES = {
     "sticker": "image",
 }
 
-# Sliding window (seconds) for the local voice-transcription throttle.
-_VOICE_WINDOW_S = 60.0
-
-
-@dataclass(frozen=True)
-class VoiceTranscription:
-    """Options for transcribing inbound voice bubbles via Feishu's ASR API."""
-
-    engine_type: str = "16k_auto"
-    format: str = "pcm"
-    max_per_min: int = 20
-    cooldown_s: int = 60
-
 
 class FeishuSDK(Protocol):
     """The subset of the Feishu SDK the connector uses (sync calls)."""
@@ -104,7 +85,6 @@ class FeishuSDK(Protocol):
     def upload_image(self, data: bytes, filename: str) -> str: ...
     def upload_file(self, data: bytes, filename: str, kind: str) -> str: ...
     def download(self, message_id: str, file_key: str, kind: str) -> bytes: ...
-    def recognize(self, data: bytes, fmt: str, engine_type: str) -> str: ...
     def bot_info(self) -> tuple[str | None, str | None]: ...
 
 
@@ -117,7 +97,6 @@ class FeishuConnector(BaseConnector):
         app_id: str,
         app_secret: str,
         sdk: FeishuSDK | None = None,
-        voice_transcription: VoiceTranscription | None = None,
     ) -> None:
         super().__init__(feishu_capabilities)
         self._app_id = app_id
@@ -125,12 +104,6 @@ class FeishuConnector(BaseConnector):
         self._sdk: FeishuSDK = sdk or LarkSDK(app_id, app_secret)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._bot: tuple[str | None, str | None] | None = None
-        self._voice = voice_transcription
-        if self._voice is not None and not _has_ffmpeg():
-            log.warning("feishu_transcription_unavailable", reason="ffmpeg not found on PATH")
-            self._voice = None
-        self._voice_times: deque[float] = deque()
-        self._voice_cooldown_until = 0.0
 
     # -- lifecycle ---------------------------------------------------------
     async def _connect(self) -> None:
@@ -329,56 +302,6 @@ class FeishuConnector(BaseConnector):
             )
         return MediaHandle(handle=key, kind=normalized)
 
-    async def transcribe_voice(self, message: InboundMessage) -> None:
-        """Replace a voice-bubble attachment with its ASR transcript, in place.
-
-        Feishu delivers a voice bubble as ``audio`` with only a ``file_key`` (no
-        transcript, unlike WeCom). When enabled, download it and call the ASR API
-        so the model receives text. Best-effort: a rate limit, quota or format
-        error is logged and the raw attachment is left for the normal pipeline
-        (spooled), never failing the turn.
-        """
-        options = self._voice
-        if options is None or message.text.strip():
-            return
-        audio = _first_audio(message.attachments)
-        if audio is None or not self._try_voice_slot(options):
-            return
-        try:
-            media = await self.download(audio)
-            pcm = await asyncio.to_thread(_decode_pcm16, media.data)
-            text = await self._call(self._sdk.recognize, pcm, options.format, options.engine_type)
-        except Exception as exc:  # noqa: BLE001 - ASR is best-effort; back off on error
-            self._voice_cooldown_until = time.monotonic() + options.cooldown_s
-            log.warning("feishu_transcription_failed", error=str(exc))
-            return
-        text = (text or "").strip()
-        if not text:
-            return
-        message.text = text
-        message.attachments = [att for att in message.attachments if att is not audio]
-        log.info("feishu_transcribed", chars=len(text))
-
-    def _try_voice_slot(self, options: VoiceTranscription) -> bool:
-        """Whether a transcription may run now; records the attempt if so.
-
-        Enforces the local per-minute throttle and, after any error, a cooldown
-        that lets the platform's rate limit recover.
-        """
-        now = time.monotonic()
-        if now < self._voice_cooldown_until:
-            log.info(
-                "feishu_transcription_backoff", seconds=round(self._voice_cooldown_until - now)
-            )
-            return False
-        while self._voice_times and now - self._voice_times[0] >= _VOICE_WINDOW_S:
-            self._voice_times.popleft()
-        if len(self._voice_times) >= options.max_per_min:
-            log.warning("feishu_transcription_throttled", limit=options.max_per_min)
-            return False
-        self._voice_times.append(now)
-        return True
-
     async def identity(self, conv: Conversation) -> BotIdentity:
         name, description = self._bot or (None, None)
         return BotIdentity(
@@ -451,50 +374,6 @@ def _post_text(data: dict) -> str:
         parts.append(title)
     walk(data.get("content"))
     return "".join(parts).strip()
-
-
-def _first_audio(attachments: list[Attachment]) -> Attachment | None:
-    """The first voice/audio attachment, if any."""
-    return next((att for att in attachments if normalize_media_kind(att.kind) == "audio"), None)
-
-
-def _has_ffmpeg() -> bool:
-    """Whether ``ffmpeg`` is on PATH (required to decode voice to PCM)."""
-    return shutil.which("ffmpeg") is not None
-
-
-def _decode_pcm16(audio: bytes) -> bytes:
-    """Decode an Ogg-Opus voice clip to 16 kHz mono signed 16-bit PCM.
-
-    Feishu's ASR endpoint accepts only raw PCM; ffmpeg demuxes, decodes and
-    resamples in one pass (~30 ms for a few seconds of audio). Raises if ffmpeg
-    is missing or the input is not decodable, so the caller can fall back.
-    """
-    proc = subprocess.run(
-        [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-i",
-            "pipe:0",
-            "-f",
-            "s16le",
-            "-ac",
-            "1",
-            "-ar",
-            "16000",
-            "pipe:1",
-        ],
-        input=audio,
-        capture_output=True,
-        timeout=30,
-        check=False,
-    )
-    if proc.returncode != 0:
-        detail = proc.stderr.decode("utf-8", "replace").strip() or f"exit {proc.returncode}"
-        raise RuntimeError(f"ffmpeg decode failed: {detail}")
-    return proc.stdout
 
 
 def _replace_mentions(text: str, raw: Any) -> str:
@@ -864,30 +743,6 @@ class LarkSDK:
         )
         resp = _ok(self._rest.im.v1.message_resource.get(request), "download")
         return resp.file.read()
-
-    def recognize(self, data: bytes, fmt: str, engine_type: str) -> str:
-        from lark_oapi.api.speech_to_text.v1 import (
-            FileConfig,
-            FileRecognizeSpeechRequest,
-            FileRecognizeSpeechRequestBody,
-            Speech,
-        )
-
-        body = (
-            FileRecognizeSpeechRequestBody.builder()
-            .speech(Speech.builder().speech(base64.b64encode(data).decode()).build())
-            .config(
-                FileConfig.builder()
-                .file_id("tethervoice00001")
-                .format(fmt)
-                .engine_type(engine_type)
-                .build()
-            )
-            .build()
-        )
-        request = FileRecognizeSpeechRequest.builder().request_body(body).build()
-        resp = _ok(self._rest.speech_to_text.v1.speech.file_recognize(request), "speech_to_text")
-        return str(getattr(resp.data, "recognition_text", "") or "")
 
     def bot_info(self) -> tuple[str | None, str | None]:
         token = self._tenant_token()
