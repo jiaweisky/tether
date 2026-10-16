@@ -9,9 +9,7 @@ from __future__ import annotations
 
 import base64
 import binascii
-import ipaddress
 import os
-import socket
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -32,6 +30,7 @@ from ..models import (
 )
 from ..util.logging import get_logger
 from ..util.media import compress_image, sniff_mime
+from ..util.net import is_public_host
 
 log = get_logger("tether.media")
 
@@ -245,7 +244,7 @@ class MediaEgress:
 
     async def _fetch(self, url: str) -> bytes | None:
         parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https") or not _is_public_host(parsed.hostname or ""):
+        if parsed.scheme not in ("http", "https") or not is_public_host(parsed.hostname or ""):
             return None
         try:
             async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
@@ -256,19 +255,3 @@ class MediaEgress:
                 return resp.content
         except httpx.HTTPError:
             return None
-
-
-def _is_public_host(host: str) -> bool:
-    """Reject hosts that resolve to a private, loopback or reserved address."""
-    if not host:
-        return False
-    try:
-        addresses = socket.getaddrinfo(host, None)
-    except OSError:
-        return False
-    for address in addresses:
-        ip = ipaddress.ip_address(address[4][0])
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-            log.warning("ssrf_blocked", host=host)
-            return False
-    return True
