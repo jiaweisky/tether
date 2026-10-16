@@ -294,7 +294,8 @@ class QQChannelConfig(BaseModel):
 
 class WeChatChannelConfig(BaseModel):
     enabled: bool = False
-    cred_path: str = "~/.wechatbot/credentials.json"
+    # QR-login credentials the connector persists (openclaw-weixin / iLink Bot).
+    cred_path: str = "~/.tether/wechat.json"
     identity: ChannelIdentity = Field(default_factory=ChannelIdentity)
 
 

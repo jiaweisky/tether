@@ -1,4 +1,4 @@
-"""Personal WeChat (wechatbot.dev) connector scaffold.
+"""Personal WeChat (openclaw-weixin / iLink Bot) connector scaffold.
 
 Declared with no Markdown, buttons, or message editing, so prompts degrade to
 numbered options and replies are sent in one shot.
