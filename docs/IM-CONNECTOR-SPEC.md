@@ -143,17 +143,17 @@
 | A3 心跳 | ✔（SDK） | ✔（SDK） | ✔ op1/op11 | ? |
 | A4 单实例 | ✔ | ✔（投递其一） | ✔ | ✔ |
 | A5 健康 | ✔ | ✔ | ✔ | ✔ |
-| B1 单聊 | ✔ always | ✔ | ✔ always | ? |
-| B2 群聊 | ✔ mention_only | ✔ mention_only | ✔ mention_only | △ 弱 |
+| B1 单聊 | ✔ always | ✔ | ✔ always | ✔ always |
+| B2 群聊 | ✔ mention_only | ✔ mention_only | ✔ mention_only | ✖（direct-only，写死） |
 | B5 频道 | ✖ | ✖ | ✔（guild 频道） | ✖ |
 | B6 线程 | ✖ | ✔ | ? | ✖ |
 | C1 文本 | ✔ | ✔ | ✔ | ✔ |
 | C2 @提及 | ✔ | ✔ | ✔ | ✖ |
-| C3 引用 | ✔ | △ | ✔（msg_elements） | ✖ |
+| C3 引用 | ✔ | △ | ✔（msg_elements） | ✔（`ref_msg`） |
 | C4 入站媒体 | ✔（部分仅单聊） | ✔ | ✔ | ✔ |
-| C5 语音转写 | ✔ 原生 | ✖（客户端转写/气泡无） | ✔ 原生（`asr_refer_text`） | ✖ |
+| C5 语音转写 | ✔ 原生 | ✖（客户端转写/气泡无） | ✔ 原生（`asr_refer_text`） | ✔ 原生（`voice_item.text`） |
 | C6 交互回调 | ✔ | ✔ | ✔ | ✖ |
-| C7 撤回事件 | ✖ | ✔ | ? | ✖ |
+| C7 撤回事件 | ✖ | ✔ | ? | ✖（有 `delete_time_ms`，无处理） |
 | C8 会话事件 | ✔ enter_chat/feedback | ✔ | ✔ 加群/好友 | ✖ |
 | C9 去重 | ✔ | ✔ | ✔（msg_id+msg_seq） | ? |
 | D1 Markdown | RICH | STANDARD | STANDARD（msg_type=2） | NONE |
@@ -170,11 +170,11 @@
 | F4 群角色 | ✖ | ? | △ 平台暴露 `member_role`（未接入门控） | ✖ |
 | F5 回执/更新卡 | ✔ | ✔ | △ acknowledge | ✖ |
 | F6 点击去重 | ✔ | ✔ | ✔ | ✖ |
-| G1 出站媒体 | image/file/voice/video | image/file/audio/video | image/file/voice/video | image/voice/file/video |
-| G2 上传 | 分块 | API | URL / 分片 | SDK |
+| G1 出站媒体 | image/file/voice/video | image/file/audio/video | image/file/voice/video | image/video/file（无语音） |
+| G2 上传 | 分块 | API | URL / 分片 | CDN（AES-128-ECB） |
 | G3 超限/兜底 | ✔ 链接兜底 | ✔ 链接兜底 | ✔（软限降级为文件） | ? |
 | H1 身份来源 | 必须配置 | 平台 `bot/v3/info` | 平台 `READY d.user.username` | 昵称 |
-| I1 主动推送 | ✔ | ✔ | ✔（配额/开关） | ? |
+| I1 主动推送 | ✔ | ✔ | ✔（配额/开关） | △（缺 `context_token` 仍发，未证） |
 | J1 本地限速 | 流式节流 | 流式节流 | ✔ 令牌桶 30/min | ? |
 | K1 输入中 | ✖ | ✖ | △ 平台有 `msg_type=6`（单聊；未接入，走占位） | ✔ |
 | K2 表情回应 | ✖ | ✖ | ✖ | ✖ |

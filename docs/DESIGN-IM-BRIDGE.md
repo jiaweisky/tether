@@ -132,6 +132,9 @@
 | 2026-10-16 | §5.3/§6.1/§3.3: QQ **C2C streaming** implemented — 单聊 sends via `POST /v2/users/{openid}/stream_messages` (`input_mode=replace`, rising `index`, `input_state` 1→10), so a single chat is one growing message with **no `🤔 Thinking…` placeholder** (the stream content must extend monotonically, so the opening frame is empty). `supports_streaming` is now **per conversation** (C2C only); groups have no stream endpoint and keep placeholder + final, and one-shot notices stay plain messages. Pending device confirmation of the chunk semantics. |
 | 2026-10-16 | §5.3/§6.1/§6.7/§3.3: QQ **streaming corrected + placeholder dropped** — the api-v2 stream is **append-only** (`replace` on submitted content → `40113003`), so 单聊 streams via `input_mode=append` with the new suffix per chunk (skipping non-monotonic interim frames; a non-monotonic final falls back to a plain message). Added **`Capabilities.progress_placeholder`** (default true; **QQ false**), so the bridge no longer opens a turn with a `🤔 Thinking…` frame for QQ — the first real content opens the stream (单聊) or the turn sends a single final message (群, which has no stream endpoint). |
 | 2026-10-16 | §5.3/§6.1/§3.3: QQ **C2C streaming disabled and removed** — device testing showed the api-v2 `stream_messages` message is **append-only** and the QQ client renders it as *"该消息类型暂不支持查看"*, so a streamed turn is worse than a single message. `Capabilities.progress_placeholder` stays (QQ `false`), so a QQ turn is a **single final message** (单聊 and 群). |
+| 2026-10-16 | §5.4/§3.3/§9/§14 M5: **WeChat personal re-based on the `iLink Bot` protocol** published by **`Tencent/openclaw-weixin`** (the official Weixin channel plugin for OpenClaw: QR-code login, long-poll, AES-128-ECB, text/image/voice/file/video), as a **thin client** — no third-party SDK. `wechatbot.dev` / `wechatbot-sdk` is a **third-party reimplementation** of that protocol, referenced only as secondary notes (not the authority, not official). The compliance/stability caveat is kept: the protocol is Tencent's, but it drives a personal account over a non-official backend. |
+| 2026-10-16 | §5.4/§7.7/§14 M5/`REF`: corrected the WeChat-personal **compliance** wording — the earlier "compliance/ban risk" was **our own uncited assertion** (the `openclaw-weixin` repo says nothing about it). Restated as **unverified, no official policy basis either way** (the plugin is under Tencent's org; the backend is a Tencent domain), and dropped the "assess compliance before group use" note since groups are **unsupported (direct-only)**. |
+| 2026-10-16 | §5.4 + `docs/REF-WECHAT-ILINK-BOT.md` (new **凭据与登录** section): documented the WeChat **login UX** — **no app key to request**; the credential is a **`bot_token` from a QR login** on the personal account that will act as the bot (**use a spare account**). Entry points: **CLI** `tether login wechat` (terminal QR + ~8 min poll) and an **admin `/login wechat` in a direct chat** (the bridge replies with the QR **image**; never a group — the QR is a login credential). Token can go stale (`errcode -14` → the reference plugin pauses the account 1 h), so re-login on demand through the same entry. |
 | 2026-10-16 | §3.3/§5.3/§7.7/§2.6/§12/§14 M4: **QQ re-planned on the api-v2 spec as a thin client — the `qq-botpy` dependency is dropped**. The official SDKs (`botpy`/`botgo`/`bot-node-sdk`) are stale (last code activity 2023‑11…2024‑12) and the platform calls them *"接入参考"*; the spec is authoritative. §5.3 now documents the concrete protocol (Access Token `getAppAccessToken`; WS gateway opcodes 0/1/2/6/9/10/11, Identify/Heartbeat/Resume, intents `GROUP_AND_C2C_EVENT (1<<25)` / `INTERACTION (1<<26)`, sharding, error-code reconnect policy; REST send with passive `msg_id`+`msg_seq` windows and proactive quotas; `msg_type` 0/2/6/7; rich-media upload → `file_info`; recall ≤2 min) and corrected the capability/identity/media rows — QQ carries native voice **`asr_refer_text`**, supports markdown (`msg_type=2`) and a C2C `stream_messages` endpoint. `pyproject`'s `qq` extra is removed (httpx is core). |
 
 ---
@@ -877,7 +880,7 @@ Preliminary assessment per platform (**starting from documentation, unconfirmed 
 | WeCom Smart Robot | RICH (bot markdown) | No* | **Yes** (`reply_stream`) | Yes (template card) | image/file/voice/video | `always` | `mention_only` | Docs (long connection) |
 | Feishu | STANDARD (card `markdown` component) | Yes (patch card) | No (simulated with edit) | Yes (card buttons) | image/file/audio/video | **pending integration testing** | **pending integration testing** | pending integration testing |
 | QQ (api-v2) | STANDARD (markdown `msg_type=2`) | No | No (`stream_messages` unviewable in the client) | Yes (keyboard) | image/file/voice/video | `always` | `mention_only` | Device-verified 2026-10-16: C2C + group; text, markdown(C2C), inbound image/voice/file, outbound file |
-| WeChat Personal (wechatbot.dev) | NONE | No | No | No | image/voice/file/video | **pending integration testing** | **pending integration testing** | pending integration testing |
+| WeChat Personal (openclaw-weixin) | NONE | No | No | No | image/video/file | `always` (推测) | n/a (direct-only) | direct-only; source `Tencent/openclaw-weixin` |
 
 > *WeCom implements "pseudo-editing" by pushing multiple times via `reply_stream`; no real edit API is needed.
 > A `pending integration testing` cell means **not "unsupported"** but "not yet confirmed on a real device"; after verification with the §13 integration checklist it is back-filled with
@@ -1500,20 +1503,47 @@ connector can be exercised against a fake (no network).
 **§13.1 backfill items**: approved intents; 群/频道 streaming; received `msg_type` values; media size
 limits; `asr_refer_text` reliability; `INTERACTION_CREATE` payload; active-message quotas; 频道 delivery.
 
-### 5.4 WeChat personal (wechatbot.dev)
+### 5.4 WeChat personal (openclaw-weixin / iLink Bot)
 
-Based on `wechatbot-sdk`:
+Based on the **`iLink Bot` protocol** published by **`Tencent/openclaw-weixin`**
+(`@tencent-weixin/openclaw-weixin` — the official Weixin channel plugin for the OpenClaw runtime;
+a curated local mirror of its protocol lives at `docs/REF-WECHAT-ILINK-BOT.md`).
+`wechatbot.dev` (`corespeed-io/wechatbot`) is a **third-party reimplementation** of the same protocol,
+referenced only for its multi-language SDK notes — **not** the authority and **not** an official WeChat SDK.
 
-- `WeChatBot` + `@bot.on_message`; `msg.type ∈ {text,image,voice,file,video}`;
-  `msg.images/voices/files/videos`; `reply/send/send_typing`; AES-128-ECB encryption.
+- **Login & transport**: **QR-code login** (credentials persisted locally), then **long-poll** delivery
+  (`getUpdates` with a `get_updates_buf` cursor — resumable), typing indicator (`sendTyping`), multi-account;
+  every media path is **AES-128-ECB**. **Single chat only** — the plugin hardcodes `ChatType: "direct"`
+  (group routing is unimplemented). `item_list` carries text / image / voice / file / video (item types
+  1–5, plus `tool_call_*` 11–12) and a **quote** (`ref_msg`, with a local quote cache and a selected
+  substring). `message_state` is `0` new / `1` generating / `2` done.
+- **Login UX (there is no app key to request)**: the credential is a **`bot_token` from a QR login** on the
+  **personal account that will act as the bot** (use a spare account). Two entry points: (1) **CLI**
+  `tether login wechat` — prints an ASCII/PNG QR in a terminal and polls for ~8 min, then writes `cred_path`;
+  (2) **inside an already-connected IM** — an **admin** sends `/login wechat` in a **direct chat**, and the
+  bridge replies with the QR **image** and polls (the QR is a login credential, so **never a group**). The token
+  can go **stale** (server `errcode -14`; the reference plugin pauses the account for an hour), so re-login must
+  be possible on demand through the same entry.
 - No Markdown, no buttons, no editing → `Capabilities` fully degraded: text purification, cards become numbered options,
   streaming degrades to "one-shot send".
-- This channel has poor compliance risk and stability, and is listed as the last to integrate.
-- **Inbound voice**: same rule as QQ (§5.3) — prefer the platform's native transcript if the message carries one; otherwise
-  the raw attachment (no bridge-side ASR).
+- **Compliance/stability (unverified — no official basis either way)**: `openclaw-weixin` is under Tencent's GitHub
+  org and its backend is a Tencent domain (`ilinkai.weixin.qq.com`), so this is **not** an obvious "third-party hack";
+  but there is also **no published policy** on automating a **personal** WeChat account this way. Treat permission and
+  stability as **unknown** (not an established risk, nor an established allowance) and **use a spare account**.
+- **Inbound voice**: the platform carries a **native transcript** (`voice_item.text`) — use it (like WeCom, §5.1);
+  otherwise the raw attachment (no bridge-side ASR).
+- **Capabilities (from the plugin source)**: `markdown=NONE` (a filter degrades it to text),
+  `edit_message=False`, `native_stream=False` (block streaming is disabled — each reply is a new message),
+  `buttons=False`, **`typing=True`**, **`groups=False`** (direct-only), media **in** = image/voice/file/video,
+  media **out** = image/video/file (**no outbound voice**), **quote ✔** (`ref_msg` + a local quote cache, incl. a
+  selected substring), **voice transcript ✔** (`voice_item.text`), and **tool-progress messages**
+  (`tool_call_start`/`result`). Sends are gated by an **`allowFrom` allow-list** (default: the account owner only).
 - **Inbound interaction**: no buttons → **no `IncomingInteraction`**; HITL uses "numbered options + text fallback" (§4.6).
-- **Delivery semantics**: messages visible to the logged-in account; the specific delivery scope of `on_message`, group-chat behavior, and rate limiting are **pending integration testing confirmation**
-  (before confirmation, handle per the most conservative setting; use in groups must have the compliance risk assessed).
+- **Delivery semantics**: messages are visible to the logged-in account; **single chat only** (group routing is
+  unimplemented — confirmed in the source); rate limits remain **pending**.
+- **Integration shape**: like QQ (§5.3), a **thin client over the documented protocol** (no third-party SDK
+  dependency): QR login, long-poll, AES-128-ECB, send/media. The reference is `Tencent/openclaw-weixin`'s backend
+  protocol document.
 
 ### 5.5 New platform checklist (extensibility acceptance)
 
@@ -1805,7 +1835,7 @@ See §4.5. Core points:
 | WeCom intelligent bot | ✔ `download_file(url, aes_key)` (built-in AES-256-CBC decryption) | ✔ asset **chunked upload** (init/chunk/finish) + image/file/voice/video messages | aeskey is independent per media; the chunked flow is **pending integration testing** |
 | Feishu | ✔ message resource download API (requires auth, `image_key`/`file_key`) | ✔ `MediaService.upload_image` / file upload | goes through `im/v1/...`, requires a permission scope; fields **pending integration testing** |
 | QQ (api-v2) | ✔ the event's `attachments[].url` (+ `voice_wav_url`, `asr_refer_text`) | ✔ `.../files` upload (URL or multi-part) → `file_info` → send `msg_type=7`; 单聊/群 endpoints separate | `file_type`/size limits documented (soft 20/30/20/200 MB; hard 200 MB) |
-| WeChat personal | △ the event gives a media URL; the bridge fetches it | ✔ `send` / media send | no official API; stability/compliance **pending integration testing** |
+| WeChat personal | △ the event gives a media URL; the bridge fetches it | ✔ `send` / media send | personal-account automation; stability/compliance **unverified** |
 
 - All four platforms provide both "download + upload", in different forms: WeCom/Feishu have official methods (including decryption/auth), while QQ/WeChat personal
   are mostly "given a URL to fetch yourself + a rich media upload interface".
@@ -2034,7 +2064,7 @@ channels:
     secret: ${QQ_BOT_SECRET:-}
   wechat:
     enabled: false
-    cred_path: ~/.wechatbot/credentials.json
+    cred_path: ~/.tether/wechat.json     # QR-login credentials this connector persists
 
 # Health/metrics (§11)
 metrics:
@@ -2215,7 +2245,7 @@ dependencies = [
 [project.optional-dependencies]
 wecom  = ["wecom-aibot-python-sdk>=1.0.2"]
 feishu = ["lark-oapi>=1.4"]
-wechat = ["wechatbot-sdk"]
+# wechat: no SDK — thin client over the openclaw-weixin (iLink Bot) protocol (§5.4)
 # QQ needs no SDK — it is a thin client over api-v2 (§5.3); httpx is already a core dependency.
 media  = ["Pillow>=10"]           # image compression; optional
 dev    = ["pytest>=8", "pytest-asyncio>=0.23", "respx>=0.21", "ruff>=0.5", "mypy>=1.10"]
@@ -2289,7 +2319,7 @@ Confirm item by item for each platform:
 | **M2 WeCom full experience** | Markdown RICH profile (table/code-block downgrade); **run status/usage/thinking display (§6.7)**; template-card HITL (permission/question); inbound media (`download_file` decryption → inline/file/url/spool); outbound media (tool media → chunked upload → image/file/voice/video); `attachment.omitted` notice. **Exit: §13.1 backfill** |
 | **M3 Feishu** | Long-connection Connector; text/p2p round-trip (**done**); card streaming + card-Markdown rendering (**done**); card interaction callbacks → HITL + `acknowledge`; media. **Exit: §13.1 backfill** |
 | **M4 QQ** | **api-v2 thin client (no SDK)**: Access Token + WS gateway (Identify/Heartbeat/Resume) + REST; 单聊/群/频道; text/markdown/keyboard/rich-media; recall. **Exit: §13.1 backfill** |
-| **M5 WeChat personal** | wechatbot-sdk Connector; extreme downgrade; compliance notices. **Exit: §13.1 backfill** |
+| **M5 WeChat personal** | openclaw-weixin (iLink Bot) **thin-client** Connector (direct-only; extreme downgrade). **Exit: §13.1 backfill** |
 | **M6 hardening** | **Done:** project sharing vs isolation (`projects.mode: shared | isolated`; per-conversation views via agentd's control API `POST/GET/DELETE /admin/projects`, impl `none`/`copy`/`worktree`/`overlay`, with `inboundPermissions` + `sandbox` passthrough, §2.8/§2.9); SSRF protection; observability `GET /healthz` + `/metrics` (§11 core; the remaining listed metrics are **not planned**, §11); stale-turn watchdog + isolated re-acquire (§8.3). **Not planned:** adaptive rate limiting (§8.4), per-session `?after=` replay / explicit overflow handling (§8.3), migration/replay — each only matters at scale or for migrating existing data, not for this single-instance, single-operator bridge. |
 | **M7 enhancements** | **None outstanding.** Per-platform **voice→text** is handled inside each connector (§5.1 WeCom reads the platform's inline transcript; §5.3/§5.4 prefer the same, otherwise the raw attachment), not by a bridge-side ASR subagent. **Not planned:** long-term file archiving, Web admin console. **Done:** message recall (§8.6, Feishu). |
 
