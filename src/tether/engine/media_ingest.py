@@ -1,131 +1,65 @@
-"""Decide how each inbound attachment reaches the agent.
+"""Prepare inbound attachments for the agentd prompt.
 
-Small supported media is inlined as a data URL; larger media is uploaded to the
-provider's file API when the host configures one, else shrunk to fit the inline
-limit (unless downsampling is disabled), and anything left is spooled into a
-controlled directory inside the working directory and referenced by path in the
-prompt. The agent is never sent bytes it cannot use, and nothing is dropped
-silently.
+Tether owns only the connector side: it downloads the bytes and resolves the file
+name, and guards against pulling an attachment the platform declares oversized
+before the download. The delivery decision — inline, provider file, url,
+downsample, spool — is owned by agentd, so every attachment is handed over as a
+byte-backed inline file part and agentd applies its ``servers[].media`` policy.
 """
 
 from __future__ import annotations
 
-import asyncio
 import base64
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..agent.client import AgentClient
-from ..agent.errors import AgentError
-from ..config import Config, resolve_spool_dir
+from ..config import Config
 from ..connector import IMConnector
 from ..models import Attachment, MediaBytes, normalize_media_kind
 from ..util.logging import get_logger
-from ..util.media import downsample, sniff_mime, spool_path
+from ..util.media import sniff_mime
 
 log = get_logger("tether.media")
-
-_DEFAULT_MODEL_INPUTS = {"image", "text"}
 
 
 @dataclass
 class IngestResult:
     files: list[dict[str, Any]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
-    spooled: list[str] = field(default_factory=list)
 
     def note_text(self) -> str:
         return "\n".join(self.notes)
 
 
 class MediaIngest:
-    def __init__(
-        self,
-        config: Config,
-        connector: IMConnector,
-        client: AgentClient,
-        *,
-        working_dir: str | None = None,
-        uploader_available: bool = True,
-    ) -> None:
+    def __init__(self, config: Config, connector: IMConnector) -> None:
         self.config = config
         self.connector = connector
-        self.client = client
-        self.working_dir = working_dir
-        self.uploader_available = uploader_available
 
-    async def ingest(
-        self, sid: str, attachments: list[Attachment], *, model_inputs: set[str] | None = None
-    ) -> IngestResult:
+    async def ingest(self, attachments: list[Attachment]) -> IngestResult:
         result = IngestResult()
-        inputs = model_inputs or _DEFAULT_MODEL_INPUTS
         for attachment in attachments:
-            await self._ingest_one(sid, attachment, inputs, result)
+            await self._ingest_one(attachment, result)
         return result
 
-    async def _ingest_one(
-        self, sid: str, attachment: Attachment, inputs: set[str], result: IngestResult
-    ) -> None:
-        kind = normalize_media_kind(attachment.kind)
-        max_bytes = self.config.media.max_bytes
-        declared_name = attachment.name or kind
-        if _declared_too_large(attachment.size, max_bytes):
-            log.warning(
-                "media_too_large", name=declared_name, size=attachment.size, limit=max_bytes
+    async def _ingest_one(self, attachment: Attachment, result: IngestResult) -> None:
+        """Download one attachment and hand it to agentd as an inline file part."""
+        label = attachment.name or normalize_media_kind(attachment.kind)
+        limit = self.config.media.max_attachment_bytes
+        if limit and attachment.size is not None and attachment.size > limit:
+            log.warning("attachment_too_large", name=label, size=attachment.size, limit=limit)
+            result.notes.append(
+                f"⚠️ Attachment `{label}` is too large to download (limit {limit} bytes)."
             )
-            _note_too_large(result, declared_name)
             return
-        media = await self._download(attachment, declared_name, result)
+        media = await self._download(attachment, label, result)
         if media is None:
             return
         # Some platforms only reveal the file name on download (e.g. via a
         # Content-Disposition header), so prefer it over the message's name.
         name = media.name or attachment.name
-        data = media.data
-        if len(data) > max_bytes:
-            log.warning("media_too_large", name=name or kind, size=len(data), limit=max_bytes)
-            _note_too_large(result, name or kind)
-            return
-
-        if kind not in inputs:
-            # The model cannot consume this modality; keep the bytes on disk so a
-            # tool can still reach them instead of dropping the attachment.
-            self._spool(
-                data,
-                result,
-                name=name,
-                reason=f"{kind} is not supported by the model",
-                hint="kept on disk for a tool",
-            )
-            return
-
-        mime = sniff_mime(data, name, media.mime or attachment.mime)
-        await self._deliver_supported(sid, data, mime, name, result)
-
-    async def _deliver_supported(
-        self, sid: str, data: bytes, mime: str, name: str | None, result: IngestResult
-    ) -> None:
-        """Place media the model can consume: inline, upload, downsample, else spool."""
-        if len(data) <= self.config.media.inline_limit_bytes:
-            log.info("media_inlined", name=name, bytes=len(data))
-            result.files.append(_inline_file(data, mime, name))
-            return
-        if self.uploader_available and await self._try_provider_upload(
-            sid, data, mime, name, result
-        ):
-            return
-        if self.config.media.downsample:
-            shrunk = await asyncio.to_thread(
-                downsample, data, mime=mime, max_bytes=self.config.media.inline_limit_bytes
-            )
-            if shrunk is not None:
-                shrunk_data, shrunk_mime = shrunk
-                log.info(
-                    "media_downsampled", name=name, before=len(data), after=len(shrunk_data)
-                )
-                result.files.append(_inline_file(shrunk_data, shrunk_mime, name))
-                return
-        self._spool(data, result, name=name, reason="large media; no upload channel")
+        mime = sniff_mime(media.data, name, media.mime or attachment.mime)
+        result.files.append(_inline_file(media.data, mime, name))
 
     async def _download(
         self, attachment: Attachment, label: str, result: IngestResult
@@ -137,60 +71,7 @@ class MediaIngest:
             result.notes.append(f"⚠️ Failed to download attachment `{label}`.")
             return None
 
-    async def _try_provider_upload(
-        self, sid: str, data: bytes, mime: str, name: str | None, result: IngestResult
-    ) -> bool:
-        try:
-            uploaded = await self.client.upload_file(sid, data=data, mime=mime, name=name)
-        except AgentError as exc:
-            log.info("provider_upload_unavailable", error=exc.code)
-            return False
-        file_id = uploaded.get("fileId") or uploaded.get("id") or uploaded.get("uri")
-        if not file_id:
-            return False
-        result.files.append(
-            {
-                "uri": str(file_id),
-                "mime": mime,
-                "name": name,
-                "mediaSource": "file",
-                "fileId": str(file_id),
-            }
-        )
-        log.info("media_uploaded", name=name, bytes=len(data))
-        return True
-
-    def _spool(
-        self,
-        data: bytes,
-        result: IngestResult,
-        *,
-        reason: str,
-        name: str | None = None,
-        hint: str = "read it with a tool",
-    ) -> None:
-        label = name or reason
-        try:
-            root = resolve_spool_dir(self.config.media.spool_dir, self.working_dir)
-            path = spool_path(root, data, name)
-            path.write_bytes(data)
-        except OSError as exc:  # noqa: BLE001 - a disk failure must not break the turn
-            log.warning("media_spool_failed", error=str(exc))
-            result.notes.append(f"⚠️ Could not save attachment `{label}` to disk.")
-            return
-        result.spooled.append(str(path))
-        log.info("media_spooled", name=path.name, bytes=len(data), reason=reason)
-        result.notes.append(f"📎 Attachment saved as `{path}` ({reason}); {hint}.")
-
-
-def _declared_too_large(size: int | None, max_bytes: int) -> bool:
-    return size is not None and size > max_bytes
-
-
-def _note_too_large(result: IngestResult, label: str) -> None:
-    result.notes.append(f"⚠️ Attachment `{label}` exceeds the size limit and was skipped.")
-
 
 def _inline_file(data: bytes, mime: str, name: str | None) -> dict[str, Any]:
     uri = f"data:{mime};base64,{base64.b64encode(data).decode()}"
-    return {"uri": uri, "mime": mime, "name": name, "mediaSource": "inline"}
+    return {"uri": uri, "mime": mime, "name": name}

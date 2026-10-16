@@ -114,6 +114,9 @@
 | 2026-10-15 | §6.6: `/status` now shows agentd **version/pid** in a direct chat, from agentd's `GET /api/info`; the line degrades to `(unreachable)` when agentd cannot be reached, and a group still hides it (unchanged redaction). |
 | 2026-10-15 | §13.1: added **`docs/VERIFY-CAPABILITIES.md`** — a runnable, per-platform checklist for the remaining `pending integration testing` cells (trigger / expected / observation / which table to backfill), covering WeCom and Feishu delivery, media in/out, rendering, streaming/editing, HITL, rate limits, proactive push and authorization data. |
 | 2026-10-15 | §7.2/§9 added **inbound downsampling**: over-limit media the model can consume is now **shrunk to fit `inline_limit_bytes`** and inlined, instead of spooling (which left images effectively invisible — the agent only got a path). Order: inline → agentd `file` (when the host configures a `MediaUploader`, probed once per agentd via `GET /api/config` and cached per base) → downsample (images via Pillow → JPEG; audio → MP3 / video → MP4 via `ffmpeg`; new **`media.downsample`**, default `true`) → spool. Downsampling only applies to modalities the model consumes. Motivation: a multi-MB image inlined under the old 10 MB limit had ballooned a group session to 2.4M tokens and broke every subsequent turn with a provider HTTP 400. |
+| 2026-10-15 | §7.2/§9: **inbound media delivery moved to agentd**. Tether deleted its own inline/upload/downsample/spool/modality/size policy (`inline_limit_bytes` / `downsample` / `spool_dir` / the inbound `max_bytes` use) and now hands **every** attachment to agentd as a byte-backed **inline** file part (`{ uri: "data:…", mime, name }`, no `source`); agentd's `servers[].media` policy (go-agent-sdk `DESIGN-MEDIA` §4.12) owns inline/file/url/downsample/spool and the size ceiling — one owner, no double policy. Tether keeps `Connector.download`, file-name resolution, a pre-download guard (`media.max_attachment_bytes`), and the omission notice (now surfacing `reason` + `detail`). `POST /api/session/{id}/file` is no longer used. |
+| 2026-10-16 | §5.1: WeCom long-connection **resilience** — the aibot client is created with `max_reconnect_attempts=-1` (retry forever; backoff 1s → 2s → … → ceiling, reset after a good connect) so a transient DNS/network blip cannot leave the bot permanently offline; the backoff ceiling is configurable via `channels.wecom.reconnect_max_ms` (default 30000 ms; the SDK hard-codes 30 s). Root cause seen in practice: the SDK's default gives up after 10 attempts, and a DNS failure for `openws.work.weixin.qq.com` took the bot down (no inbound messages) until a manual restart. |
+| 2026-10-16 | §5.2: Feishu long-connection **supervision** — `lark-oapi` already reconnects indefinitely (`_reconnect_count=-1`), so the WeCom "gives up after N" failure does not apply; but its blocking `start()` runs in a dedicated thread that would die (and go silently offline) if `start()` ever ended, so `LarkSDK._run` now supervises it — on `start()` returning/raising it logs and, after a backoff, rebuilds the `lark.ws.Client` and restarts; a `_stopped` flag ends the loop cleanly on `stop()`. |
 
 ---
 
@@ -1662,16 +1665,22 @@ outbound: the file part of event/message ──► MediaCollector(§4.5) ──�
 
 ### 7.2 Inbound (IM → Agent)
 
-See the §4.4 decision tree. Core points:
+**Tether owns only the connector side**: `Connector.download(att)`, file-name resolution, a **pre-download size guard**
+(`media.max_attachment_bytes` — skip an attachment the platform declares oversized *before* fetching it), and a download-failure
+notice.
 
-- Prefer `inline` (small files, modality supported). For larger media, in order: (1) the agentd **`file`** channel when the host
-  configures a `MediaUploader` (probed once per agentd via `GET /api/config`, cached per base — a stale cache only costs an extra
-  downsample, never a failure); (2) else, if **`media.downsample`** is on (default), **shrink** the media to fit `inline_limit_bytes`
-  (image → JPEG via Pillow; audio → MP3 / video → MP4 via `ffmpeg`) and inline the result; (3) else spool to a **controlled subdirectory
-  inside the working directory** and note it in the prompt text (details in §4.4). Downsampling applies only to modalities the model
-  consumes — a text/image model never downscales video/audio.
-- Make `mime` as precise as possible (as given by the platform or sniffed by extension/magic); sanitize `name`.
-- Voice: if the model does not support audio, it can be spooled first; a speech-to-text subagent could also be connected in the future (not MVP).
+The **delivery decision — inline / provider `file` / url / downsample / spool, and the size ceiling — is owned by agentd**
+(`servers[].media`; go-agent-sdk `DESIGN-MEDIA` §4.12). So Tether hands **every** attachment over as a **byte-backed inline file
+part** (`{ uri: "data:<mime>;base64,…", mime, name }`) with **no `source`**, and agentd applies its policy uniformly. Tether no
+longer decides inline-vs-upload, no longer uploads to the provider (`POST /api/session/{id}/file` is unused), and no longer
+downsamples or spools. This also removes the "double policy" (two downsample/upload stacks) and the earlier trap where a spooled
+image was effectively invisible to the agent (a binary can't be shown through `read`).
+
+- Make `mime` as precise as possible (as given by the platform or sniffed by extension/magic); keep `name`.
+- When agentd omits an attachment it emits `session.next.attachment.omitted` (`reason` + `detail`); the bridge **presents it** (e.g.
+  ``⚠️ `img.png` was not sent to the model: it exceeds the size limit — limit N bytes``).
+- Consequence: with agentd's `media:` unset, behavior degrades to inline-first (agentd unwraps the data URL and inlines); the model
+  still sees small media.
 
 ### 7.3 Outbound (Agent → IM)
 
@@ -1902,15 +1911,13 @@ streaming:
   max_chars_override: null            # override max_text_chars from Capabilities
 
 media:
-  inline_limit_bytes: 262144          # 256KB — larger media uses provider upload, downsampling, or spool
-  max_bytes: 52428800                 # inbound download / outbound fetch limit (50MB, §7.6)
-  downsample: true                    # shrink over-limit model-consumable media to fit inline_limit (§7.2)
-  spool_dir: "{working_dir}/.tether/spool"   # inside the working directory by default (reachable by agent read, §4.4/§10.4)
+  max_bytes: 52428800                 # outbound size cap (path files / /send / url fetch, §7.6)
+  max_attachment_bytes: 26214400      # connector guard: skip an oversized declared attachment before download (§7.2)
   fetch_url_outbound: false           # whether to allow the bridge to proxy-fetch url sources (includes SSRF protection)
-  outbound:
+  outbound:                           # outbound file/media policy (see docs/DESIGN-OUTBOUND-FILES.md)
     sources: [tool_media]             # tool_media | changed_files
     image_max_bytes: 10485760
-    auto_files: false                 # auto-forward files the agent writes/edits (off; see docs/DESIGN-OUTBOUND-FILES.md)
+    auto_files: false                 # auto-forward files the agent writes/edits (off)
     patterns: []                      # default-deny glob allow-list; e.g. ["{working_dir}/**", "!**/.env"]
 
 permissions:

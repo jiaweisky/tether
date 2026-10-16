@@ -32,15 +32,16 @@ change-log row in `DESIGN-IM-BRIDGE.md`.
 ### 2. Inbound media
 - ✅ image (AES `download_file`) and file received + decrypted; ✅ voice (`message.voice.content`
   is the transcript); ✅ quoted file/text path.
-- ✅ a ~4.9 MB screenshot is delivered by the platform and (2026-10-15) **downsampled** to fit the
-  inline limit → inlined (`media_downsampled`, 4.9 MB → 163 KB). Note: this agentd has **no media
-  uploader** (`GET /api/config` → `mediaUpload: null`; `POST /api/session/{sid}/file` → 501), so an
-  over-limit image goes *uploader (none) → downsample → inline*.
-- ⚠️ **Context poisoning**: if a multi-MB image is inlined (e.g. under a large `inline_limit_bytes`),
-  the turn can blow past the model's context and then *every* later prompt 400s
-  (`maximum context length … requested N tokens`). Recover with **`/new`** (admin) to reset the
-  session. `media.downsample` (default on) prevents it — the same 4.9 MB image otherwise reached
-  `media_inlined` (bad), `media_spooled` (agent-blind), then `media_downsampled` (correct).
+- ℹ️ Delivery is **agentd-owned** now: Tether hands each attachment over as an inline data URL and
+  agentd's `servers[].media` decides inline / file / url / downsample / spool. This agentd has **no
+  media uploader** (`GET /api/config` → `mediaUpload: null`; `POST /api/session/{sid}/file` → 501),
+  so an over-limit image needs `media.downsample: true` (images shrink in-process; audio/video need
+  the host `ffmpeg` hook) — otherwise it **spools** (invisible to the model) or, past `maxBytes`, is
+  omitted (`attachment.omitted`, `reason: too_large`).
+- ⚠️ **Context poisoning** (historical, pre-agentd-ownership): a multi-MB inlined image could exceed
+  the model context and then *every* later prompt 400s
+  (`maximum context length … requested N tokens`); recover with **`/new`** (admin). Now agentd's
+  `media:` policy (downsample / provider file / spool) owns this.
 - ⬜ platform size cap for a delivered image/file — largest accepted?
   - 🔎 send progressively larger files; find the rejection point.
   - → backfill §7.7 inbound + §5.1.

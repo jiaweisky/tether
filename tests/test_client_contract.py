@@ -79,20 +79,14 @@ def test_prompt_payload():
         await client.prompt(
             info.id,
             prompt="hi",
-            files=[
-                {
-                    "uri": "data:image/png;base64,AA",
-                    "mime": "image/png",
-                    "mediaSource": "inline",
-                }
-            ],
+            files=[{"uri": "data:image/png;base64,AA", "mime": "image/png", "name": "x.png"}],
             id="fake:direct:None:d1:None:m1",
         )
 
     asyncio.run(run())
     assert captured["prompt"] == "hi"
     assert captured["id"].endswith(":m1")
-    assert captured["files"][0]["mediaSource"] == "inline"
+    assert captured["files"][0]["uri"].startswith("data:image/png")
 
 
 def test_events_parse_sse():

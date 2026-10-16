@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import asyncio
-from pathlib import Path
-
 import pytest
-from fakes import FakeAgentClient
 
 from tether.config import Config
 from tether.engine.media_ingest import MediaIngest
@@ -29,115 +25,45 @@ class FakeConnector:
         return MediaBytes(data=self._data, mime=att.mime, name=self._download_name or att.name)
 
 
-def _ingest(tmp_path, connector) -> MediaIngest:
-    return MediaIngest(Config(), connector, FakeAgentClient(), working_dir=str(tmp_path))
+def _ingest(connector) -> MediaIngest:
+    return MediaIngest(Config(), connector)
 
 
 @pytest.mark.asyncio
-async def test_small_supported_image_is_inlined(tmp_path):
-    ingest = _ingest(tmp_path, FakeConnector(b"\x89PNG\r\n\x1a\n"))
+async def test_attachment_becomes_an_inline_file_part():
+    ingest = _ingest(FakeConnector(b"\x89PNG\r\n\x1a\n"))
     att = Attachment(kind="image", name="a.png", handle={"url": "x"})
-    result = await ingest.ingest("ses_1", [att], model_inputs={"image", "text"})
-    assert result.files and result.files[0]["mediaSource"] == "inline"
-    assert not result.spooled
+    result = await ingest.ingest([att])
+    assert result.files
+    part = result.files[0]
+    assert part["uri"].startswith("data:image/png;base64,")
+    assert part["name"] == "a.png" and part["mime"] == "image/png"
 
 
 @pytest.mark.asyncio
-async def test_unsupported_modality_is_spooled_not_dropped(tmp_path):
-    connector = FakeConnector(b"wav-bytes")
-    ingest = _ingest(tmp_path, connector)
-    att = Attachment(kind="audio", name="voice.amr", handle={"url": "x"})
-    result = await ingest.ingest("ses_1", [att], model_inputs={"image", "text"})
-    assert result.spooled, "unsupported media must be spooled, not dropped"
-    spooled = await asyncio.to_thread(Path(result.spooled[0]).read_bytes)
-    assert spooled == b"wav-bytes"
-    assert any("not supported by the model" in note for note in result.notes)
-
-
-@pytest.mark.asyncio
-async def test_oversized_attachment_skipped_before_download(tmp_path):
+async def test_declared_oversized_attachment_is_skipped_before_download():
     connector = FakeConnector(b"x")
-    ingest = _ingest(tmp_path, connector)
-    att = Attachment(
-        kind="video", name="big.mp4", size=Config().media.max_bytes + 1, handle={"url": "x"}
-    )
-    result = await ingest.ingest("ses_1", [att], model_inputs={"image", "text"})
-    assert connector.downloads == 0, "must not download media we will reject"
-    assert any("exceeds the size limit" in note for note in result.notes)
+    ingest = _ingest(connector)
+    oversized = Config().media.max_attachment_bytes + 1
+    att = Attachment(kind="video", name="big.mp4", size=oversized, handle={"url": "x"})
+    result = await ingest.ingest([att])
+    assert connector.downloads == 0, "must not download an attachment we will reject"
+    assert not result.files
+    assert any("too large" in note for note in result.notes)
 
 
 @pytest.mark.asyncio
-async def test_download_failure_is_reported(tmp_path):
-    ingest = _ingest(tmp_path, FakeConnector(b"", fail=True))
+async def test_download_failure_is_reported():
+    ingest = _ingest(FakeConnector(b"", fail=True))
     att = Attachment(kind="image", name="a.png", handle={"url": "x"})
-    result = await ingest.ingest("ses_1", [att], model_inputs={"image", "text"})
-    assert not result.files and not result.spooled
+    result = await ingest.ingest([att])
+    assert not result.files
     assert any("Failed to download" in note for note in result.notes)
 
 
 @pytest.mark.asyncio
-async def test_spool_failure_is_reported_not_raised(tmp_path):
-    blocker = tmp_path / "blocker"
-    await asyncio.to_thread(blocker.write_text, "x")
-    config = Config()
-    config.media.spool_dir = str(blocker / "sub")
-    ingest = MediaIngest(
-        config, FakeConnector(b"wav"), FakeAgentClient(), working_dir=str(tmp_path)
-    )
-    att = Attachment(kind="audio", name="v.amr", handle={"url": "x"})
-    result = await ingest.ingest("ses_1", [att], model_inputs={"image", "text"})
-    assert not result.spooled
-    assert any("Could not save" in note for note in result.notes)
-
-
-@pytest.mark.asyncio
-async def test_downloaded_filename_used_when_message_has_none(tmp_path):
-    connector = FakeConnector(b"xlsx-bytes", download_name="季度报表.xlsx")
-    ingest = _ingest(tmp_path, connector)
+async def test_downloaded_filename_is_used():
+    ingest = _ingest(FakeConnector(b"x", download_name="季度报表.xlsx"))
     att = Attachment(kind="file", name=None, handle={"url": "x"})
-    result = await ingest.ingest("ses_1", [att], model_inputs={"image", "text"})
-    assert result.spooled
-    assert result.spooled[0].endswith("_季度报表.xlsx")
-
-
-def _noisy_png(width: int, height: int) -> bytes:
-    import os
-    from io import BytesIO
-
-    from PIL import Image
-
-    buffer = BytesIO()
-    Image.frombytes("RGB", (width, height), os.urandom(width * height * 3)).save(buffer, "PNG")
-    return buffer.getvalue()
-
-
-@pytest.mark.asyncio
-async def test_large_image_is_downsampled_when_no_uploader(tmp_path):
-    ingest = MediaIngest(
-        Config(),
-        FakeConnector(_noisy_png(1200, 900)),
-        FakeAgentClient(),
-        working_dir=str(tmp_path),
-        uploader_available=False,
-    )
-    att = Attachment(kind="image", name="big.png", handle={"url": "x"})
-    result = await ingest.ingest("ses_1", [att], model_inputs={"image", "text"})
-    assert result.files and result.files[0]["mediaSource"] == "inline"
-    assert result.files[0]["uri"].startswith("data:image/jpeg;base64,")  # downsampled
-    assert not result.spooled
-
-
-@pytest.mark.asyncio
-async def test_large_image_spools_when_downsample_disabled(tmp_path):
-    config = Config()
-    config.media.downsample = False
-    ingest = MediaIngest(
-        config,
-        FakeConnector(_noisy_png(1200, 900)),
-        FakeAgentClient(),
-        working_dir=str(tmp_path),
-        uploader_available=False,
-    )
-    att = Attachment(kind="image", name="big.png", handle={"url": "x"})
-    result = await ingest.ingest("ses_1", [att], model_inputs={"image", "text"})
-    assert result.spooled and not result.files
+    result = await ingest.ingest([att])
+    assert result.files[0]["name"] == "季度报表.xlsx"

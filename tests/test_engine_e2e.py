@@ -177,7 +177,7 @@ async def test_inline_attachment_becomes_prompt_file(tmp_path):
     await app._on_message(inbound("look", attachments=[att]))
     files = client.prompts[0]["files"]
     assert len(files) == 1
-    assert files[0]["mediaSource"] == "inline"
+    assert files[0]["name"] == "x.png"
     assert files[0]["uri"].startswith("data:image/png;base64,")
 
 
@@ -505,10 +505,16 @@ async def test_attachment_omitted_is_noticed(tmp_path):
         Event(
             "a1",
             ATTACHMENT_OMITTED,
-            {"sessionID": sid, "name": "big.zip", "reason": "too large"},
+            {
+                "sessionID": sid,
+                "name": "big.zip",
+                "reason": "too_large",
+                "detail": "limit 33554432 bytes",
+            },
         )
     )
-    assert any(m["kind"] == "text" and "big.zip" in m["text"] for m in conn.messages)
+    text = "\n".join(m["text"] for m in conn.messages if m["kind"] == "text")
+    assert "big.zip" in text and "size limit" in text and "33554432" in text
 
 
 @pytest.mark.asyncio
@@ -1047,31 +1053,3 @@ async def test_tool_edits_send_only_the_final_file_version(tmp_path):
     # An edit-tool file is delivered, and only once, with its final content.
     assert len(media) == 1
     assert media[0]["media"].data == b"v2"
-
-
-@pytest.mark.asyncio
-async def test_agentd_has_uploader_reads_config(tmp_path, monkeypatch):
-    app, conn, client = await make_app(tmp_path)
-    base = app.config.server.base_url
-
-    def wire(has_uploader):
-        view: dict = {"name": "http"}
-        if has_uploader:
-            view["mediaUpload"] = {"url": "https://example/upload"}
-
-        async def get_info():
-            return {"servers": ["http"]}
-
-        async def get_config(*, section=None, server=None):
-            return {"config": {"servers": [view]}}
-
-        monkeypatch.setattr(client, "get_info", get_info)
-        monkeypatch.setattr(client, "get_config", get_config)
-
-    wire(True)
-    assert await app._agentd_has_uploader(base) is True
-    assert await app._agentd_has_uploader(base) is True  # cached
-
-    app._uploader_cache.clear()  # e.g. after an agentd (re)connect
-    wire(False)
-    assert await app._agentd_has_uploader(base) is False

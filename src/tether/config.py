@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 from .util.path_policy import compile_rules
 
@@ -211,23 +211,16 @@ class MediaOutboundConfig(BaseModel):
 
 
 class MediaConfig(BaseModel):
-    # Only genuinely small media is inlined as a base64 data URL in the prompt;
-    # anything larger would bloat the context, so it uses a provider file upload
-    # (when available) or is spooled instead.
-    inline_limit_bytes: int = 262144
+    # Outbound size cap (path-based files, /send, remote url fetch). Inbound
+    # delivery — inline / provider file / url / downsample / spool — is owned by
+    # agentd's `servers[].media` policy, not the bridge.
     max_bytes: int = 52428800
-    spool_dir: str = "{working_dir}/.tether/spool"
+    # Connector guard: do not download an attachment the platform declares larger
+    # than this (protects against pulling a huge file before the download). It is
+    # not a delivery decision — that belongs to agentd.
+    max_attachment_bytes: int = 26214400
     fetch_url_outbound: bool = False
-    # Shrink over-limit media the model can consume (image/video/audio) so it can be
-    # inlined instead of spooled, when agentd has no media uploader. On by default.
-    downsample: bool = True
     outbound: MediaOutboundConfig = Field(default_factory=MediaOutboundConfig)
-
-    @model_validator(mode="after")
-    def _inline_le_max(self) -> MediaConfig:
-        if self.inline_limit_bytes > self.max_bytes:
-            raise ValueError("media.inline_limit_bytes must be <= media.max_bytes")
-        return self
 
 
 def _default_permission_auto() -> dict[str, PermissionAction]:
@@ -432,14 +425,3 @@ def validate_startup(config: Config) -> None:
                 "channels.wecom.identity (or the global identity), since WeCom does "
                 "not expose the bot's name or description"
             )
-    spool = config.media.spool_dir
-    if "{working_dir}" not in spool:
-        root = Path(spool).expanduser()
-        root.mkdir(parents=True, exist_ok=True)
-        if not os.access(root, os.W_OK):
-            raise ValueError(f"spool_dir is not writable: {root}")
-
-
-def resolve_spool_dir(template: str, working_dir: str | None) -> Path:
-    wd = working_dir or os.getcwd()
-    return Path(template.replace("{working_dir}", wd)).expanduser()

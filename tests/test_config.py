@@ -16,11 +16,6 @@ def test_bad_enum_rejected():
         Config.model_validate({"group": {"hitl_scope": "everyone"}})
 
 
-def test_inline_limit_over_max_rejected():
-    with pytest.raises(ValidationError):
-        Config.model_validate({"media": {"inline_limit_bytes": 100, "max_bytes": 50}})
-
-
 def test_context_limit_positive():
     with pytest.raises(ValidationError):
         Config.model_validate({"model": {"context_limit": 0}})

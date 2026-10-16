@@ -71,6 +71,17 @@ from .streaming import RateLimited, StreamingController
 
 log = get_logger("tether.turn")
 
+# Why agentd left an inbound attachment out of the model prompt (readable wording).
+_OMIT_REASONS = {
+    "too_large": "it exceeds the size limit",
+    "unsupported_modality": "the model does not accept this media type",
+    "unsupported_type": "the media type is unsupported",
+    "unsupported_source": "the media source is unsupported",
+    "unsupported_role": "the media role is unsupported",
+    "invalid_payload": "the payload is invalid",
+    "url_not_allowed": "a caller-supplied url is not allowed",
+}
+
 FinishCb = Callable[["TurnEngine"], Awaitable[None]]
 EventHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -343,8 +354,11 @@ class TurnEngine:
 
     async def _on_attachment_omitted(self, data: dict[str, Any]) -> None:
         name = data.get("name", "attachment")
-        reason = data.get("reason", "unsupported")
-        await self._send_notice(f"⚠️ `{name}` was not sent to the model ({reason}).")
+        reason = str(data.get("reason", "unsupported"))
+        note = _OMIT_REASONS.get(reason, f"not accepted ({reason})")
+        detail = data.get("detail")
+        suffix = f" — {detail}" if detail else ""
+        await self._send_notice(f"⚠️ `{name}` was not sent to the model: {note}{suffix}.")
 
     async def _on_compaction_started(self, data: dict[str, Any]) -> None:
         await self._send_notice("🧹 Organizing context…")
