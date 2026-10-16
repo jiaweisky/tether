@@ -123,6 +123,16 @@
 | 2026-10-16 | §8.3/§8.4/§14: re-scoped the remaining "hardening" items from **deferred** to **not planned**. All three — adaptive rate limiting (§8.4), per-session `?after=` replay / explicit `subscriber_overflow` handling (§8.3), and migration/replay (§14) — only matter at high volume, multi-user fan-out, or when migrating existing data, none of which applies to this single-instance, single-operator bridge. The implemented mechanisms already cover the realistic failure modes: a static per-Conversation token bucket + streaming backoff (§8.4); the global stream + reconciliation, the stale-turn watchdog, and session re-acquire (§8.3). |
 | 2026-10-16 | §11: marked the **remaining observability metrics** (outbound message counts, turn duration, media bytes received, render-downgrade counts, the per-route debug view, project-switch count) as **not planned** — low value at this single-instance scale, where the existing counters/gauges/alerts plus structured logs and `/status` already suffice. |
 | 2026-10-16 | §3.1/§5.2/§9/§14/§15: **removed Feishu voice-bubble transcription (D24)**. `IMConnector.transcribe_voice` (§3.1), `channels.feishu.voice_transcription` (§9), the connector's ASR path (`ffmpeg` decode → `speech_to_text/v1` → `recognition_text`) and its tests are gone; a Feishu **voice bubble** is now just a raw attachment. Rationale: the platform ASR API needs a **paid tenant** + `ffmpeg` and helps only voice *bubbles* — **voice input** ("speech to text") already arrives as a `post`/text message, so the common path never needed it. **D24** is re-recorded as "not transcribed" (dropped). The historical 2026-10-13 entries that introduced the feature are kept for the record. |
+| 2026-10-16 | Added **`docs/REF-QQ-BOT-API-V2.md`** — a curated **local mirror** of the QQ bot api-v2 docs (51 pages: 起步指南 / 网关与鉴权 / 消息收发 / 富媒体 / 消息类型 / 事件 / 变更记录), for offline reference while building and maintaining the QQ connector (§5.3). The legacy 「频道/guild」management cluster is intentionally excluded. |
+| 2026-10-16 | Added **`docs/IM-CONNECTOR-SPEC.md`** — a normative **IM 接入特性规范**: a feature checklist (~45 axes: 传输/会话/入站/出站/流式/交互/媒体/身份/主动推送/限流/体验/鉴权/验证) with **MUST/SHOULD/MAY** levels, each mapped to its `Capabilities` field / connector primitive, plus a **cross-platform 能力矩阵** (WeCom · Feishu · QQ · 微信个人号). It doubles as the acceptance standard for a new connector (§5.5) and the capability-evaluation rubric (§3.3). |
+| 2026-10-16 | §5.3 implemented: **QQ connector built as an api-v2 thin client** — `connectors/qq/sdk.py` (`QQSDK` protocol + `QQClient`: `getAppAccessToken` with refresh, WS gateway Hello/Identify/Heartbeat/Resume with the documented reconnect policy, REST send/upload/download/interaction) and a real `connectors/qq/connector.py` (`QQConnector`: C2C/group events → `InboundMessage` incl. the native voice transcript `asr_refer_text`, `INTERACTION_CREATE` → `IncomingInteraction` with acknowledgement, passive `msg_id`+`msg_seq` replies that fall back to proactive, markdown→plain fallback, rich media, identity from `READY`), plus `websockets>=12` and 18 tests. Review fixes: implemented `_send_card` (inline **keyboard**) so HITL buttons are real; declared `typing=False` and `member_roles=False` (QQ exposes both but the bridge does not use them yet — see §3.3 / `IM-CONNECTOR-SPEC` §2). `msg_type=2` markdown permission and the multipart upload flow stay **pending device verification** (§13.1). |
+| 2026-10-16 | QQ residual items: (1) clarified the **rate-limit split** — `Capabilities.rate_limit_per_min` (a per-conversation token bucket) applies to **discrete-send** channels (QQ = 30/min); **streaming** channels (WeCom/Feishu) are bounded by the streaming controller instead and leave it unset (`IM-CONNECTOR-SPEC` §1 J1 / §2, §8.4). (2) added a **QQ section** to `docs/VERIFY-CAPABILITIES.md` (§13.1): gateway/Identify/Resume, delivery, inbound (incl. voice `asr_refer_text`), markdown permission, keyboard callback + `msg_type=0`/row limits, rich-media upload + multipart, passive windows/quotas, and recall/`member_role`. |
+| 2026-10-16 | §3.3/§5.3/`VERIFY-CAPABILITIES`: QQ **device-verified (C2C)** — gateway connect (Hello/Identify/Ready + heartbeat), `direct_delivery: always`, text round-trip (placeholder → answer + `📊` usage line), **`msg_type=2` markdown permitted and renders**, and inbound **image** + **voice** (platform transcript). Still ⬜: group @, quoted/file/video, keyboard HITL, outbound media, recall, quotas. |
+| 2026-10-16 | §5.3/§6.1/`VERIFY`: QQ **group** fixes from device testing — (a) a group bot **cannot send proactive messages** (`40034105`), so QQ sends now default to a **passive reply** (reply to the conversation's latest inbound `msg_id`); (b) the non-streaming placeholder is now **best-effort**, so a send failure no longer aborts the turn (the empty-answer `✅` was that failure surfacing); (c) markdown permission is tracked **per conversation** (groups reject `msg_type=2`, which had wrongly disabled markdown for C2C). Verified: group @ delivery + passive replies; markdown is C2C-only; groups use plain text. |
+| 2026-10-16 | §5.3/§6.1/§3.3: QQ **C2C streaming** implemented — 单聊 sends via `POST /v2/users/{openid}/stream_messages` (`input_mode=replace`, rising `index`, `input_state` 1→10), so a single chat is one growing message with **no `🤔 Thinking…` placeholder** (the stream content must extend monotonically, so the opening frame is empty). `supports_streaming` is now **per conversation** (C2C only); groups have no stream endpoint and keep placeholder + final, and one-shot notices stay plain messages. Pending device confirmation of the chunk semantics. |
+| 2026-10-16 | §5.3/§6.1/§6.7/§3.3: QQ **streaming corrected + placeholder dropped** — the api-v2 stream is **append-only** (`replace` on submitted content → `40113003`), so 单聊 streams via `input_mode=append` with the new suffix per chunk (skipping non-monotonic interim frames; a non-monotonic final falls back to a plain message). Added **`Capabilities.progress_placeholder`** (default true; **QQ false**), so the bridge no longer opens a turn with a `🤔 Thinking…` frame for QQ — the first real content opens the stream (单聊) or the turn sends a single final message (群, which has no stream endpoint). |
+| 2026-10-16 | §5.3/§6.1/§3.3: QQ **C2C streaming disabled and removed** — device testing showed the api-v2 `stream_messages` message is **append-only** and the QQ client renders it as *"该消息类型暂不支持查看"*, so a streamed turn is worse than a single message. `Capabilities.progress_placeholder` stays (QQ `false`), so a QQ turn is a **single final message** (单聊 and 群). |
+| 2026-10-16 | §3.3/§5.3/§7.7/§2.6/§12/§14 M4: **QQ re-planned on the api-v2 spec as a thin client — the `qq-botpy` dependency is dropped**. The official SDKs (`botpy`/`botgo`/`bot-node-sdk`) are stale (last code activity 2023‑11…2024‑12) and the platform calls them *"接入参考"*; the spec is authoritative. §5.3 now documents the concrete protocol (Access Token `getAppAccessToken`; WS gateway opcodes 0/1/2/6/9/10/11, Identify/Heartbeat/Resume, intents `GROUP_AND_C2C_EVENT (1<<25)` / `INTERACTION (1<<26)`, sharding, error-code reconnect policy; REST send with passive `msg_id`+`msg_seq` windows and proactive quotas; `msg_type` 0/2/6/7; rich-media upload → `file_info`; recall ≤2 min) and corrected the capability/identity/media rows — QQ carries native voice **`asr_refer_text`**, supports markdown (`msg_type=2`) and a C2C `stream_messages` endpoint. `pyproject`'s `qq` extra is removed (httpx is core). |
 
 ---
 
@@ -372,7 +382,7 @@ context, so that **the bot's external identity and the agent's self-perception a
 |---|---|---|---|
 | WeCom | not provided (the callback carries only `aibotid`) | not provided | **required** |
 | Feishu | `GET /open-apis/bot/v3/info` → `app_name` | application info `description` | optional |
-| QQ (`botpy`) | `robot.name` (from the `on_ready` event) | not provided | optional |
+| QQ (api-v2) | `d.user.username` (from the WebSocket `READY` event) | not provided | optional |
 | Personal WeChat | logged-in account nickname (`whoami`) | signature (best-effort) | optional |
 
 **Rule**: name/description resolve in this order — **per-channel `channels.<name>.identity`** → **global `identity`** default → **the platform's own values**. The identity is per-channel because one bridge process serves several bots with different platform names and different exposure (Feishu exposes `app_name`, WeCom exposes nothing). **WeCom exposes neither the name nor the description, so both are mandatory when WeCom is enabled** — supplied at either level (`channels.wecom.identity` or the global `identity`), and startup validation fails if neither provides them. The name is **never** inferred from message text (e.g. an inline `@name`) — that is fragile and was explicitly rejected.
@@ -800,7 +810,7 @@ class Button:
 
 ### 3.3 Capability declaration `Capabilities` (**most critical**)
 
-Rendering and degradation are entirely capability-driven; the connector only **declares facts** and writes no rendering branches.
+Rendering and degradation are entirely capability-driven; the connector only **declares facts** and writes no rendering branches. The declarative spec behind these fields — a normative feature checklist that doubles as a cross-platform capability matrix — lives in `docs/IM-CONNECTOR-SPEC.md`.
 
 ```python
 # Platform "delivery model": which messages the platform pushes to the bot (**facts**, for documentation/integration reference; the bridge forwards on receipt,
@@ -857,7 +867,7 @@ class Capabilities:
 |---|---|---|
 | WeCom Smart Robot | Yes (`event.template_card_event` carries the clicker, **fields pending integration testing**) | **No** |
 | Feishu | Yes (`card.action.trigger` carries `operator`, **pending integration testing**) | **?** (possibly via chat API, **pending integration testing**) |
-| QQ (botpy) | Yes (interaction callbacks carry the user, **pending integration testing**) | **No** |
+| QQ (api-v2) | Yes (`INTERACTION_CREATE` carries the clicker; group messages carry `author.member_openid`) | platform exposes `author.member_role` (member/admin/owner); **not yet wired** into gating |
 | WeChat Personal | N/A (no buttons; text messages carry `sender`) | **No** |
 
 Preliminary assessment per platform (**starting from documentation, unconfirmed items marked `pending integration testing`, back-filled after §13 measurement**):
@@ -866,7 +876,7 @@ Preliminary assessment per platform (**starting from documentation, unconfirmed 
 |---|---|---|---|---|---|---|---|---|
 | WeCom Smart Robot | RICH (bot markdown) | No* | **Yes** (`reply_stream`) | Yes (template card) | image/file/voice/video | `always` | `mention_only` | Docs (long connection) |
 | Feishu | STANDARD (card `markdown` component) | Yes (patch card) | No (simulated with edit) | Yes (card buttons) | image/file/audio/video | **pending integration testing** | **pending integration testing** | pending integration testing |
-| QQ (botpy) | BASIC (markdown message) | No | No | Yes (keyboard) | image/video/audio | **pending integration testing** | **pending integration testing** | pending integration testing |
+| QQ (api-v2) | STANDARD (markdown `msg_type=2`) | No | No (`stream_messages` unviewable in the client) | Yes (keyboard) | image/file/voice/video | `always` | `mention_only` | Device-verified 2026-10-16: C2C + group; text, markdown(C2C), inbound image/voice/file, outbound file |
 | WeChat Personal (wechatbot.dev) | NONE | No | No | No | image/voice/file/video | **pending integration testing** | **pending integration testing** | pending integration testing |
 
 > *WeCom implements "pseudo-editing" by pushing multiple times via `reply_stream`; no real edit API is needed.
@@ -1429,23 +1439,66 @@ complete message instead.
 
 **§13.1 backfill items**: capabilities table; p2p vs group delivery; card-callback fields (`operator`, `action.value`); the breadth of `edit` (which `msg_type`s can be patched); media types/size limits; proactive push; rate limits; clicker identity.
 
-### 5.3 QQ (botpy)
+### 5.3 QQ (api-v2, thin client — no SDK)
 
-Based on `qq-botpy` and the QQ Bot Open Platform API v2:
+The QQ bot platform (单聊 / 群聊 / 频道) is defined by the **api-v2 spec**
+(<https://bot.q.qq.com/wiki/develop/api-v2/>; a curated local mirror lives at
+`docs/REF-QQ-BOT-API-V2.md`). The official SDKs (`botpy` Python, `botgo` Go,
+`bot-node-sdk` Node) are **stale** — last code activity 2023‑11…2024‑12, `botpy` still
+`Python :: 3.7`/Beta — and the platform documents them as **"接入参考" (reference only)**: the spec,
+not the SDK, is authoritative. So the connector is a **thin client over api-v2**, following the same
+"platform SDK hidden behind a protocol" pattern as elsewhere (§3.1) — a `QQSDK` protocol so the
+connector can be exercised against a fake (no network).
 
-- Client: inherit `botpy.Client`, implement `on_at_message_create` (channel),
-  `on_group_at_message_create` (group), `on_c2c_message_create` (direct message); `Intents` declares the channels.
-- Outbound: `message.reply(...)`, `self.api.post_message(channel_id/group_openid, content,
-  msg_type, media, msg_id, msg_seq)`; Markdown needs `msg_type=2` etc. (HTML/Markdown capability is limited by the platform).
-- Media: first upload the rich media (image/video/audio/file), then `post_message` references `file_info`.
-- Auth: `AppID + AppSecret`.
-- **Inbound voice**: prefer the platform's **native transcript** when the event carries one (WeCom-style, §5.1); otherwise
-  the raw attachment (no bridge-side ASR).
-- **Inbound events → §3.2**: `on_*_message_create` → `InboundMessage`; keyboard/interaction callback →
-  `IncomingInteraction` (event name pending integration testing).
-- **Delivery semantics (inferred from event names)**: group/channel @-only (`on_group_at_message_create` / `on_at_message_create`
-  ⇒ `group_delivery: mention_only`), direct message `on_c2c_message_create` (`direct_delivery: always`);
-  **event names, parameters, and `msg_type` values are pending integration testing confirmation**.
+- **Auth**: `POST https://api.bot.qq.com/app/getAppAccessToken` `{appId, clientSecret}` →
+  `{access_token, expires_in}` (7200 s; refresh within the last 60 s). Every REST call sends
+  `Authorization: QQBot <access_token>`.
+- **WebSocket gateway** (Discord-like): `GET /gateway` (`/gateway/bot` → suggested `shards` +
+  `session_start_limit`) → `wss://api.bot.qq.com/websocket/`. Handshake: the gateway sends **OpCode 10
+  Hello** `{heartbeat_interval}`; the client sends **OpCode 2 Identify** `{token: "QQBot <token>",
+  intents, shard: [0,1], properties}` → **READY** (`op:0 t:READY`, `d.session_id`, `d.user`); then
+  **OpCode 1 Heartbeat** (`d`=last `s`) every `heartbeat_interval` → **OpCode 11 ACK**. On a drop,
+  reconnect and send **OpCode 6 Resume** `{token, session_id, seq}` → **RESUMED** (missed events are
+  replayed). Opcodes: `0` Dispatch · `1` Heartbeat · `2` Identify · `6` Resume · `7` Reconnect ·
+  `9` Invalid Session · `10` Hello · `11` Heartbeat ACK. Sharding is `shard_id = (guild_id >> 22) %
+  shards` (a single connection uses `[0,1]`). Reconnect per the documented codes: `4009` → resume;
+  `4006`/`4007`/`4900‑4913` → identify; `4914` (sandbox) / `4915` (banned) → stop.
+- **Intents** (bitmask; only `GUILDS`/`PUBLIC_GUILD_MESSAGES`/`GUILD_MEMBERS` are default — the rest need
+  platform approval, and an unauthorized bit makes the gateway reject Identify): **`GROUP_AND_C2C_EVENT
+  (1<<25)`** → `C2C_MESSAGE_CREATE` (单聊) / `GROUP_AT_MESSAGE_CREATE` (群 @) / `FRIEND_ADD` /
+  `GROUP_ADD_ROBOT`…; **`INTERACTION (1<<26)`** → `INTERACTION_CREATE` (keyboard callbacks);
+  `PUBLIC_GUILD_MESSAGES (1<<30)` / `DIRECT_MESSAGE (1<<12)` for 频道.
+- **Inbound → §3.2**: `C2C_MESSAGE_CREATE` / `GROUP_AT_MESSAGE_CREATE` / channel `AT_MESSAGE_CREATE`
+  → `InboundMessage` (`id`, `author.{user_openid, union_openid, member_openid, member_role}`,
+  `content`, `message_type` 0 text / 3 ark / 101 / 102 / 103 quote, `timestamp` RFC3339,
+  `message_scene.ext` `msg_idx`/`ref_msg_idx`, `attachments[]`); `INTERACTION_CREATE` →
+  `IncomingInteraction`.
+- **Voice**: an inbound voice attachment (`content_type: voice`) carries **`voice_wav_url`** (WAV) and
+  **`asr_refer_text`** — the platform's own ASR reference text — so, like WeCom (§5.1), QQ provides the
+  transcript natively (no bridge-side ASR).
+- **Outbound** (`msg_type` 0 text / 2 markdown / 6 typing / 7 rich media): `POST
+  /v2/users/{user_openid}/messages` (单聊) and `POST /v2/groups/{group_openid}/messages` (群). A
+  **passive reply** carries the event `msg_id` (单聊 window 60 min / ≤4 replies; 群 5 min / ≤5) plus a
+  **`msg_seq`** (the same `msg_id + msg_seq` is rejected → increment per reply); `event_id` replies to an
+  event; **proactive** messages omit both (subject to per-Bot / per-relation QPS and daily caps, and the
+  user can turn them off). **Markdown** goes in `markdown.content` (`msg_type=2`, then `content` must be
+  empty); **buttons** in `keyboard` (rows→buttons, clicked via `INTERACTION_CREATE`); **quote** via
+  `message_reference`. Rate: 100 QPS per endpoint.
+- **Rich media** (`msg_type=7`): upload → `file_info`, then send `media.file_info`. Upload is **URL
+  upload** (`POST /v2/users/{user_openid}/files` `{file_type, url}`) or the **multi-part** flow
+  (`upload_prepare` → per-part `PUT` + `part_finish` → merge). `file_type`: 1 image (png/jpg), 2 video
+  (mp4), 3 voice (silk), 4 file — soft limits 20/30/20/200 MB (over soft degrades to file), hard 200 MB.
+  **单聊 and 群 upload endpoints are separate** (files do not cross scenes); `file_info` has a `ttl`.
+- **Recall**: `DELETE /v2/users/{user_openid}/messages/{message_id}` (单聊) or the 群 equivalent, within
+  **2 minutes** → `ConnectorEvent(kind="recall")` (§8.6).
+- **Identity**: the WS **READY** event carries `d.user.username` (the bot name) → `Connector.identity()`
+  (§2.6), no config required (config still overrides).
+- **Delivery**: 单聊 always; 群 only when @-mentioned (`GROUP_AT_MESSAGE_CREATE` ⇒ `mention_only`);
+  频道 @-only. `direct_delivery: always`.
+- **Streaming**: 单聊 has `POST /v2/users/{user_openid}/stream_messages`, but it is **not used** — the stream is **append-only**, and the QQ client renders the streamed message as *"该消息类型暂不支持查看"*, so a streamed turn is worse than a single message. QQ sets `progress_placeholder: false` (§6.1), so the bridge sends **no** `🤔 Thinking…` frame: a turn is a **single final message** (单聊 and 群 alike).
+
+**§13.1 backfill items**: approved intents; 群/频道 streaming; received `msg_type` values; media size
+limits; `asr_refer_text` reliability; `INTERACTION_CREATE` payload; active-message quotas; 频道 delivery.
 
 ### 5.4 WeChat personal (wechatbot.dev)
 
@@ -1471,6 +1524,8 @@ Adding a new platform only requires:
 3. If a special Markdown form is needed, add a `render/profiles/<name>.py` (otherwise reuse the default profile).
 4. `pyproject.toml` adds an optional extra depending on that platform SDK.
 5. Register into the `connector registry` (entry point or explicit table).
+
+Acceptance is governed by the feature spec `docs/IM-CONNECTOR-SPEC.md`: a new connector must cover every **MUST** axis, every platform-supported **SHOULD** axis, and fill the capability matrix after §13.1 device verification.
 
 Core engine zero changes.
 
@@ -1749,7 +1804,7 @@ See §4.5. Core points:
 |---|---|---|---|
 | WeCom intelligent bot | ✔ `download_file(url, aes_key)` (built-in AES-256-CBC decryption) | ✔ asset **chunked upload** (init/chunk/finish) + image/file/voice/video messages | aeskey is independent per media; the chunked flow is **pending integration testing** |
 | Feishu | ✔ message resource download API (requires auth, `image_key`/`file_key`) | ✔ `MediaService.upload_image` / file upload | goes through `im/v1/...`, requires a permission scope; fields **pending integration testing** |
-| QQ (botpy) | △ the event gives a **URL**; the bridge fetches it itself (may have a time limit/require auth) | ✔ rich media upload (image/video/audio/file) → `post_message` references `file_info` | URL validity period/auth **pending integration testing** |
+| QQ (api-v2) | ✔ the event's `attachments[].url` (+ `voice_wav_url`, `asr_refer_text`) | ✔ `.../files` upload (URL or multi-part) → `file_info` → send `msg_type=7`; 单聊/群 endpoints separate | `file_type`/size limits documented (soft 20/30/20/200 MB; hard 200 MB) |
 | WeChat personal | △ the event gives a media URL; the bridge fetches it | ✔ `send` / media send | no official API; stability/compliance **pending integration testing** |
 
 - All four platforms provide both "download + upload", in different forms: WeCom/Feishu have official methods (including decryption/auth), while QQ/WeChat personal
@@ -1797,7 +1852,7 @@ See §4.5. Core points:
 
 ### 8.4 Backpressure and Rate Limiting
 
-- One token bucket per Conversation; the rate is the smaller of `Capabilities.rate_limit_per_min` and the local configuration.
+- One token bucket per Conversation, driven by `Capabilities.rate_limit_per_min` (unset = no token bucket). Streaming channels are instead bounded by the streaming controller (§6.2); discrete-send channels (e.g. QQ) use the bucket.
 - The send queue is bounded; send throttling and backpressure are implemented by §6.2's drop-if-busy (keep only the latest snapshot, keep the final frame), never
   blocking event consumption.
 - In the event loop shared by multiple Connectors, any blocking call (the SDK's internal HTTP) should be executed in a thread pool or native async
@@ -2159,9 +2214,9 @@ dependencies = [
 
 [project.optional-dependencies]
 wecom  = ["wecom-aibot-python-sdk>=1.0.2"]
-feishu = ["feishu-bot-sdk>=0.13"]
-qq     = ["qq-botpy>=1.2"]
+feishu = ["lark-oapi>=1.4"]
 wechat = ["wechatbot-sdk"]
+# QQ needs no SDK — it is a thin client over api-v2 (§5.3); httpx is already a core dependency.
 media  = ["Pillow>=10"]           # image compression; optional
 dev    = ["pytest>=8", "pytest-asyncio>=0.23", "respx>=0.21", "ruff>=0.5", "mypy>=1.10"]
 
@@ -2233,7 +2288,7 @@ Confirm item by item for each platform:
 | **M1 (MVP) WeCom direct chat + group chat text** | WeCom long-connection Connector; **direct chat and group chat (one session per conversation; bot name/description and speaker identity injected)**; `reply_stream` streaming Markdown; no cross-user steer within a group, reply @-mentions the initiator; turn completion/error notices; `/stop`. **Exit: §13.1 integration testing and backfill §3.3** |
 | **M2 WeCom full experience** | Markdown RICH profile (table/code-block downgrade); **run status/usage/thinking display (§6.7)**; template-card HITL (permission/question); inbound media (`download_file` decryption → inline/file/url/spool); outbound media (tool media → chunked upload → image/file/voice/video); `attachment.omitted` notice. **Exit: §13.1 backfill** |
 | **M3 Feishu** | Long-connection Connector; text/p2p round-trip (**done**); card streaming + card-Markdown rendering (**done**); card interaction callbacks → HITL + `acknowledge`; media. **Exit: §13.1 backfill** |
-| **M4 QQ** | botpy Connector; group/channel/DM; markdown+keyboard; rich media. **Exit: §13.1 backfill** |
+| **M4 QQ** | **api-v2 thin client (no SDK)**: Access Token + WS gateway (Identify/Heartbeat/Resume) + REST; 单聊/群/频道; text/markdown/keyboard/rich-media; recall. **Exit: §13.1 backfill** |
 | **M5 WeChat personal** | wechatbot-sdk Connector; extreme downgrade; compliance notices. **Exit: §13.1 backfill** |
 | **M6 hardening** | **Done:** project sharing vs isolation (`projects.mode: shared | isolated`; per-conversation views via agentd's control API `POST/GET/DELETE /admin/projects`, impl `none`/`copy`/`worktree`/`overlay`, with `inboundPermissions` + `sandbox` passthrough, §2.8/§2.9); SSRF protection; observability `GET /healthz` + `/metrics` (§11 core; the remaining listed metrics are **not planned**, §11); stale-turn watchdog + isolated re-acquire (§8.3). **Not planned:** adaptive rate limiting (§8.4), per-session `?after=` replay / explicit overflow handling (§8.3), migration/replay — each only matters at scale or for migrating existing data, not for this single-instance, single-operator bridge. |
 | **M7 enhancements** | **None outstanding.** Per-platform **voice→text** is handled inside each connector (§5.1 WeCom reads the platform's inline transcript; §5.3/§5.4 prefer the same, otherwise the raw attachment), not by a bridge-side ASR subagent. **Not planned:** long-term file archiving, Web admin console. **Done:** message recall (§8.6, Feishu). |
