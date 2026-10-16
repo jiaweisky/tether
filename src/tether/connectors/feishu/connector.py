@@ -670,6 +670,11 @@ def _ok(resp: Any, action: str) -> Any:
     return resp
 
 
+# Backoff for re-establishing the long connection if its thread ever dies.
+_STREAM_BACKOFF_S = 5.0
+_STREAM_BACKOFF_MAX_S = 30.0
+
+
 class LarkSDK:
     """``lark-oapi`` implementation: blocking WS in a thread + sync REST."""
 
@@ -680,9 +685,11 @@ class LarkSDK:
         self._ws: Any = None
         self._ws_loop: asyncio.AbstractEventLoop | None = None
         self._ready = threading.Event()
+        self._stopped = threading.Event()
         self._error: BaseException | None = None
 
     def start(self, on_message: Any, on_card: Any, on_recall: Any) -> None:
+        self._stopped.clear()
         threading.Thread(
             target=self._run, args=(on_message, on_card, on_recall), daemon=True
         ).start()
@@ -693,30 +700,57 @@ class LarkSDK:
             raise self._error
 
     def _run(self, on_message: Any, on_card: Any, on_recall: Any) -> None:
+        # Import inside the thread so lark's module-level event loop binds here.
+        asyncio.set_event_loop(asyncio.new_event_loop())
         try:
-            # Import inside the thread so lark's module-level event loop binds here.
-            asyncio.set_event_loop(asyncio.new_event_loop())
-            import lark_oapi as lark
-            from lark_oapi.ws import client as ws_module
-
-            self._ws_loop = ws_module.loop
-            self._rest = (
-                lark.Client.builder().app_id(self._app_id).app_secret(self._app_secret).build()
-            )
-            builder = lark.EventDispatcherHandler.builder("", "")
-            builder.register_p2_im_message_receive_v1(on_message)
-            builder.register_p2_card_action_trigger(on_card)
-            builder.register_p2_im_message_recalled_v1(on_recall)
-            self._ws = lark.ws.Client(self._app_id, self._app_secret, event_handler=builder.build())
+            self._build(on_message, on_card, on_recall)
         except Exception as exc:  # noqa: BLE001 - surface build failure to start()
             self._error = exc
             self._ready.set()
             return
         self._ready.set()
-        log.info("feishu_stream_connecting")
-        self._ws.start()  # blocks until the connection ends
+        self._supervise(on_message, on_card, on_recall)
+
+    def _supervise(self, on_message: Any, on_card: Any, on_recall: Any) -> None:
+        """Keep the blocking stream alive; rebuild it if its thread ever ends.
+
+        The SDK reconnects indefinitely on its own, but ``start()`` ends the
+        thread if the socket dies for good, so restart it here.
+        """
+        backoff = _STREAM_BACKOFF_S
+        while not self._stopped.is_set():
+            log.info("feishu_stream_connecting")
+            try:
+                self._ws.start()  # blocks while connected
+                log.warning("feishu_stream_ended")
+            except Exception:  # noqa: BLE001 - rebuild and retry below
+                log.warning("feishu_stream_failed", exc_info=True)
+            if self._stopped.is_set():
+                break
+            log.warning("feishu_stream_restarting", backoff_s=backoff)
+            self._stopped.wait(backoff)
+            backoff = min(backoff * 2, _STREAM_BACKOFF_MAX_S)
+            try:
+                self._build(on_message, on_card, on_recall)
+            except Exception:  # noqa: BLE001 - retry the rebuild next tick
+                log.warning("feishu_stream_rebuild_failed", exc_info=True)
+
+    def _build(self, on_message: Any, on_card: Any, on_recall: Any) -> None:
+        import lark_oapi as lark
+        from lark_oapi.ws import client as ws_module
+
+        self._ws_loop = ws_module.loop
+        self._rest = (
+            lark.Client.builder().app_id(self._app_id).app_secret(self._app_secret).build()
+        )
+        builder = lark.EventDispatcherHandler.builder("", "")
+        builder.register_p2_im_message_receive_v1(on_message)
+        builder.register_p2_card_action_trigger(on_card)
+        builder.register_p2_im_message_recalled_v1(on_recall)
+        self._ws = lark.ws.Client(self._app_id, self._app_secret, event_handler=builder.build())
 
     def stop(self) -> None:
+        self._stopped.set()
         ws, loop = self._ws, self._ws_loop
         conn = getattr(ws, "_conn", None) if ws is not None else None
         if conn is not None and loop is not None:

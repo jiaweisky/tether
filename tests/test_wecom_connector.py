@@ -616,3 +616,24 @@ async def test_video_message_becomes_an_attachment():
     await sdk.emit("message", frame)
     message = items[0]
     assert message.attachments and message.attachments[0].kind == "video"
+
+
+def test_aibot_sdk_sets_the_reconnect_ceiling(monkeypatch):
+    import sys
+    import types
+
+    from tether.connectors.wecom.connector import AibotSDK
+
+    class _Manager:
+        _reconnect_max_delay = 30000
+
+    class _Client:
+        def __init__(self, options):
+            self._ws_manager = _Manager()
+
+    fake = types.SimpleNamespace(WSClient=_Client, WSClientOptions=lambda **kw: kw)
+    monkeypatch.setitem(sys.modules, "aibot", fake)
+
+    assert AibotSDK("id", "sec")._ensure_client()._ws_manager._reconnect_max_delay == 30000
+    tuned = AibotSDK("id", "sec", reconnect_max_ms=5000)._ensure_client()
+    assert tuned._ws_manager._reconnect_max_delay == 5000

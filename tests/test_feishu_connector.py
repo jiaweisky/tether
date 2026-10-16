@@ -406,3 +406,37 @@ def test_interactive_card_honors_button_style():
     columns = _interactive_card(card)["body"]["elements"][-1]["columns"]
     types = [c["elements"][0]["type"] for c in columns]
     assert types == ["primary", "primary", "danger"]
+
+
+def test_lark_sdk_supervises_the_stream_thread(monkeypatch):
+    import time
+
+    monkeypatch.setattr(feishu_module, "_STREAM_BACKOFF_S", 0.01)
+    monkeypatch.setattr(feishu_module, "_STREAM_BACKOFF_MAX_S", 0.02)
+
+    builds: list[int] = []
+    starts: list[int] = []
+
+    class _WS:
+        def start(self) -> None:
+            starts.append(1)
+            if len(starts) == 1:
+                raise RuntimeError("socket died on the first start")
+            while not sdk._stopped.is_set():
+                time.sleep(0.01)
+
+    sdk = feishu_module.LarkSDK("id", "sec")
+
+    def fake_build(on_message, on_card, on_recall):
+        builds.append(1)
+        sdk._ws = _WS()
+
+    monkeypatch.setattr(sdk, "_build", fake_build)
+    sdk.start(lambda *a: None, lambda *a: None, lambda *a: None)
+    for _ in range(200):
+        time.sleep(0.01)
+        if len(builds) >= 2 and len(starts) >= 2:
+            break
+    sdk.stop()
+    assert len(builds) >= 2, "the supervisor must rebuild the client"
+    assert len(starts) >= 2, "the supervisor must restart the stream"

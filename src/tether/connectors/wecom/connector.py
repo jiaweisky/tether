@@ -103,9 +103,10 @@ class AibotSDK:
     SDK's generic ``reply``.
     """
 
-    def __init__(self, bot_id: str, secret: str) -> None:
+    def __init__(self, bot_id: str, secret: str, *, reconnect_max_ms: int | None = None) -> None:
         self._bot_id = bot_id
         self._secret = secret
+        self._reconnect_max_ms = reconnect_max_ms
         self._client: Any = None
 
     def _ensure_client(self):
@@ -117,8 +118,20 @@ class AibotSDK:
                     "wecom-aibot-python-sdk is not installed; install tether[wecom]"
                 ) from exc
             self._client = aibot.WSClient(
-                aibot.WSClientOptions(bot_id=self._bot_id, secret=self._secret)
+                aibot.WSClientOptions(
+                    bot_id=self._bot_id,
+                    secret=self._secret,
+                    # Retry forever: a transient DNS/network blip must not leave the
+                    # bot permanently offline (the SDK's default gives up after 10).
+                    max_reconnect_attempts=-1,
+                )
             )
+            ceiling = self._reconnect_max_ms
+            manager = getattr(self._client, "_ws_manager", None)
+            if ceiling and ceiling > 0 and manager is not None:
+                # The SDK hard-codes the reconnect backoff ceiling (30s) with no
+                # option for it, so set it on the connection manager directly.
+                manager._reconnect_max_delay = ceiling
         return self._client
 
     def on(self, event: str, handler: Callable[..., Any]) -> None:
@@ -256,11 +269,14 @@ class WeComConnector(BaseConnector):
         secret: str,
         sdk: WeComSDK | None = None,
         welcome_text: str | None = None,
+        reconnect_max_ms: int | None = None,
     ) -> None:
         super().__init__(wecom_capabilities)
         self._bot_id = bot_id
         self._secret = secret
-        self._sdk: WeComSDK = sdk or AibotSDK(bot_id, secret)
+        self._sdk: WeComSDK = sdk or AibotSDK(
+            bot_id, secret, reconnect_max_ms=reconnect_max_ms
+        )
         self._welcome_text = welcome_text
         self._frames: dict[str, Any] = {}
 

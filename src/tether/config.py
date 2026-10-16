@@ -272,6 +272,9 @@ class WeComChannelConfig(BaseModel):
     bot_id: str | None = None
     secret: str | None = None
     welcome_text: str | None = None
+    # Long-connection reconnect backoff ceiling (ms). The SDK hard-codes 30s; a
+    # smaller value recovers from a network blip faster (at more attempts).
+    reconnect_max_ms: int = 30000
     identity: ChannelIdentity = Field(default_factory=ChannelIdentity)
 
 

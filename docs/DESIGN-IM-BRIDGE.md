@@ -1315,6 +1315,14 @@ Based on `wecom-aibot-python-sdk` (`aibot`) and the official "Smart Robot Long C
 - Client: `WSClient(WSClientOptions(bot_id, secret))`; events `message.text/image/mixed/voice/file`,
   `event.enter_chat`, `event.template_card_event`, `event.feedback_event`; connection events
   `authenticated/connected/disconnected/reconnecting/error`.
+- **Connection resilience**: the client retries **forever** (`max_reconnect_attempts=-1`) with
+  exponential backoff — 1 s, 2 s, 4 s, 8 s, 16 s, then capped (default 30 s), resetting after a
+  successful connect. The SDK's default gives up after 10 attempts, so a transient DNS/network blip
+  could leave the bot silently offline with no inbound messages; Tether overrides it. The backoff
+  **ceiling** is configurable (`channels.wecom.reconnect_max_ms`, default `30000`; the SDK hard-codes
+  30 s, so Tether sets it on the connection manager directly). The SDK already reconnects on a
+  receive-loop drop and on a heartbeat-pong timeout, so the long connection is self-healing without a
+  bridge-side watchdog.
 - Outbound:
   - Streaming text: `await reply_stream(frame, stream_id, content, finish=False, msg_item=None,
     feedback=None)`; **multiple calls** push updates, the last with `finish=True`. Markdown is rendered by the bot.
@@ -1412,6 +1420,7 @@ complete message instead.
 **Delivery / auth / caveats.**
 - Auth: `tenant_access_token` (from `app_id`/`app_secret`), managed by the SDK.
 - **Multiple long connections**: with several instances of the app online, the platform may deliver an event to only **one** of them (not broadcast) — the bridge must run a **single instance** (as with WeCom's one-connection rule) or de-duplicate by `message_id`.
+- **Connection resilience**: `lark-oapi` reconnects **indefinitely** on its own (`_reconnect_count=-1`), so — unlike WeCom — there is no "give up after N attempts" failure. But its blocking `start()` runs in a **dedicated thread**, and if that call ever ends (e.g. a `ClientException` at the handshake), the thread would die and the channel go silently offline. So `LarkSDK._run` **supervises** the thread: on `start()` returning/raising it logs (`feishu_stream_restarting`) and, after a small backoff, rebuilds the `lark.ws.Client` and restarts; a `_stopped` flag lets `stop()` end the loop cleanly.
 - **Delivery semantics** (p2p always? group @-only? effect of the event-subscription permission) are **pending integration testing**; until confirmed, keep the conservative `group_delivery: mention_only`.
 - `mentions` carry names → speaker labeling / `@`-stripping use the bot `app_name` from identity.
 
@@ -1892,6 +1901,7 @@ channels:
     identity:                         # REQUIRED for WeCom (it exposes no name/description)
       display_name: "..."
       description: "..."
+    reconnect_max_ms: 30000           # long-connection reconnect backoff ceiling (ms)
   feishu:
     identity:                         # optional; unset = use the platform's bot name
       display_name: null

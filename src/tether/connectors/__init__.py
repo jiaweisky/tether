@@ -22,10 +22,22 @@ def register_builtins() -> None:
     register_connector("fake", lambda **_: FakeConnector())
 
 
-def _make_wecom(*, bot_id: str, secret: str, welcome_text: str | None = None, **_):
+def _make_wecom(
+    *,
+    bot_id: str,
+    secret: str,
+    welcome_text: str | None = None,
+    reconnect_max_ms: int | None = None,
+    **_,
+):
     from .wecom.connector import WeComConnector
 
-    return WeComConnector(bot_id=bot_id, secret=secret, welcome_text=welcome_text)
+    return WeComConnector(
+        bot_id=bot_id,
+        secret=secret,
+        welcome_text=welcome_text,
+        reconnect_max_ms=reconnect_max_ms,
+    )
 
 
 def _make_feishu(*, app_id: str, app_secret: str, voice_transcription=None, **_):
@@ -59,6 +71,7 @@ def _build_wecom(channel: Any) -> IMConnector:
         bot_id=_require(channel.bot_id, "bot_id", "wecom"),
         secret=_require(channel.secret, "secret", "wecom"),
         welcome_text=channel.welcome_text,
+        reconnect_max_ms=channel.reconnect_max_ms,
     )
 
 
