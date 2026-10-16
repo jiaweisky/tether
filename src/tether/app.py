@@ -71,6 +71,11 @@ _WATCHDOG_GRACE_S = 10.0
 # prolonged-disconnection alert.
 _SSE_PROLONGED_AFTER = 3
 
+# How often to sample each connector's transport state, and how long one may be
+# down before it is logged as an error (its state is also exported as a metric).
+_CONNECTOR_HEALTH_INTERVAL_S = 30.0
+_CONNECTOR_DOWN_ALERT_S = 120.0
+
 
 class TetherApp:
     def __init__(
@@ -106,6 +111,8 @@ class TetherApp:
         self._watchdog_task: asyncio.Task[None] | None = None
         self._metrics_task: asyncio.Task[None] | None = None
         self._config_task: asyncio.Task[None] | None = None
+        self._connector_health_task: asyncio.Task[None] | None = None
+        self._connector_down_since: dict[str, float] = {}
         self._metrics_server: asyncio.AbstractServer | None = None
         self.metrics_port: int | None = None
         self._running = False
@@ -142,6 +149,7 @@ class TetherApp:
             self._config_mtime = _mtime(self._config_path)
             self._config_task = asyncio.ensure_future(self._watch_config())
         await self._start_metrics()
+        self._connector_health_task = asyncio.ensure_future(self._connector_health_loop())
         log.info("tether_started", connectors=list(self.connectors))
 
     async def stop(self) -> None:
@@ -161,6 +169,8 @@ class TetherApp:
             self._watchdog_task.cancel()
         if self._config_task is not None:
             self._config_task.cancel()
+        if self._connector_health_task is not None:
+            self._connector_health_task.cancel()
         with contextlib.suppress(Exception):
             await self._stop_metrics()
         for task in self._sse_tasks.values():
@@ -175,6 +185,9 @@ class TetherApp:
         if self._config_task is not None:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._config_task
+        if self._connector_health_task is not None:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._connector_health_task
         log.info("stop_streams_closed", elapsed_ms=_ms_since(started))
         for engine in list(self._turns.values()):
             # Default: just stop streaming and leave the turn on agentd so a
@@ -396,6 +409,7 @@ class TetherApp:
         lines.append(_agentd_line(route.server_base, info))
         if route.bot_name:
             lines.append(f"identity: {route.bot_name}")
+        lines.append(_connectors_line(self.connectors))
         return lines
 
     def _waiting(self, route: Route) -> int:
@@ -1097,6 +1111,7 @@ class TetherApp:
         metrics.set("active_turns", float(len(self._turns)))
         metrics.set("leases", float(self.router.leases.count))
         metrics.set("queue_depth", float(sum(e.route.queue_depth for e in self._turns.values())))
+        self._check_connectors()
 
     async def _metrics_log_loop(self) -> None:
         while self._running:
@@ -1108,6 +1123,32 @@ class TetherApp:
                 raise
             except Exception:  # noqa: BLE001 - the log loop must never die
                 log.exception("metrics_log_failed")
+
+    async def _connector_health_loop(self) -> None:
+        while self._running:
+            await asyncio.sleep(_CONNECTOR_HEALTH_INTERVAL_S)
+            try:
+                self._check_connectors()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - the health loop must never die
+                log.exception("connector_health_failed")
+
+    def _check_connectors(self) -> None:
+        """Publish each connector's transport state and alert on a prolonged outage."""
+        now = time.monotonic()
+        for name, connector in self.connectors.items():
+            state = connector.connected
+            if state is None:
+                continue
+            metrics.set(f"connector_connected_{name}", 1.0 if state else 0.0)
+            if state:
+                self._connector_down_since.pop(name, None)
+                continue
+            since = self._connector_down_since.setdefault(name, now)
+            if now - since >= _CONNECTOR_DOWN_ALERT_S:
+                log.error("connector_down", channel=name, for_s=int(now - since))
+                self._connector_down_since[name] = now
 
     async def _handle_http(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -1150,11 +1191,16 @@ class TetherApp:
                 agentd[base] = await self.router.client_for_base(base).health()
             except Exception:  # noqa: BLE001
                 agentd[base] = False
-        ok = bool(self.connectors) and all(agentd.values())
+        connectors = {name: c.connected for name, c in self.connectors.items()}
+        ok = (
+            bool(self.connectors)
+            and all(agentd.values())
+            and all(state is not False for state in connectors.values())
+        )
         return {
             "status": "ok" if ok else "degraded",
             "uptime_s": round(metrics.uptime_s(), 1),
-            "connectors": sorted(self.connectors),
+            "connectors": connectors,
             "agentd": agentd,
             "active_turns": len(self._turns),
             "leases": self.router.leases.count,
@@ -1292,6 +1338,18 @@ def _config_chunks(dump: str, limit: int) -> list[str]:
     if current or not pieces:
         pieces.append(current)
     return [f"```json\n{piece}\n```" for piece in pieces]
+
+
+def _connectors_line(connectors: dict[str, Any]) -> str:
+    """A one-line summary of each connector's transport state (for ``/status``)."""
+    parts = [f"{name}={_conn_state(c.connected)}" for name, c in sorted(connectors.items())]
+    return "connectors: " + " ".join(parts)
+
+
+def _conn_state(state: bool | None) -> str:
+    if state is None:
+        return "?"
+    return "up" if state else "down"
 
 
 def _agentd_line(base: str, info: dict[str, Any] | None) -> str:

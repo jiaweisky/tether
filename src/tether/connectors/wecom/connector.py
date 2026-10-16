@@ -79,6 +79,8 @@ class WeComSDK(Protocol):
     """The subset of the official SDK this connector uses."""
 
     def on(self, event: str, handler: Callable[..., Any]) -> None: ...
+    @property
+    def is_connected(self) -> bool: ...
     async def connect(self) -> Any: ...
     def disconnect(self) -> None: ...
     async def reply_stream(
@@ -133,6 +135,10 @@ class AibotSDK:
                 # option for it, so set it on the connection manager directly.
                 manager._reconnect_max_delay = ceiling
         return self._client
+
+    @property
+    def is_connected(self) -> bool:
+        return self._client is not None and self._client.is_connected
 
     def on(self, event: str, handler: Callable[..., Any]) -> None:
         self._ensure_client().on(event, handler)
@@ -311,6 +317,10 @@ class WeComConnector(BaseConnector):
 
     async def _disconnect(self) -> None:
         self._sdk.disconnect()
+
+    @property
+    def connected(self) -> bool:
+        return self._sdk.is_connected
 
     def supports_streaming(self, conv: Conversation) -> bool:
         # WeCom refreshes a message only as a passive reply to a callback, so a

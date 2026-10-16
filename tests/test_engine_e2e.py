@@ -1053,3 +1053,21 @@ async def test_tool_edits_send_only_the_final_file_version(tmp_path):
     # An edit-tool file is delivered, and only once, with its final content.
     assert len(media) == 1
     assert media[0]["media"].data == b"v2"
+
+@pytest.mark.asyncio
+async def test_connector_health_publishes_the_transport_state(tmp_path):
+    app, conn, _ = await make_app(tmp_path)
+
+    app._check_connectors()
+    assert metrics.gauges.get("connector_connected_fake") == 1.0
+    assert "fake" not in app._connector_down_since
+
+    conn._connected = False
+    app._check_connectors()
+    assert metrics.gauges.get("connector_connected_fake") == 0.0
+    assert "fake" in app._connector_down_since  # an outage is now being tracked
+
+    conn._connected = True
+    app._check_connectors()
+    assert metrics.gauges.get("connector_connected_fake") == 1.0
+    assert "fake" not in app._connector_down_since  # cleared on recovery

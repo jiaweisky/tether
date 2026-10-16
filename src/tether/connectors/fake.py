@@ -67,6 +67,11 @@ class FakeConnector(BaseConnector):
         self.uploads: list[MediaHandle] = []
         self._attachments: dict[str, MediaBytes] = {}
         self._counter = 0
+        self._connected: bool | None = True
+
+    @property
+    def connected(self) -> bool | None:
+        return self._connected
 
     # -- test helpers ------------------------------------------------------
     def register_attachment(

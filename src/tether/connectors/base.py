@@ -59,6 +59,11 @@ class BaseConnector:
     async def _disconnect(self) -> None:
         return None
 
+    @property
+    def connected(self) -> bool | None:
+        """Whether the connector's transport is up, or ``None`` if it is untracked."""
+        return None
+
     async def emit(self, item: IncomingItem) -> None:
         if self._emit is not None:
             await self._emit(item)

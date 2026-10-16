@@ -48,6 +48,10 @@ class FakeWeComSDK:
     def disconnect(self):
         self.connected = False
 
+    @property
+    def is_connected(self) -> bool:
+        return self.connected
+
     async def reply_stream(self, frame, stream_id, content, finish, msg_item=None):
         self.streams.append((stream_id, content, finish))
 

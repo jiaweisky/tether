@@ -35,6 +35,10 @@ class FakeFeishuSDK:
     def stop(self):
         pass
 
+    @property
+    def connected(self) -> bool:
+        return True
+
     def reply(self, message_id, msg_type, content):
         self.calls.append(("reply", message_id, msg_type, content))
         return "om_reply"

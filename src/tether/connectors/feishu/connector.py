@@ -96,6 +96,8 @@ class FeishuSDK(Protocol):
 
     def start(self, on_message: Any, on_card: Any, on_recall: Any) -> None: ...
     def stop(self) -> None: ...
+    @property
+    def connected(self) -> bool: ...
     def reply(self, message_id: str, msg_type: str, content: dict) -> str: ...
     def send(self, chat_id: str, msg_type: str, content: dict) -> str: ...
     def patch(self, message_id: str, content: dict) -> None: ...
@@ -149,6 +151,10 @@ class FeishuConnector(BaseConnector):
             await asyncio.to_thread(self._sdk.stop)
         except Exception:  # noqa: BLE001
             log.warning("feishu_stop_failed", exc_info=True)
+
+    @property
+    def connected(self) -> bool:
+        return self._sdk.connected
 
     # -- inbound (called from the SDK thread; hop back to Tether's loop) ---
     def _on_message(self, event: Any) -> None:
@@ -755,6 +761,11 @@ class LarkSDK:
         conn = getattr(ws, "_conn", None) if ws is not None else None
         if conn is not None and loop is not None:
             loop.call_soon_threadsafe(lambda: asyncio.ensure_future(conn.close()))
+
+    @property
+    def connected(self) -> bool:
+        # The SDK holds the open socket on ``_conn`` (cleared on disconnect).
+        return self._ws is not None and getattr(self._ws, "_conn", None) is not None
 
     # -- REST (sync) -------------------------------------------------------
     def reply(self, message_id: str, msg_type: str, content: dict) -> str:
