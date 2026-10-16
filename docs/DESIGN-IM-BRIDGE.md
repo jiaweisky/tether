@@ -118,6 +118,11 @@
 | 2026-10-16 | §5.1: WeCom long-connection **resilience** — the aibot client is created with `max_reconnect_attempts=-1` (retry forever; backoff 1s → 2s → … → ceiling, reset after a good connect) so a transient DNS/network blip cannot leave the bot permanently offline; the backoff ceiling is configurable via `channels.wecom.reconnect_max_ms` (default 30000 ms; the SDK hard-codes 30 s). Root cause seen in practice: the SDK's default gives up after 10 attempts, and a DNS failure for `openws.work.weixin.qq.com` took the bot down (no inbound messages) until a manual restart. |
 | 2026-10-16 | §5.2: Feishu long-connection **supervision** — `lark-oapi` already reconnects indefinitely (`_reconnect_count=-1`), so the WeCom "gives up after N" failure does not apply; but its blocking `start()` runs in a dedicated thread that would die (and go silently offline) if `start()` ever ended, so `LarkSDK._run` now supervises it — on `start()` returning/raising it logs and, after a backoff, rebuilds the `lark.ws.Client` and restarts; a `_stopped` flag ends the loop cleanly on `stop()`. |
 | 2026-10-16 | §11/§6.6: **connector transport health** — each connector now exposes `connected` (WeCom via the SDK's `is_connected`, Feishu via the live socket); the bridge samples it every 30 s, exports a `connector_connected_<channel>` gauge, logs `connector_down` (error level) once a channel has been down ≥ 2 min, reflects the state in `GET /healthz`'s `connectors` map (and its overall `status`), and shows a `connectors:` line in `/status` (direct chat). This makes a silently-dead long connection visible/alertable instead of only internal to the connector. |
+| 2026-10-16 | §14 M7: dropped the planned **image OCR**. Screenshots already work end-to-end because the agentd model is **multimodal** (`inputModalities: [text, image]`) and the image is passed through as an image part — the model reads it natively (better than OCR: layout, charts, not just characters). The only case OCR would help (a text-only model) is handled upstream by configuring the model's modalities at agentd, not by the bridge. |
+| 2026-10-16 | §5.1/§5.3/§5.4/§14 M7: clarified that **voice→text is per-platform and lives in the connectors** — WeCom uses the callback's inline recognised text (`voice.content`, §5.1); QQ/WeChat prefer the same, otherwise the raw attachment. §14 M7 dropped the "voice transcription subagent" item and marked **long-term file archiving** and the **Web admin console** as *not planned* (message recall already shipped for Feishu, §8.6). |
+| 2026-10-16 | §8.3/§8.4/§14: re-scoped the remaining "hardening" items from **deferred** to **not planned**. All three — adaptive rate limiting (§8.4), per-session `?after=` replay / explicit `subscriber_overflow` handling (§8.3), and migration/replay (§14) — only matter at high volume, multi-user fan-out, or when migrating existing data, none of which applies to this single-instance, single-operator bridge. The implemented mechanisms already cover the realistic failure modes: a static per-Conversation token bucket + streaming backoff (§8.4); the global stream + reconciliation, the stale-turn watchdog, and session re-acquire (§8.3). |
+| 2026-10-16 | §11: marked the **remaining observability metrics** (outbound message counts, turn duration, media bytes received, render-downgrade counts, the per-route debug view, project-switch count) as **not planned** — low value at this single-instance scale, where the existing counters/gauges/alerts plus structured logs and `/status` already suffice. |
+| 2026-10-16 | §3.1/§5.2/§9/§14/§15: **removed Feishu voice-bubble transcription (D24)**. `IMConnector.transcribe_voice` (§3.1), `channels.feishu.voice_transcription` (§9), the connector's ASR path (`ffmpeg` decode → `speech_to_text/v1` → `recognition_text`) and its tests are gone; a Feishu **voice bubble** is now just a raw attachment. Rationale: the platform ASR API needs a **paid tenant** + `ffmpeg` and helps only voice *bubbles* — **voice input** ("speech to text") already arrives as a `post`/text message, so the common path never needed it. **D24** is re-recorded as "not transcribed" (dropped). The historical 2026-10-13 entries that introduced the feature are kept for the record. |
 
 ---
 
@@ -194,7 +199,7 @@ There are also several requirement-driven **supporting designs**: bot identity s
 - Does not implement connection/authentication/encryption for each IM platform (left to each IM SDK).
 - Does not do multi-agent orchestration/routing strategy: one bot corresponds to one agent; switching is an **operational** concern (deployment configuration), not switched in chat.
 - Does not do schema-first / code generation (consistent with `DESIGN-HTTP.md` §11).
-- The MVP does not include a Web admin console (listed as optional in §14 M7).
+- The MVP does not include a Web admin console (marked *not planned*, §14 M7).
 - **No multi-tenant SaaS** (no per-organization renting/billing); but a single instance serves multiple IMs and multiple groups — **isolation is needed between conversations and groups**
   (§2.8/§2.9).
 
@@ -1335,6 +1340,9 @@ Based on `wecom-aibot-python-sdk` (`aibot`) and the official "Smart Robot Long C
   - Welcome message: `reply_welcome(frame, body)` (within 5s of the enter-session event).
 - Inbound media: `await download_file(url, aes_key)` (built-in AES-256-CBC decryption) → `(bytes, filename)`;
   `aeskey` is taken from `body.image.aeskey` / `body.file.aeskey` / `body.voice.aeskey`.
+- **Inbound voice**: the callback carries the platform's **recognised text** for a voice message (`voice.content`), and the
+  connector uses it directly as the message text — **no bridge-side ASR**. Only when the transcript is empty does it fall
+  back to the raw attachment.
 - Outbound media: materials need **chunked upload** (upload init → upload chunk → upload finish); send by type using
   image/file/voice/video messages.
 - Reply queue: replies to the same `req_id` are sent serially, naturally avoiding out-of-order.
@@ -1396,7 +1404,7 @@ complete message instead.
 | `im.message.recalled_v1` | `ConnectorEvent(kind="recall")` (§8.6) |
 | `im.chat.member.bot.added_v1` (+ deleted) | `ConnectorEvent` (membership; informational) |
 
-> **Voice (D24, device-verified).** Two distinct paths: (1) **voice input / "speech to text"** — the Feishu client transcribes and sends a `post` message with the text, so it is handled like any text (no ASR needed); (2) a **voice bubble** — `message_type: audio` with content `{file_key, duration}` only, no transcript (unlike WeCom, whose `message.voice.content` *is* the transcript). A voice bubble is passed through as an attachment (§7.1 normalizes `voice`→`audio`) unless optional transcription is enabled (below).
+> **Voice.** Two distinct paths: (1) **voice input / "speech to text"** — the Feishu client transcribes and sends a `post` message with the text, so it is handled like any text (no ASR needed); (2) a **voice bubble** — `message_type: audio` with content `{file_key, duration}` only, no transcript (unlike WeCom, whose `message.voice.content` *is* the transcript). A voice bubble is passed through as an attachment (§7.1 normalizes `voice`→`audio`); the bridge does not transcribe it.
 
 `message` fields: `message_id`, `chat_id`, `chat_type` (`p2p`|`group`), `message_type`, `content` (a JSON **string**: e.g. `{"text": …}`, `{"image_key": …}`, `{"file_key":…, "file_name":…}`), `mentions` (each `{key, id, name}`; the text carries the `@_user_N` placeholder), and `parent_id`/`root_id`/`thread_id` (→ `Conversation.thread`). Group messages are delivered only when the bot is @-mentioned unless "receive all group messages" is granted.
 
@@ -1409,14 +1417,8 @@ complete message instead.
 **HITL.** Render permission/question as an **interactive card** with button elements whose `value` carries the encoded payload (§4.6). `card.action.trigger` → `IncomingInteraction`; the clicker's `operator.open_id` is the actor, enabling in-group authorization (§2.5(3)). Dedup by the encoded `rid` (§8.2); after a decision the clicked card is rewritten in place to a text notice (`acknowledge`, patch-by `message_id`, like WeCom).
 
 **Media.**
-- Inbound: `GET /im/v1/messages/{message_id}/resources/{file_key}?type=image|file` → bytes (the `image_key`/`file_key` come from the message content). **Voice** downloads as `type=file`; it carries no transcript (D24), so the agent receives the raw audio and normally cannot use it unless transcription is enabled.
+- Inbound: `GET /im/v1/messages/{message_id}/resources/{file_key}?type=image|file` → bytes (the `image_key`/`file_key` come from the message content). **Voice** downloads as `type=file`; it carries no transcript, so the agent receives the raw audio (usable only if the model consumes audio).
 - Outbound: upload via `POST /im/v1/images` (image_key) and `POST /im/v1/files` (file_key), then send an `image`/`file`/`audio`/`media` message. (Current implementation sends non-image media as a `file`; native audio/video bubbles are a follow-up.)
-
-**Voice transcription (optional, D24).** When `channels.feishu.voice_transcription.enabled` is set, the connector transcribes an inbound voice bubble before the turn starts: download the audio → **decode Ogg-Opus to 16 kHz mono PCM** (`ffmpeg`, one pass, ~30 ms) → `POST /open-apis/speech_to_text/v1/speech/file_recognize` → put `recognition_text` into the message text (and drop the attachment so it is not also spooled). Facts and constraints:
-- the API accepts **only `format=pcm` + `engine_type=16k_auto`**, and requires the `speech_to_text:speech` scope (app identity);
-- the tenant limit is **20 QPS** shared by all apps in the tenant, and **the free version does not support the API** (a call there returns the misleading `99991400 request trigger frequency limit`);
-- the bridge applies its own throttle (`max_per_min`) and, on **any** error (rate limit, quota, permission, format, decode), logs `feishu_transcription_failed`, **backs off** for `cooldown_s` (skipping ASR meanwhile) and falls back to the raw attachment — it never fails the turn;
-- `ffmpeg` must be on `PATH`; if it is missing the feature is **disabled at startup with a single warning** (no repeated errors).
 
 **Delivery / auth / caveats.**
 - Auth: `tenant_access_token` (from `app_id`/`app_secret`), managed by the SDK.
@@ -1437,6 +1439,8 @@ Based on `qq-botpy` and the QQ Bot Open Platform API v2:
   msg_type, media, msg_id, msg_seq)`; Markdown needs `msg_type=2` etc. (HTML/Markdown capability is limited by the platform).
 - Media: first upload the rich media (image/video/audio/file), then `post_message` references `file_info`.
 - Auth: `AppID + AppSecret`.
+- **Inbound voice**: prefer the platform's **native transcript** when the event carries one (WeCom-style, §5.1); otherwise
+  the raw attachment (no bridge-side ASR).
 - **Inbound events → §3.2**: `on_*_message_create` → `InboundMessage`; keyboard/interaction callback →
   `IncomingInteraction` (event name pending integration testing).
 - **Delivery semantics (inferred from event names)**: group/channel @-only (`on_group_at_message_create` / `on_at_message_create`
@@ -1452,6 +1456,8 @@ Based on `wechatbot-sdk`:
 - No Markdown, no buttons, no editing → `Capabilities` fully degraded: text purification, cards become numbered options,
   streaming degrades to "one-shot send".
 - This channel has poor compliance risk and stability, and is listed as the last to integrate.
+- **Inbound voice**: same rule as QQ (§5.3) — prefer the platform's native transcript if the message carries one; otherwise
+  the raw attachment (no bridge-side ASR).
 - **Inbound interaction**: no buttons → **no `IncomingInteraction`**; HITL uses "numbered options + text fallback" (§4.6).
 - **Delivery semantics**: messages visible to the logged-in account; the specific delivery scope of `on_message`, group-chat behavior, and rate limiting are **pending integration testing confirmation**
   (before confirmation, handle per the most conservative setting; use in groups must have the compliance risk assessed).
@@ -1787,7 +1793,7 @@ See §4.5. Core points:
 - SSE overflow (`event: error` + `subscriber_overflow`) → log it and run the reconciliation flow.
 - **Session recovery (lost agentd state)**: the IM↔session mapping is persisted by the bridge (`routes`), keyed by `Conversation.key`; agentd holds only session ids. If agentd is restarted with a **fresh state directory**, a persisted `session_id` no longer exists. On the **first use of a loaded route** (`sessions.validate_session`), the bridge verifies it with `GET /api/session/{id}` and, on `not_found`, creates a new session for the same `Conversation.key` and updates the route (re-injecting identity). A `not_found` on `prompt` is also recovered reactively, covering a session lost mid-run. This keeps a conversation working instead of failing permanently.
 - **Stale-turn watchdog (`sessions.turn_watchdog_s`)**: a Turn ends **only** on the live `session.status idle` event, and the global SSE has **no replay** — so a single missed idle (a reconnect gap, an agentd restart, or a second bridge instance taking the connection) would leave the Turn "active" and **block that conversation's queue forever**. Every N seconds the bridge cross-checks each active Turn against `GET /api/session/active` and, for any whose session is **no longer running** (after a short grace period, so a just-started Turn is not raced), finishes it — flushing the partial snapshot and draining the queue. `0` disables it.
-- **Deferred — do not implement without an explicit instruction**: per-session `?after=` event replay and any explicit `subscriber_overflow` protocol handling beyond the existing "log + reconnect + reconcile" (the design uses the global stream + reconciliation, §4.3 / D14).
+- **Not planned**: per-session `?after=` event replay and explicit `subscriber_overflow` protocol handling beyond "log + reconnect + reconcile". The design uses the global stream + reconciliation (§4.3 / D14), which already recovers the final state and pending interactions; per-session replay would only smooth streaming across a reconnect gap (a UX nicety, not correctness), and overflow needs a slow/overloaded subscriber — neither occurs at this single-instance scale.
 
 ### 8.4 Backpressure and Rate Limiting
 
@@ -1796,7 +1802,7 @@ See §4.5. Core points:
   blocking event consumption.
 - In the event loop shared by multiple Connectors, any blocking call (the SDK's internal HTTP) should be executed in a thread pool or native async
   to avoid dragging down event consumption.
-- **Deferred — do not implement without an explicit instruction**: adaptive (auto-tuning) rate limiting. The per-Conversation token bucket and the streaming backoff are in place; auto-tuning needs the real per-platform caps, which are pending device verification (§13.1).
+- **Not planned**: adaptive (auto-tuning) rate limiting. The per-Conversation token bucket (static `Capabilities.rate_limit_per_min` / the local cap) plus the streaming backoff already prevent exceeding platform caps; auto-tuning only pays off under high-volume or multi-user fan-out, and would need the real per-platform caps (§13.1) first.
 
 ### 8.5 Graceful Shutdown
 
@@ -1967,12 +1973,6 @@ channels:
     enabled: false
     app_id: ${FEISHU_APP_ID:-}
     app_secret: ${FEISHU_APP_SECRET:-}
-    voice_transcription:               # optional; off by default
-      enabled: false
-      engine_type: 16k_auto            # the API supports only this
-      format: pcm                      # the API supports only this
-      max_per_min: 20                  # local throttle (tenant limit is 20 QPS)
-      cooldown_s: 60                   # skip ASR after any error
   qq:
     enabled: false
     appid: ${QQ_BOT_APPID:-}
@@ -2082,7 +2082,7 @@ inputModalities: [text, image]       # the endpoint model's actual capabilities
 - Isolation-related: active project lease count, isolated-view (worktree/overlay/container) create/fail count, project switch count.
 - Key alerts: agentd unreachable, prolonged SSE disconnection, Connector authentication failure, rising HITL timeout rate.
 
-**Implemented**: a process-wide counter/gauge registry (`tether.metrics`) incremented by the app, the engine and the connectors; an **optional HTTP endpoint** (`metrics.listen`) serving `GET /healthz` (JSON: `status`, `uptime_s`, `connectors` — a per-channel transport-state map `up`/`down`, per-base `agentd` reachability, `active_turns`, `leases`) and `GET /metrics` (Prometheus text); and a **periodic `metrics` structured log** (`metrics.log_interval_s`). Counters: `inbound_messages`, `prompts`, `turns`, `sse_reconnects`, `sse_prolonged_disconnects`, `hitl_asks`, `hitl_timeouts`, `isolated_leases_created`/`isolated_lease_failures`, `rate_limit_hits`, `media_bytes_out`, `media_send_failures`; gauges: `uptime_s`, `active_turns`, `leases`, `queue_depth`, `sse_disconnected`, `connector_connected_<channel>`. Alerts are structured log events: `sse_disconnected` (per disconnect), `sse_disconnected_prolonged` (alert level after `_SSE_PROLONGED_AFTER` consecutive failed reconnects), `connector_down` (error level once a channel's transport has been down for `_CONNECTOR_DOWN_ALERT_S`; its state is sampled every `_CONNECTOR_HEALTH_INTERVAL_S` and also shown in `/status`, §6.6), `route_unavailable`, `stale_turn_recovered`. **Not yet instrumented** (deferred): outbound message counts, turn duration, media bytes received, render-downgrade counts, the per-route debug view, and project-switch count.
+**Implemented**: a process-wide counter/gauge registry (`tether.metrics`) incremented by the app, the engine and the connectors; an **optional HTTP endpoint** (`metrics.listen`) serving `GET /healthz` (JSON: `status`, `uptime_s`, `connectors` — a per-channel transport-state map `up`/`down`, per-base `agentd` reachability, `active_turns`, `leases`) and `GET /metrics` (Prometheus text); and a **periodic `metrics` structured log** (`metrics.log_interval_s`). Counters: `inbound_messages`, `prompts`, `turns`, `sse_reconnects`, `sse_prolonged_disconnects`, `hitl_asks`, `hitl_timeouts`, `isolated_leases_created`/`isolated_lease_failures`, `rate_limit_hits`, `media_bytes_out`, `media_send_failures`; gauges: `uptime_s`, `active_turns`, `leases`, `queue_depth`, `sse_disconnected`, `connector_connected_<channel>`. Alerts are structured log events: `sse_disconnected` (per disconnect), `sse_disconnected_prolonged` (alert level after `_SSE_PROLONGED_AFTER` consecutive failed reconnects), `connector_down` (error level once a channel's transport has been down for `_CONNECTOR_DOWN_ALERT_S`; its state is sampled every `_CONNECTOR_HEALTH_INTERVAL_S` and also shown in `/status`, §6.6), `route_unavailable`, `stale_turn_recovered`. **Not planned** (low value at this single-instance, single-operator scale — the counters/gauges/alerts above, plus structured logs and `/status`, already cover day-to-day visibility): outbound message counts, turn duration, media bytes received, render-downgrade counts, the per-route debug view, and project-switch count.
 
 ---
 
@@ -2232,11 +2232,11 @@ Confirm item by item for each platform:
 | **M0 skeleton** | uv project, config/validation, unified message model (including inbound items `InboundMessage`/`IncomingInteraction`/`ConnectorEvent`), Connector protocol+registry, AgentClient (HTTP/SSE), Router+SQLite, StreamingController, Renderer (plain-text profile), `/stop`, identity-lead skeleton, structured logging |
 | **M1 (MVP) WeCom direct chat + group chat text** | WeCom long-connection Connector; **direct chat and group chat (one session per conversation; bot name/description and speaker identity injected)**; `reply_stream` streaming Markdown; no cross-user steer within a group, reply @-mentions the initiator; turn completion/error notices; `/stop`. **Exit: §13.1 integration testing and backfill §3.3** |
 | **M2 WeCom full experience** | Markdown RICH profile (table/code-block downgrade); **run status/usage/thinking display (§6.7)**; template-card HITL (permission/question); inbound media (`download_file` decryption → inline/file/url/spool); outbound media (tool media → chunked upload → image/file/voice/video); `attachment.omitted` notice. **Exit: §13.1 backfill** |
-| **M3 Feishu** | Long-connection Connector; text/p2p round-trip (**done**); card streaming + card-Markdown rendering (**done**); card interaction callbacks → HITL + `acknowledge`; media; optional voice-bubble transcription (`voice_transcription`, D24 — opt-in, needs a paid tenant + `ffmpeg`). **Exit: §13.1 backfill** |
+| **M3 Feishu** | Long-connection Connector; text/p2p round-trip (**done**); card streaming + card-Markdown rendering (**done**); card interaction callbacks → HITL + `acknowledge`; media. **Exit: §13.1 backfill** |
 | **M4 QQ** | botpy Connector; group/channel/DM; markdown+keyboard; rich media. **Exit: §13.1 backfill** |
 | **M5 WeChat personal** | wechatbot-sdk Connector; extreme downgrade; compliance notices. **Exit: §13.1 backfill** |
-| **M6 hardening** | **Done:** project sharing vs isolation (`projects.mode: shared | isolated`; per-conversation views via agentd's control API `POST/GET/DELETE /admin/projects`, impl `none`/`copy`/`worktree`/`overlay`, with `inboundPermissions` + `sandbox` passthrough, §2.8/§2.9); SSRF protection; observability `GET /healthz` + `/metrics` (§11 core; a few listed metrics still deferred, §11); stale-turn watchdog + isolated re-acquire (§8.3). **Deferred — do not implement without an explicit instruction:** adaptive rate limiting (§8.4), per-session `?after=` replay / explicit overflow handling (§8.3), migration/replay. |
-| **M7 enhancements** | Voice transcription subagent, image OCR, long-term file archiving, Web admin console (optional), **message recall handling** (best-effort, §8.6: Feishu `im.message.recalled_v1` / QQ; WeCom has no event) |
+| **M6 hardening** | **Done:** project sharing vs isolation (`projects.mode: shared | isolated`; per-conversation views via agentd's control API `POST/GET/DELETE /admin/projects`, impl `none`/`copy`/`worktree`/`overlay`, with `inboundPermissions` + `sandbox` passthrough, §2.8/§2.9); SSRF protection; observability `GET /healthz` + `/metrics` (§11 core; the remaining listed metrics are **not planned**, §11); stale-turn watchdog + isolated re-acquire (§8.3). **Not planned:** adaptive rate limiting (§8.4), per-session `?after=` replay / explicit overflow handling (§8.3), migration/replay — each only matters at scale or for migrating existing data, not for this single-instance, single-operator bridge. |
+| **M7 enhancements** | **None outstanding.** Per-platform **voice→text** is handled inside each connector (§5.1 WeCom reads the platform's inline transcript; §5.3/§5.4 prefer the same, otherwise the raw attachment), not by a bridge-side ASR subagent. **Not planned:** long-term file archiving, Web admin console. **Done:** message recall (§8.6, Feishu). |
 
 > Each phase should include corresponding unit/contract tests; starting from M1, "conversing with the agent within a group" can be demonstrated end-to-end.
 
@@ -2269,7 +2269,7 @@ Confirm item by item for each platform:
 | D21 | **Isolation is `shared` or `isolated`** (`projects.mode`, D20): `isolated` leases per-conversation views from **agentd's control API** (`none`/`copy`/`worktree`/`overlay`); the bridge never forks Go processes (container/remote would be host-orchestrated). Abstracted via `ProjectProvider` (§2.8/§2.9/§3.7) | One clear boundary; reuses agentd's built-in isolation runner |
 | D22 | **Isolation is shared across `agentd`'s transports via a transport-agnostic project runner in `cmd/`** (`Transport` is a parameter); **a writable project has a single owner `(project, transport)`**, read-only can be shared; the SDK provides only policy (**+ the `Sandbox` hook (SDK layer), §17.2**) (§17.3, §3.7) | Isomorphic to the sandbox: share the mechanism, not the instance; avoids writing one per transport |
 | D23 | **Message recall is best-effort and platform-dependent** (§8.6): handled only where the platform emits a recall event (Feishu `im.message.recalled_v1`); cancels queued/in-flight turns, never "unsends" an already-sent reply; a platform without the event (WeCom long connection) is a no-op | The bridge cannot delete its own outbound messages; recall can only cancel uncommitted work |
-| D24 | **Feishu voice bubbles are transcribed on demand** (§5.2, device-verified): a **voice bubble** (`audio`) event carries only `{file_key, duration}` — no transcript (unlike WeCom, whose `message.voice.content` *is* the transcript). Optional `channels.feishu.voice_transcription` transcodes it (Ogg-Opus → 16 kHz mono PCM via `ffmpeg` → `speech_to_text/v1` `file_recognize`) and feeds the text to the model. **Voice input** ("speech to text") already arrives as a `post`/text message and needs no ASR. Off by default; the API needs a paid tenant (the free version is blocked), requires `ffmpeg`, and is rate-limited — any error falls back to the raw attachment | Keep it opt-in and degrade gracefully: the API is not on the free plan, needs a decode step, and shares a 20 QPS/tenant limit |
+| D24 | **Feishu voice bubbles are not transcribed** (§5.2): a **voice bubble** (`audio`) event carries only `{file_key, duration}` — no transcript (unlike WeCom, whose `message.voice.content` *is* the transcript); a **voice input** ("speech to text") already arrives as a `post`/text message and needs no ASR. | The platform's ASR API needs a paid tenant + `ffmpeg` and only benefits voice *bubbles* — **dropped 2026-10-16** (low value). A voice bubble is delivered as a raw attachment. |
 
 ---
 

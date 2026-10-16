@@ -98,8 +98,8 @@ change-log row in `DESIGN-IM-BRIDGE.md`.
 ### 2. Inbound media
 - ✅ image received + downloaded.
 - ⬜ **file** received + downloaded (`file_key`, `file_name`).
-- ⬜ **voice bubble** (`message_type: audio`, `{file_key, duration}`) received; ASR path needs a
-  paid tenant + `ffmpeg` (deferred, D24).
+- ⬜ **voice bubble** (`message_type: audio`, `{file_key, duration}`) received and delivered as a
+  raw attachment (no transcription, D24).
 - ⬜ sticker.
   - → §7.7 inbound + §5.2.
 
