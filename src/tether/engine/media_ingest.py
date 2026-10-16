@@ -59,6 +59,13 @@ class MediaIngest:
         # Content-Disposition header), so prefer it over the message's name.
         name = media.name or attachment.name
         mime = sniff_mime(media.data, name, media.mime or attachment.mime)
+        log.info(
+            "attachment_ingested",
+            name=name,
+            mime=mime,
+            bytes=len(media.data),
+            kind=attachment.kind,
+        )
         result.files.append(_inline_file(media.data, mime, name))
 
     async def _download(

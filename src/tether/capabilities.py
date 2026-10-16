@@ -48,6 +48,10 @@ class Capabilities:
     question_form: bool = False
     reactions: bool = False
     typing: bool = False
+    # Whether the bridge should open a turn with a text "🤔 Thinking…" placeholder
+    # while it works. Channels that stream real content from the first token, or
+    # that show their own progress UI, can turn this off.
+    progress_placeholder: bool = True
     proactive: bool = False
     groups: bool = False
     mention: bool = False

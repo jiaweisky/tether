@@ -160,23 +160,28 @@ class TurnEngine:
     async def start(self) -> None:
         cap = self.connector.capabilities
         if self._can_stream:
-            # Open the message now with a placeholder so the user sees that work
-            # has started; later updates reuse this same message.
-            try:
-                self._sent_ref = await self.connector.send(
-                    self.conv,
-                    OutboundPlan(segments=[TextSegment(text="🤔 Thinking…")], final=False),
-                )
-                self._placeholder_sent = True
-            except Exception:  # noqa: BLE001 - placeholder is best-effort
-                log.warning("placeholder_failed", exc_info=True)
+            # Open the stream with a placeholder only when the channel wants one;
+            # a channel that streams real content from the first token opens it
+            # with that content instead.
+            if cap.progress_placeholder:
+                try:
+                    self._sent_ref = await self.connector.send(
+                        self.conv,
+                        OutboundPlan(segments=[TextSegment(text="🤔 Thinking…")], final=False),
+                    )
+                    self._placeholder_sent = True
+                except Exception:  # noqa: BLE001 - placeholder is best-effort
+                    log.warning("placeholder_failed", exc_info=True)
         elif cap.typing:
             try:
                 await self.connector.send_typing(self.conv)
             except Exception:  # noqa: BLE001 - typing is best-effort
                 pass
-        else:
-            await self._send_notice("🤔 Thinking…")
+        elif cap.progress_placeholder:
+            try:
+                await self._send_notice("🤔 Thinking…")
+            except Exception:  # noqa: BLE001 - placeholder is best-effort
+                log.warning("placeholder_failed", exc_info=True)
             self._placeholder_sent = True
 
     async def handle_event(self, event: Event) -> None:
@@ -568,15 +573,19 @@ class TurnEngine:
         replace; on non-streaming channels it is simply the initial frame.
         """
         if not self._can_stream:
-            if not self._placeholder_sent:
+            if not self._placeholder_sent and self.connector.capabilities.progress_placeholder:
                 await self._send_notice("🤔 Thinking…")
                 self._placeholder_sent = True
             return True
         if not snapshot.strip() and self._sent_ref is None:
-            self._sent_ref = await self.connector.send(
-                self.conv, OutboundPlan(segments=[TextSegment(text="🤔 Thinking…")], final=False)
-            )
-            self._placeholder_sent = True
+            # Nothing to stream yet: open with a placeholder only if the channel
+            # wants one, else wait for the first real content.
+            if self.connector.capabilities.progress_placeholder:
+                self._sent_ref = await self.connector.send(
+                    self.conv,
+                    OutboundPlan(segments=[TextSegment(text="🤔 Thinking…")], final=False),
+                )
+                self._placeholder_sent = True
             return True
         return False
 
