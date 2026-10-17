@@ -149,7 +149,7 @@ def is_authorized(
     if pending.scope == "participants":
         return True
     if pending.scope == "admins":
-        return sender.id in config.group.admins
+        return sender.id in config.admins_for(conv.channel, conv.account)
     owner = pending.owner or active_turn_sender
     return owner is None or sender.id == owner
 
@@ -164,7 +164,8 @@ def command_authorized(
     """Whether ``sender`` may run the stop command against the current turn."""
     if not conv.is_group:
         return True
-    if sender.id in config.group.admins:  # admins are a superset for commands
+    if sender.id in config.admins_for(conv.channel, conv.account):
+        # Admins are a superset for commands.
         return True
     if config.group.command_scope == "admins":
         return False

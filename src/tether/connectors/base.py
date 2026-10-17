@@ -38,12 +38,18 @@ Emit = Callable[[IncomingItem], Awaitable[None]]
 
 class BaseConnector:
     name: str = "base"
+    account: str | None = None
     capabilities: Capabilities
 
     def __init__(self, capabilities: Capabilities) -> None:
         self.capabilities = capabilities
         self._emit: Emit | None = None
         self._buckets: dict[str, TokenBucket] = {}
+
+    @property
+    def instance_id(self) -> str:
+        """Registry/health key: the platform name, or ``channel@account``."""
+        return f"{self.name}@{self.account}" if self.account else self.name
 
     # -- lifecycle ---------------------------------------------------------
     async def start(self, emit: Emit) -> None:

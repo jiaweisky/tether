@@ -116,8 +116,13 @@ commands:
   prefix: "/"
 
 access:
-  allow_users: []
-  allow_groups: []
+  allow_users: []               # allowed user ids (empty = unrestricted)
+  allow_groups: []              # allowed group ids (empty = unrestricted)
+  admins:                       # per-channel/bot admins; null = fall back to group.admins
+    wecom: null
+    feishu: null
+    qq: null
+    wechat: {}                  # bot id -> user ids
 
 channels:
   wecom:
@@ -135,7 +140,18 @@ channels:
     secret: ${QQ_BOT_SECRET:-}
   wechat:
     enabled: false
-    cred_path: ~/.wechatbot/credentials.json
+    qr_timeout_s: 480
+    bots:
+      - id: assistant                 # hidden route-key segment; do not rename casually
+        enabled: true                 # false = pre-provision only (no long-poll)
+        identity:
+          display_name: "微信助手"     # required: WeChat exposes no bot nickname/remark
+          description: "微信小助手"
+        login_via:                    # `/login wechat` from these DMs logs this bot in;
+          # at least one channel here must be enabled (there is no CLI login).
+          - {channel: wecom, user: "<wecom-user-id>"}
+          - {channel: feishu, user: "<feishu-open-id>"}
+
 
 # Health/metrics: an optional HTTP endpoint plus a periodic structured log line.
 metrics:

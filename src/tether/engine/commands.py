@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-CommandKind = Literal["stop", "new", "whoami", "status", "send", "config", "help"]
+CommandKind = Literal["stop", "new", "whoami", "status", "send", "config", "login", "help"]
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,12 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "Show config — the current agentd server, or --all for the bridge + full agentd "
         "(admins, direct chat only).",
         usage="[--all]",
+        optional=True,
+    ),
+    CommandSpec(
+        "login",
+        "Log in your WeChat bot (direct chat only).",
+        usage="wechat",
         optional=True,
     ),
     CommandSpec("help", "List the available commands."),

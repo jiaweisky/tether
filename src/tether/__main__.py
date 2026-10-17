@@ -19,8 +19,18 @@ SHUTDOWN_TIMEOUT_S = 15.0
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="tether", description="IM bridge for go-agent-sdk")
-    parser.add_argument("--config", "-c", default="config.yaml", help="path to config.yaml")
-    parser.add_argument("--db", default="tether.sqlite3", help="route store SQLite path")
+    parser.add_argument(
+        "--config",
+        "-c",
+        default="config.yaml",
+        help="path to config.yaml (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--db",
+        default="~/.tether/tether.sqlite3",
+        help="route store SQLite path, holds sessions/routes and WeChat tokens "
+        "(default: %(default)s; must be 0600 in a private directory)",
+    )
     return parser.parse_args(argv)
 
 

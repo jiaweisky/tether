@@ -18,9 +18,10 @@ The full design lives in [`docs/DESIGN-IM-BRIDGE.md`](./docs/DESIGN-IM-BRIDGE.md
 
 ## Status
 
-Draft implementation of the M0 skeleton + M1 (WeCom direct/group text) plus the
-full core engine. Feishu / QQ / WeChat connectors are scaffolded with declared
-capabilities.
+Implemented: the M0 core engine plus WeCom, Feishu and QQ (including their
+device-verified paths), and the personal-WeChat (iLink Bot) connector — direct
+chat only, with multi-bot QR login. WeChat group chat is not supported by
+the platform/protocol.
 
 ## Quick start
 
@@ -30,6 +31,11 @@ cp .env.example .env          # fill in AGENTSERVE_TOKEN and platform secrets
 cp config.example.yaml config.yaml
 uv run tether --config config.yaml
 ```
+
+For personal WeChat, enable the channel and add a bot with `login_via` in
+`config.yaml`. Then send `/login wechat` from one of the mapped direct chats.
+Login is only available through an already-connected channel; there is no CLI
+login.
 
 Run the checks:
 

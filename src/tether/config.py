@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -251,9 +252,23 @@ class CommandsConfig(BaseModel):
     prefix: str = "/"
 
 
+class AdminConfig(BaseModel):
+    """Per-channel/bot admin lists; unset falls back to ``group.admins``.
+
+    An explicitly empty list means "no admins on this channel/bot" (it does not
+    fall back). For WeChat, keys are bot ids, so admins can be scoped per bot.
+    """
+
+    wecom: list[str] | None = None
+    feishu: list[str] | None = None
+    qq: list[str] | None = None
+    wechat: dict[str, list[str]] = Field(default_factory=dict)
+
+
 class AccessConfig(BaseModel):
     allow_users: list[str] = Field(default_factory=list)
     allow_groups: list[str] = Field(default_factory=list)
+    admins: AdminConfig = Field(default_factory=AdminConfig)
 
 
 class ChannelIdentity(BaseModel):
@@ -292,11 +307,103 @@ class QQChannelConfig(BaseModel):
     identity: ChannelIdentity = Field(default_factory=ChannelIdentity)
 
 
+_WECHAT_BOT_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+
+
+class WeChatLoginVia(BaseModel):
+    """One (channel, sender) that may start a QR login for a bot."""
+
+    channel: Literal["wecom", "feishu", "qq", "wechat"]
+    user: str
+
+    @field_validator("user")
+    @classmethod
+    def _non_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("login_via.user must not be empty")
+        return value.strip()
+
+
+class WeChatBotConfig(BaseModel):
+    """One WeChat bot identity (a QR-logged-in personal account)."""
+
+    id: str
+    enabled: bool = True
+    identity: ChannelIdentity = Field(default_factory=ChannelIdentity)
+    # Who may start `/login wechat` for this bot, from which channel.
+    login_via: list[WeChatLoginVia] = Field(default_factory=list)
+
+    @field_validator("id")
+    @classmethod
+    def _valid_id(cls, value: str) -> str:
+        if not _WECHAT_BOT_ID.match(value):
+            raise ValueError(
+                "wechat bot id must match [a-z0-9][a-z0-9_-]{0,31} "
+                "(it is a hidden route-key segment)"
+            )
+        return value
+
+    def spec(self) -> WeChatBotSpec:
+        return WeChatBotSpec(
+            id=self.id,
+            enabled=self.enabled,
+            identity=self.identity,
+            login_via=tuple(self.login_via),
+        )
+
+
+@dataclass(frozen=True)
+class WeChatBotSpec:
+    """A resolved WeChat bot slot."""
+
+    id: str
+    enabled: bool
+    identity: ChannelIdentity
+    login_via: tuple[WeChatLoginVia, ...] = ()
+
+    @property
+    def slot(self) -> str:
+        """Stable key for binding records and route keys."""
+        return self.id
+
+    @property
+    def instance_id(self) -> str:
+        return f"wechat@{self.id}"
+
+
 class WeChatChannelConfig(BaseModel):
     enabled: bool = False
-    # QR-login credentials the connector persists (openclaw-weixin / iLink Bot).
-    cred_path: str = "~/.tether/wechat.json"
-    identity: ChannelIdentity = Field(default_factory=ChannelIdentity)
+    qr_timeout_s: int = 480
+    bots: list[WeChatBotConfig] = Field(default_factory=list)
+
+    @field_validator("qr_timeout_s")
+    @classmethod
+    def _positive_timeout(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("channels.wechat.qr_timeout_s must be > 0")
+        return value
+
+    def bot_specs(self) -> list[WeChatBotSpec]:
+        return [bot.spec() for bot in self.bots]
+
+    def spec_for(self, bot_id: str) -> WeChatBotSpec | None:
+        for bot in self.bots:
+            if bot.id == bot_id:
+                return bot.spec()
+        return None
+
+    def bot_for_login(self, channel: str, user: str) -> WeChatBotSpec | None:
+        """Resolve the bare ``/login wechat`` command for a sender."""
+        for bot in self.bots:
+            for via in bot.login_via:
+                if via.channel == channel and via.user == user:
+                    return bot.spec()
+        return None
+
+    def account_identity(self, bot_id: str) -> ChannelIdentity:
+        """The per-bot identity override (WeChat has no channel-level one)."""
+        spec = self.spec_for(bot_id)
+        return spec.identity if spec is not None else ChannelIdentity()
 
 
 class ChannelsConfig(BaseModel):
@@ -310,6 +417,14 @@ class ChannelsConfig(BaseModel):
         sub = getattr(self, channel, None)
         override = getattr(sub, "identity", None)
         return override if isinstance(override, ChannelIdentity) else ChannelIdentity()
+
+    def identity_for_account(self, channel: str, account: str | None) -> ChannelIdentity:
+        """The per-bot identity override (currently WeChat)."""
+        if not account:
+            return ChannelIdentity()
+        sub = getattr(self, channel, None)
+        resolve = getattr(sub, "account_identity", None)
+        return resolve(account) if callable(resolve) else ChannelIdentity()
 
 
 class MetricsConfig(BaseModel):
@@ -347,6 +462,19 @@ class Config(BaseModel):
     # Watch config.yaml and hot-apply a safe subset (group/access/permissions/
     # commands/identity/sessions/media) without a restart.
     reload: bool = False
+
+    def admins_for(self, channel: str, account: str | None = None) -> list[str]:
+        """Admins for a conversation: account/channel override, else global."""
+        admins = self.access.admins
+        if channel == "wechat":
+            key = account or "default"
+            if key in admins.wechat:
+                return list(admins.wechat[key])
+            return list(self.group.admins)
+        specific = getattr(admins, channel, None)
+        if specific is not None:
+            return list(specific)
+        return list(self.group.admins)
 
     def server_bases(self) -> list[tuple[str, str, str | None]]:
         """(name, base_url, working_directory) tuples for the pool (or single base)."""
@@ -416,3 +544,86 @@ def validate_startup(config: Config) -> None:
                 "channels.wecom.identity (or the global identity), since WeCom does "
                 "not expose the bot's name or description"
             )
+    _validate_wechat(config.channels.wechat)
+    _validate_wechat_logins(config)
+    _validate_admins(config)
+
+
+def _validate_wechat_logins(config: Config) -> None:
+    """Every enabled WeChat bot needs a mapped, reachable login channel."""
+    wechat = config.channels.wechat
+    if not wechat.enabled:
+        return
+    enabled_channels = {
+        "wecom": config.channels.wecom.enabled,
+        "feishu": config.channels.feishu.enabled,
+        "qq": config.channels.qq.enabled,
+        "wechat": config.channels.wechat.enabled,
+    }
+    allowed_users = set(config.access.allow_users)
+    for bot in wechat.bots:
+        reachable = [via for via in bot.login_via if enabled_channels[via.channel]]
+        if not reachable:
+            raise ValueError(
+                f"channels.wechat.bots[{bot.id!r}].login_via has no enabled channel; "
+                "there is no CLI login fallback"
+            )
+        if allowed_users and not any(via.user in allowed_users for via in reachable):
+            raise ValueError(
+                f"channels.wechat.bots[{bot.id!r}].login_via has no user permitted by "
+                "access.allow_users, so the login command would be dropped"
+            )
+
+
+def _validate_admins(config: Config) -> None:
+    for name in ("wecom", "feishu", "qq"):
+        values = getattr(config.access.admins, name)
+        if values is not None and any(not value.strip() for value in values):
+            raise ValueError(f"access.admins.{name} must not contain empty ids")
+    known_slots = {spec.slot for spec in config.channels.wechat.bot_specs()}
+    for slot, values in config.access.admins.wechat.items():
+        if slot not in known_slots:
+            raise ValueError(
+                f"access.admins.wechat.{slot!r} does not match a configured WeChat "
+                f"account slot ({', '.join(sorted(known_slots))})"
+            )
+        if any(not value.strip() for value in values):
+            raise ValueError(
+                f"access.admins.wechat.{slot!r} must not contain empty ids"
+            )
+
+
+def _validate_wechat(wechat: WeChatChannelConfig) -> None:
+    """Validate bot ids, identities and login mappings."""
+    specs = wechat.bot_specs()
+    if wechat.enabled and not specs:
+        raise ValueError("channels.wechat.enabled requires at least one bot")
+
+    slots = [spec.slot for spec in specs]
+    if len(slots) != len(set(slots)):
+        raise ValueError("channels.wechat.bots contains duplicate ids")
+    for spec in specs:
+        name = (spec.identity.display_name or "").strip()
+        if not name:
+            raise ValueError(
+                f"channels.wechat.bots[{spec.slot!r}].identity.display_name is "
+                "required: WeChat exposes no bot name or remark name"
+            )
+        if not spec.login_via:
+            raise ValueError(
+                f"channels.wechat.bots[{spec.slot!r}].login_via is required: "
+                "there is no CLI login, so a bot without a mapped channel cannot "
+                "be logged in"
+            )
+
+    seen_logins: dict[tuple[str, str], str] = {}
+    for spec in specs:
+        for via in spec.login_via:
+            key = (via.channel, via.user)
+            previous = seen_logins.get(key)
+            if previous is not None and previous != spec.slot:
+                raise ValueError(
+                    f"login_via {via.channel}:{via.user} maps to both "
+                    f"{previous!r} and {spec.slot!r}; it must map to one bot"
+                )
+            seen_logins[key] = spec.slot

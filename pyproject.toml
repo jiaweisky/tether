@@ -19,12 +19,15 @@ dependencies = [
   "filetype>=1.2",
   "Pillow>=10",
   "python-dotenv>=1.0",
+  "cryptography>=42",
+  "qrcode>=7.4",
 ]
 
 [project.optional-dependencies]
 wecom = ["wecom-aibot-python-sdk>=1.0.2"]
 feishu = ["lark-oapi>=1.4"]
-# wechat: no SDK — thin client over the openclaw-weixin (iLink Bot) protocol (docs/DESIGN-IM-BRIDGE.md §5.4)
+# wechat: no SDK — a thin client over the openclaw-weixin (iLink Bot) protocol
+# (cryptography + qrcode are core dependencies; docs/DESIGN-IM-BRIDGE.md §5.4)
 dev = [
   "pytest>=8",
   "pytest-asyncio>=0.23",

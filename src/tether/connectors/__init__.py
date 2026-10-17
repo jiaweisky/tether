@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING, Any
 
 from ..connector import IMConnector, register_connector
@@ -52,10 +51,22 @@ def _make_qq(*, appid: str, secret: str, **_):
     return QQConnector(appid=appid, secret=secret)
 
 
-def _make_wechat(*, cred_path: str, **_):
+def _make_wechat(
+    *,
+    spec: Any,
+    channel_enabled: bool,
+    qr_timeout_s: int,
+    store: Any = None,
+    **_,
+):
     from .wechat.connector import WeChatConnector
 
-    return WeChatConnector(cred_path=cred_path)
+    return WeChatConnector(
+        spec=spec,
+        channel_enabled=channel_enabled,
+        qr_timeout_s=qr_timeout_s,
+        store=store,
+    )
 
 
 def _require(value: str | None, field: str, channel: str) -> str:
@@ -87,11 +98,20 @@ def _build_qq(channel: Any) -> IMConnector:
     )
 
 
-def _build_wechat(channel: Any) -> IMConnector:
-    return _make_wechat(cred_path=os.path.expanduser(channel.cred_path))
+def _build_wechat(channel: Any, store: Any = None) -> list[IMConnector]:
+    """One connector instance per enabled account slot (legacy = one slot)."""
+    return [
+        _make_wechat(
+            spec=spec,
+            channel_enabled=channel.enabled,
+            qr_timeout_s=channel.qr_timeout_s,
+            store=store,
+        )
+        for spec in channel.bot_specs()
+    ]
 
 
-def build_enabled(config: Config) -> list[IMConnector]:
+def build_enabled(config: Config, store: Any = None) -> list[IMConnector]:
     """Construct every connector whose channel is enabled in the config."""
     register_builtins()
     channels = config.channels
@@ -99,6 +119,8 @@ def build_enabled(config: Config) -> list[IMConnector]:
         (channels.wecom, _build_wecom),
         (channels.feishu, _build_feishu),
         (channels.qq, _build_qq),
-        (channels.wechat, _build_wechat),
     )
-    return [builder(channel) for channel, builder in specs if channel.enabled]
+    connectors = [builder(channel) for channel, builder in specs if channel.enabled]
+    if channels.wechat.enabled:
+        connectors.extend(_build_wechat(channels.wechat, store=store))
+    return connectors

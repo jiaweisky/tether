@@ -518,24 +518,26 @@ Success requires HTTP `200` and a nonempty `x-encrypted-param` response header. 
 - **没有 AppID/AppSecret 可申请**：凭据来自**扫码登录**换来的 **`bot_token`**（没有开发者门户、无需"定义机器人"）。
 - **流程**：`POST /ilink/bot/get_bot_qrcode?bot_type=3` → `{qrcode, qrcode_img_content}` → 展示二维码 → 轮询 `GET /ilink/bot/get_qrcode_status?qrcode=...` → `confirmed` 返回 `{bot_token, ilink_bot_id, baseurl, ilink_user_id}` → 存 `{token, baseUrl, userId}`。
 - **参考实现如何存**：`~/.openclaw/openclaw-weixin/accounts/<ilink_bot_id>.json`（`{token, baseUrl, userId, savedAt}`）；账号索引 `accounts.json`；`context_token` 落 `accounts/<id>.context-tokens.json`；授权白名单 `credentials/openclaw-weixin-<id>-allowFrom.json`。
-- **Tether 如何存**：`cred_path`（默认 `~/.tether/wechat.json`，同构 `{token, baseUrl, userId}`）。
+- **Tether 如何存**：每个 bot 一个槽位 `channels.wechat.bots[] = {id, identity, enabled, login_via[]}`；`id` 是隐藏、稳定的路由 key，`identity.display_name` 是必需的人类可读名（微信不暴露昵称/备注名）。**运行时状态全部在 SQLite**：`wechat_accounts(slot, ilink_bot_id, token, base_url, user_id, bound_at, token_saved_at)`、`wechat_state(slot, cursor)`、`wechat_context_tokens(slot, peer_id, token)`；没有凭据 JSON。DB 默认 `~/.tether/tether.sqlite3`，必须 0600 且放在私有目录（不能放 `/tmp`）。启动时会把旧的 `~/.tether/wechat/<id>.json` + `.state.json` 导入并删除。
 - **地址**：API 基址用登录返回的 `baseurl`（默认 `https://ilinkai.weixin.qq.com`）；CDN `https://novac2c.cdn.weixin.qq.com/c2c`；`bot_type=3`。
 - **登录窗口**：`waitForWeixinLogin` 超时 **8 分钟**（480s）。
 - **失效 / 重登**：服务端 `errcode = -14`（token 失效）→ 参考实现把该账号**冻结 1 小时**；Tether 应视其为"需重登"，支持随时再扫。
 - **扫哪个号，哪个号就是 bot** → **务必用专门的小号**。
 
-## 登录 UX（提案）
+## 登录 UX（已实现）
 
-- **A. CLI**：`tether login wechat` → 终端打印 **ASCII** 二维码（可选存 PNG）+ 轮询 8 分钟 → 写 `cred_path`；`tether serve` 只读 token。
-- **B. 已连接的 IM 内（推荐，headless/远程）**：**admin** 在**单聊**发 `/login wechat` → 桥 `get_bot_qrcode` → 渲染二维码**图片**回该单聊 → 用小号微信扫 → 桥轮询 `confirmed` → 写 `cred_path` + 回执。
+- **唯一入口：已连接的 IM 内**。在 `login_via` 映射的**单聊**里发 `/login wechat`（**无参数**）→ 桥按 `(渠道, 发送者 id)` 找到 bot → 二维码图片回该单聊 → 扫码 → `confirmed` → 写入 DB + 回执；若该 bot `enabled=true`，**立即只重启该 bot 的长轮询**（`enabled=false` 只预登录、不启动）。`login_via` 本身就是登录授权，不要求 `access.admins`；至少一个映射渠道必须启用（否则启动校验失败，没有 CLI 兜底）；同一 bot 同一时间只允许一个待扫码登录。**没有 CLI 登录**。
   - **绝不放群**（二维码=登录凭据，群里谁都能绑）。
-- **C.（可选）本地页**：admin 端口挂 `/wechat-login` 显示二维码（SSH 隧道扫）。
-- token 失效（`-14`）时，**同一入口随时可再触发**。
+- **换绑**：先停 bridge，删除 SQLite 中该 bot 的 `wechat_accounts` / `wechat_state` / `wechat_context_tokens` 行，再启动并 `/login`；目前没有 in-chat unbind 命令。
+- **登录准入**：扫码确认的 `ilink_bot_id`：① 该 bot 尚未绑定 → 允许首次绑定；② 与已绑定 id 相同 → 允许重登；③ 已绑定另一个 id → **拒绝**，需先清除绑定；④ 该 id 已绑定另一个 bot → **拒绝**。拒绝不写入 token（`wechat_login_rejected`）。
+- token 失效（`-14`）时，**只停该 bot 的长轮询**（标记 `login_required`，其余 bot 继续），通过**同一入口**重新扫码即可。
+- **单实例约束**：同一 `ilink_bot_id` 只能绑定一个 bot；两个 `getUpdates` 循环会拆分事件流，启动校验直接报错。
 
 ## 能力小结（对齐 Tether 的 `Capabilities`）
 
 | 维度 | 结论 | 依据 |
 |---|---|---|
+| **身份来源** | **不暴露**（备注名/昵称是客户端本地数据；需配置 `name`/identity） | 源码无 `whoami`/nickname/profile API |
 | markdown | **NONE** | 仅 `text_item` |
 | 代码块 / 表格 / 标题 / 内联图 | ✖ | 无富文本 |
 | 编辑消息 | ✖ | 无按 `message_id` 编辑 |

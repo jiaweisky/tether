@@ -35,11 +35,17 @@ class Conversation:
     name: str | None = None
     thread: str | None = None
     tenant: str | None = None
+    account: str | None = None
 
     @property
     def key(self) -> str:
-        """Stable identity used to map a conversation to one agent session."""
-        return f"{self.channel}:{self.kind}:{self.tenant}:{self.id}:{self.thread}"
+        """Stable identity used to map a conversation to one agent session.
+
+        Multi-account channels include the account in the source segment
+        (``wechat@assistant:...``); the legacy single-account form is unchanged.
+        """
+        source = f"{self.channel}@{self.account}" if self.account else self.channel
+        return f"{source}:{self.kind}:{self.tenant}:{self.id}:{self.thread}"
 
     @property
     def is_group(self) -> bool:

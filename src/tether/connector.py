@@ -36,7 +36,11 @@ class Unsupported(Exception):
 @runtime_checkable
 class IMConnector(Protocol):
     name: str
+    account: str | None
     capabilities: Capabilities
+
+    @property
+    def instance_id(self) -> str: ...
 
     async def start(self, emit: Emit) -> None: ...
     async def stop(self) -> None: ...
@@ -86,12 +90,13 @@ def known_connectors() -> list[str]:
     return sorted(_REGISTRY)
 
 
-def build_connectors(config: Any) -> list[IMConnector]:
+def build_connectors(config: Any, store: Any = None) -> list[IMConnector]:
     """Instantiate every enabled connector declared in ``config.channels``.
 
     Connectors are imported lazily so the core carries no hard dependency on any
-    platform SDK.
+    platform SDK. ``store`` is the route store, used by multi-account channels
+    for account-binding records.
     """
     from .connectors import build_enabled
 
-    return build_enabled(config)
+    return build_enabled(config, store=store)

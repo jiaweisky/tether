@@ -310,8 +310,16 @@ class Router:
         # Name/description resolve channel override > global config > platform.
         cfg = self.config.identity
         channel = self.config.channels.identity_for(route.conversation.channel)
-        name = channel.display_name or cfg.display_name or identity.name
-        description = channel.description or cfg.description or identity.description
+        account = self.config.channels.identity_for_account(
+            route.conversation.channel, route.conversation.account
+        )
+        name = account.display_name or channel.display_name or cfg.display_name or identity.name
+        description = (
+            account.description
+            or channel.description
+            or cfg.description
+            or identity.description
+        )
         if name != identity.name or description != identity.description:
             identity = BotIdentity(name=name, description=description, aliases=identity.aliases)
         if route.bot_name != identity.name or route.bot_description != identity.description:

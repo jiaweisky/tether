@@ -27,6 +27,7 @@
 | A3 | 心跳保活 | WS 心跳与 ACK | 有 / 无 | 连接器实现 | 应 |
 | A4 | 单实例约束 | 同一机器人只能有一条连接（否则丢事件） | 有 / 无 | 文档 + 运行约束 | 必须（声明） |
 | A5 | 健康上报 | 暴露传输是否在线 | `bool` / `None` | `IMConnector.connected` | 必须 |
+| A6 | 多账号 | 同一平台并行运行多个机器人账号（当前仅微信个人号） | 支持 / 单账号 | 每账号一个连接器实例；`Conversation.account` + `IMConnector.instance_id` | 可选 |
 
 ### B. 会话形态
 
@@ -138,11 +139,12 @@
 
 | 特性 | WeCom | Feishu | QQ (api-v2) | 微信个人号 |
 |---|---|---|---|---|
-| A1 连接 | WS 长连 | WS 长连 | WS 网关 + REST | 第三方 SDK |
-| A2 自愈 | ✔ 重试无限 | ✔ 重连无限 + 线程监督 | ✔（退避 + resume） | ? |
-| A3 心跳 | ✔（SDK） | ✔（SDK） | ✔ op1/op11 | ? |
-| A4 单实例 | ✔ | ✔（投递其一） | ✔ | ✔ |
-| A5 健康 | ✔ | ✔ | ✔ | ✔ |
+| A1 连接 | WS 长连 | WS 长连 | WS 网关 + REST | HTTP 长轮询（iLink Bot，thin client） |
+| A2 自愈 | ✔ 重试无限 | ✔ 重连无限 + 线程监督 | ✔（退避 + resume） | ✔ 每账号指数退避（`-14` 除外） |
+| A3 心跳 | ✔（SDK） | ✔（SDK） | ✔ op1/op11 | ✖（长轮询超时即返回） |
+| A4 单实例 | ✔ | ✔（投递其一） | ✔ | ✔（同一 `ilink_bot_id` 只允许一个槽位） |
+| A5 健康 | ✔ | ✔ | ✔ | ✔（按账号实例） |
+| A6 多账号 | ✖ 单账号 | ✖ 单账号 | ✖ 单账号 | ✔（每账号独立连接器/凭据/长轮询） |
 | B1 单聊 | ✔ always | ✔ | ✔ always | ✔ always |
 | B2 群聊 | ✔ mention_only | ✔ mention_only | ✔ mention_only | ✖（direct-only，写死） |
 | B5 频道 | ✖ | ✖ | ✔（guild 频道） | ✖ |
@@ -173,7 +175,7 @@
 | G1 出站媒体 | image/file/voice/video | image/file/audio/video | image/file/voice/video | image/video/file（无语音） |
 | G2 上传 | 分块 | API | URL / 分片 | CDN（AES-128-ECB） |
 | G3 超限/兜底 | ✔ 链接兜底 | ✔ 链接兜底 | ✔（软限降级为文件） | ? |
-| H1 身份来源 | 必须配置 | 平台 `bot/v3/info` | 平台 `READY d.user.username` | 昵称 |
+| H1 身份来源 | 必须配置 | 平台 `bot/v3/info` | 平台 `READY d.user.username` | 不暴露（备注名/昵称是客户端本地数据；需配置 `identity.display_name`） |
 | I1 主动推送 | ✔ | ✔ | ✔（配额/开关） | △（缺 `context_token` 仍发，未证） |
 | J1 本地限速 | 流式节流 | 流式节流 | ✔ 令牌桶 30/min | ? |
 | K1 输入中 | ✖ | ✖ | △ 平台有 `msg_type=6`（单聊；未接入，走占位） | ✔ |

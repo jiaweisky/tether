@@ -31,6 +31,12 @@ from .agent.events import (
 )
 from .config import Config, load_config, validate_startup
 from .connector import IMConnector, build_connectors
+from .connectors.wechat.login import (
+    WeChatLoginError,
+    WeChatLoginRejected,
+    WeChatVerifyCodeRequired,
+)
+from .connectors.wechat.migrate import migrate_legacy_wechat_files
 from .engine import hitl
 from .engine.commands import Command, help_text, parse_command, unescape_command
 from .engine.media_egress import MediaEgress, read_path_media, record_blocked
@@ -46,6 +52,7 @@ from .models import (
     InboundMessage,
     IncomingInteraction,
     IncomingItem,
+    MediaSegment,
     OutboundPlan,
     RichMedia,
     Route,
@@ -82,7 +89,7 @@ class TetherApp:
         self,
         config: Config,
         *,
-        db_path: str = "tether.sqlite3",
+        db_path: str = "~/.tether/tether.sqlite3",
         connectors: list[IMConnector] | None = None,
         client_factory: ClientFactory | None = None,
         config_path: str | None = None,
@@ -113,6 +120,7 @@ class TetherApp:
         self._config_task: asyncio.Task[None] | None = None
         self._connector_health_task: asyncio.Task[None] | None = None
         self._connector_down_since: dict[str, float] = {}
+        self._login_tasks: set[asyncio.Task[None]] = set()
         self._metrics_server: asyncio.AbstractServer | None = None
         self.metrics_port: int | None = None
         self._running = False
@@ -126,11 +134,13 @@ class TetherApp:
         validate_startup(self.config)
         await self.provider.preflight()
         await self.store.connect()
+        await migrate_legacy_wechat_files(self.config, self.store)
         built = self._connectors_override
         if built is None:
-            built = build_connectors(self.config)
+            built = build_connectors(self.config, store=self.store)
         for connector in built:
-            self.connectors[connector.name] = connector
+            key = getattr(connector, "instance_id", None) or connector.name
+            self.connectors[key] = connector
         if not self.connectors:
             log.warning("no_connectors_enabled")
         for connector in self.connectors.values():
@@ -199,6 +209,12 @@ class TetherApp:
                 else:
                     await engine.pause()
         log.info("stop_turns_closed", elapsed_ms=_ms_since(started))
+        login_tasks = list(self._login_tasks)
+        for task in login_tasks:
+            task.cancel()
+        for task in login_tasks:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
         for connector in self.connectors.values():
             with contextlib.suppress(Exception):
                 await connector.stop()
@@ -254,6 +270,11 @@ class TetherApp:
                 await self._stop_sse(base)
 
     # -- inbound -----------------------------------------------------------
+    def _connector_for(self, channel: str, account: str | None) -> IMConnector | None:
+        """Look up a connector instance (multi-account channels include account)."""
+        key = f"{channel}@{account}" if account else channel
+        return self.connectors.get(key)
+
     async def _on_item(self, item: IncomingItem) -> None:
         if not self._accepting:
             return
@@ -276,7 +297,7 @@ class TetherApp:
             log.info("duplicate_message", key=key)
             return
         metrics.inc("inbound_messages")
-        connector = self.connectors.get(msg.channel)
+        connector = self._connector_for(msg.channel, msg.conversation.account)
         if connector is None:
             return
         text, escaped = unescape_command(msg.text, self.config.commands.prefix)
@@ -333,6 +354,8 @@ class TetherApp:
             await self._handle_send(msg, connector, command.args)
         elif command.kind == "config":
             await self._handle_config(msg, connector, command.args)
+        elif command.kind == "login":
+            await self._handle_login(msg, connector, command.args)
         elif command.kind == "help":
             await self._notice(
                 connector, msg.conversation, help_text(self.config.commands.prefix)
@@ -418,7 +441,7 @@ class TetherApp:
         return max(0, len(queue) - running)
 
     async def _on_interaction(self, item: IncomingInteraction) -> None:
-        connector = self.connectors.get(item.conversation.channel)
+        connector = self._connector_for(item.conversation.channel, item.conversation.account)
         if connector is None:
             return
         value = hitl.decode_value(item.value)
@@ -488,7 +511,7 @@ class TetherApp:
                 await client.reply_question(sid, rid, [list(value.get("answer") or [])])
 
     def _attach_resumed_engine(self, sid: str, route: Route) -> None:
-        connector = self.connectors.get(route.conversation.channel)
+        connector = self._connector_for(route.conversation.channel, route.conversation.account)
         if connector is None:
             return
         inbound = InboundMessage(
@@ -650,7 +673,7 @@ class TetherApp:
         Only configured admins may run it; the project/view is left untouched.
         """
         conv = msg.conversation
-        if msg.sender.id not in self.config.group.admins:
+        if msg.sender.id not in self.config.admins_for(conv.channel, conv.account):
             await self._notice(
                 connector, conv, "🔒 Only admins can start a new conversation."
             )
@@ -683,6 +706,104 @@ class TetherApp:
             return
         await self._notice(connector, route.conversation, "🆕 Started a new conversation.")
 
+    async def _handle_login(
+        self, msg: InboundMessage, connector: IMConnector, args: str
+    ) -> None:
+        """`/login wechat`: start a QR login for the bot mapped to this sender."""
+        conv = msg.conversation
+        if conv.is_group:
+            await self._notice(connector, conv, "🔒 `/login` is available in a direct chat only.")
+            return
+        if args.split() != ["wechat"]:
+            await self._notice(
+                connector,
+                conv,
+                f"Usage: `{self.config.commands.prefix}login wechat`",
+            )
+            return
+        bot = self.config.channels.wechat.bot_for_login(conv.channel, msg.sender.id)
+        if bot is None:
+            await self._notice(
+                connector,
+                conv,
+                "🔒 You are not allowed to log in a WeChat bot from this channel.",
+            )
+            return
+        target = self.connectors.get(bot.instance_id)
+        if target is None:
+            await self._notice(connector, conv, "ℹ️ That WeChat bot is not configured.")
+            return
+        login = getattr(target, "login", None)
+        if not callable(login):
+            await self._notice(connector, conv, "⚠️ This connector cannot log in.")
+            return
+        task = asyncio.create_task(
+            self._run_wechat_login(target, login, connector, conv)
+        )
+        self._login_tasks.add(task)
+        task.add_done_callback(self._login_tasks.discard)
+
+    async def _run_wechat_login(
+        self,
+        target: IMConnector,
+        login: Any,
+        connector: IMConnector,
+        conv: Conversation,
+    ) -> None:
+        async def on_qr(png: bytes | None, content: str) -> None:
+            if png:
+                try:
+                    await connector.send(
+                        conv,
+                        OutboundPlan(
+                            segments=[
+                                MediaSegment(
+                                    media=RichMedia(
+                                        kind="image",
+                                        data=png,
+                                        mime="image/png",
+                                        name="wechat-login.png",
+                                    )
+                                )
+                            ]
+                        ),
+                    )
+                    return
+                except Exception:  # noqa: BLE001 - fall back to the raw QR content
+                    log.warning("wechat_login_qr_image_failed", exc_info=True)
+            await self._notice(
+                connector, conv, "Scan this QR content with WeChat:\n" + content
+            )
+
+        try:
+            credential = await login(on_qr=on_qr)
+        except WeChatLoginRejected as exc:
+            await self._notice(
+                connector,
+                conv,
+                f"❌ Login rejected: {exc.reason}\nplatform id: `{exc.bot_id or '?'}`",
+            )
+        except WeChatVerifyCodeRequired:
+            await self._notice(
+                connector,
+                conv,
+                "⚠️ This login needs a verification code, which the in-chat flow "
+                "cannot collect; try again with another WeChat account or later.",
+            )
+        except WeChatLoginError as exc:
+            await self._notice(connector, conv, f"⚠️ Login failed: {exc}")
+        except Exception:  # noqa: BLE001 - a login task must never kill the app
+            log.exception("wechat_login_failed")
+            await self._notice(connector, conv, "⚠️ Login failed; please try again.")
+        else:
+            label = getattr(target, "account", None) or "default"
+            await self._notice(
+                connector,
+                conv,
+                f"✅ WeChat bot `{label}` logged in"
+                + (f" (`{credential.bot_id}`)" if credential.bot_id else ""),
+            )
+
     async def _handle_send(
         self, msg: InboundMessage, connector: IMConnector, args: str
     ) -> None:
@@ -714,7 +835,7 @@ class TetherApp:
         if conv.is_group:
             await self._notice(connector, conv, "🔒 `/config` is available in a direct chat only.")
             return
-        if msg.sender.id not in self.config.group.admins:
+        if msg.sender.id not in self.config.admins_for(conv.channel, conv.account):
             await self._notice(connector, conv, "🔒 Only admins can view the configuration.")
             return
         option = args.strip()
@@ -784,6 +905,34 @@ class TetherApp:
             return
         for name in _RUNTIME_SECTIONS:
             setattr(self.config, name, getattr(updated, name))
+        # WeChat bot identity and login_via are safe to hot-apply;
+        # the bot list / enabled still needs a restart.
+        for connector in self.connectors.values():
+            if connector.name != "wechat":
+                continue
+            account = getattr(connector, "account", None)
+            spec = (
+                updated.channels.wechat.spec_for(account)
+                if isinstance(account, str)
+                else None
+            )
+            apply = getattr(connector, "apply_bot_policy", None)
+            if spec is not None and callable(apply):
+                apply(spec)
+                updated_bot = next(
+                    (
+                        bot
+                        for bot in updated.channels.wechat.bots
+                        if bot.id == account
+                    ),
+                    None,
+                )
+                if updated_bot is not None:
+                    for current in self.config.channels.wechat.bots:
+                        if current.id == account:
+                            current.identity = updated_bot.identity
+                            current.login_via = updated_bot.login_via
+                            break
         log.info("config_reloaded")
 
     async def _maybe_answer_pending(
@@ -974,7 +1123,7 @@ class TetherApp:
             log.info("reconcile_turn_seeded", session=sid, chars=len(text or ""))
             return
         # No live engine (e.g. bridge restarted mid-turn): surface what we have.
-        connector = self.connectors.get(route.conversation.channel)
+        connector = self._connector_for(route.conversation.channel, route.conversation.account)
         if connector is not None and text:
             await self._notice(connector, route.conversation, text)
 
@@ -997,7 +1146,7 @@ class TetherApp:
                 perm.id,
                 options=["once", "always", "reject"],
             )
-            connector = self.connectors.get(route.conversation.channel)
+            connector = self._connector_for(route.conversation.channel, route.conversation.account)
             if connector is not None:
                 card = hitl.permission_card(perm)
                 if connector.capabilities.buttons:
@@ -1013,7 +1162,7 @@ class TetherApp:
                 continue
             text, options = hitl.question_numbered_text(question)
             await self._register_pending(route, "question", question.id, options=options)
-            connector = self.connectors.get(route.conversation.channel)
+            connector = self._connector_for(route.conversation.channel, route.conversation.account)
             if connector is not None:
                 qcard = hitl.question_card(question)
                 if qcard is not None and connector.capabilities.buttons:
@@ -1140,7 +1289,8 @@ class TetherApp:
             state = connector.connected
             if state is None:
                 continue
-            metrics.set(f"connector_connected_{name}", 1.0 if state else 0.0)
+            metric_name = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in name)
+            metrics.set(f"connector_connected_{metric_name}", 1.0 if state else 0.0)
             if state:
                 self._connector_down_since.pop(name, None)
                 continue
@@ -1341,11 +1491,16 @@ def _config_chunks(dump: str, limit: int) -> list[str]:
 
 def _connectors_line(connectors: dict[str, Any]) -> str:
     """A one-line summary of each connector's transport state (for ``/status``)."""
-    parts = [f"{name}={_conn_state(c.connected)}" for name, c in sorted(connectors.items())]
+    parts = [
+        f"{name}={_conn_state(getattr(c, 'state', None) or c.connected)}"
+        for name, c in sorted(connectors.items())
+    ]
     return "connectors: " + " ".join(parts)
 
 
-def _conn_state(state: bool | None) -> str:
+def _conn_state(state: bool | str | None) -> str:
+    if isinstance(state, str):
+        return state
     if state is None:
         return "?"
     return "up" if state else "down"

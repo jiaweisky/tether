@@ -137,6 +137,14 @@
 | 2026-10-16 | §5.4 + `docs/REF-WECHAT-ILINK-BOT.md` (new **凭据与登录** section): documented the WeChat **login UX** — **no app key to request**; the credential is a **`bot_token` from a QR login** on the personal account that will act as the bot (**use a spare account**). Entry points: **CLI** `tether login wechat` (terminal QR + ~8 min poll) and an **admin `/login wechat` in a direct chat** (the bridge replies with the QR **image**; never a group — the QR is a login credential). Token can go stale (`errcode -14` → the reference plugin pauses the account 1 h), so re-login on demand through the same entry. |
 | 2026-10-16 | §5.3 (QQ / api-v2): **gateway reconnect hardening** — a transient drop now **resumes** (`op 6`) whenever a session exists, so the gateway replays missed events (previously only close code `4009` resumed; a normal `1006` / generic transport error dropped the session and identified fresh). Non-retryable close codes (`4001`/`4002`/`4010–4014`/`4914`/`4915`) are **fatal** instead of retried forever; `op 9 Invalid Session` now reconnects with a fresh identify; a gateway that stops answering heartbeats is detected and reconnected; and the backoff only resets after a connection has been stable for 30 s. |
 | 2026-10-16 | §3.3/§5.3/§7.7/§2.6/§12/§14 M4: **QQ re-planned on the api-v2 spec as a thin client — the `qq-botpy` dependency is dropped**. The official SDKs (`botpy`/`botgo`/`bot-node-sdk`) are stale (last code activity 2023‑11…2024‑12) and the platform calls them *"接入参考"*; the spec is authoritative. §5.3 now documents the concrete protocol (Access Token `getAppAccessToken`; WS gateway opcodes 0/1/2/6/9/10/11, Identify/Heartbeat/Resume, intents `GROUP_AND_C2C_EVENT (1<<25)` / `INTERACTION (1<<26)`, sharding, error-code reconnect policy; REST send with passive `msg_id`+`msg_seq` windows and proactive quotas; `msg_type` 0/2/6/7; rich-media upload → `file_info`; recall ≤2 min) and corrected the capability/identity/media rows — QQ carries native voice **`asr_refer_text`**, supports markdown (`msg_type=2`) and a C2C `stream_messages` endpoint. `pyproject`'s `qq` extra is removed (httpx is core). |
+| 2026-10-17 | §5.4/§14 M5 status corrected: **QR login, inbound text/image and outbound text were verified on a real personal WeChat account**. Remaining §13.1 items: outbound video/file, voice handling, typing, `-14` recovery, two-bot concurrency, and the bare `login_via` command. |
+| 2026-10-17 | §2.6 identity table corrected: personal WeChat exposes **neither the bot nickname nor remark names** (both are client-local); the iLink API returns only `ilink_bot_id`/`ilink_user_id`/`bot_token`. A human-readable bot name must be configured (`name`/identity); it does not change WeChat profile data. |
+| 2026-10-17 | §2.5/§4.6/§6.6/§9/§15: added **per-channel/account admin lists** under `access.admins` (`wecom`/`feishu`/`qq` + `wechat.<slot>`); resolution is account/channel override → `group.admins` fallback, with `[]` meaning explicitly no admins. HITL, `/stop`, `/new`, `/config` and `/login` now resolve admins per conversation; `access` is hot-reloadable. |
+| 2026-10-17 | **WeChat runtime state moved to SQLite**: `wechat_accounts` now holds `token`/`base_url`/`user_id` in addition to the binding; added `wechat_state` (cursor) and `wechat_context_tokens`; removed credential/state JSON files (one-time import + delete from `~/.tether/wechat/*.json`). The default DB is `~/.tether/tether.sqlite3` and is now a **secret** (0600, private dir). Removed the login/unbind CLI; `/login wechat` is the only login entry point. |
+| 2026-10-17 | **WeChat config simplified to B**: replaced `accounts[]` + all login switches (`login.enabled/allow/allow_admin_new`, `bots[].login`) with `bots[]` (`id`, required `identity.display_name`, `enabled`, `cred_path`, `login_via[]`). Bare `/login wechat` resolves `(channel,sender)` → bot via `login_via`; the same mapping may not point at two bots. First bind is allowed; same `ilink_bot_id` re-login; a different bound id is rejected until local `tether wechat unbind <id>`; duplicate ids across bots rejected. CLI is `tether login wechat --bot <id>`; no `--allow-new`/`--force`. `login_via`/identity are hot-reloadable. |
+| 2026-10-17 | §5.4/§9/§15: added `channels.wechat.login.allow_admin_new` (default `false`) — an explicit opt-in that lets an **admin's in-chat `/login`** perform a first bind, equivalent to CLI `--allow-new`; the default remains deny-new-in-chat. |
+| 2026-10-17 | **Implemented** the WeChat personal connector: iLink thin client (QR login, long-poll, AES-128-ECB CDN media, typing), direct-only text/image/video/file, multi-account slots, default-deny login admission, binding records in SQLite, CLI `tether login wechat`, and in-chat `/login wechat`. Unit/contract tests cover config, protocol, media, admission and app routing. |
+| 2026-10-17 | §2.5/§2.6/§2.7/§2.8/§3.1/§3.2/§3.6/§5.4/§6.6/§8/§9/§10/§11/§13/§14/§15: **WeChat multi-account** — one WeChat channel may now run several logged-in accounts. Each account is a **connector instance** with an `account` dimension in `Conversation.key`, its own `cred_path`, token-independent binding record, long-poll cursor, `context_token` cache, identity and failure state. Login is per account (`tether login wechat --account <id>` / `/login wechat <id>`, admin + direct chat only). Login admission is **default-deny** for new bindings: a scan completes only if the returned `ilink_bot_id` is already bound to the target slot (re-login) or listed in `login.allow`; the first bind needs CLI `--allow-new` or a pre-added id. Login controls: `channels.wechat.accounts[].login`, global `login.enabled`, and the `login.allow` allowlist; `accounts[].enabled` only decides whether the account runs. An expired token (`errcode -14`) takes down only that account (`login_required`); duplicate `ilink_bot_id`s are rejected at startup; login policy is hot-reloadable while the account list/credentials still need a restart. The legacy single-account `cred_path` remains a shorthand for one implicit account whose `Conversation.key` is unchanged. |
 
 ---
 
@@ -227,6 +235,7 @@ There are also several requirement-driven **supporting designs**: bot identity s
 |---|---|
 | **Connector** | An adapter that integrates with one IM platform, encapsulating that platform SDK's connection, send/receive, media, and card capabilities. |
 | **Conversation** | A message context in an IM, `kind ∈ {direct, group, channel}` (`channel` is treated the same as `group`) + `id` (direct/group/channel ID). |
+| **Account** | A platform bot identity inside a multi-account channel (currently WeChat personal, §5.4). It is an independent connector instance with its own credentials, long-poll and identity; it appears as `Conversation.account` and is part of `Conversation.key`, so accounts never share a Route/session. |
 | **Tenant** | A dimension marker for a deployment/source (`Conversation.tenant`, nullable). Tether **does not do SaaS tenancy**, but uses it to distinguish different sources under the same instance; for **isolation between conversations/groups**, see §2.8/§2.9 (§1.4). |
 | **Agent Session** | go-agent-sdk's `session`, created by `POST /api/session`, with an `id` (`ses_…`). |
 | **Turn** | The complete process of one prompt → model/tool execution → idle. |
@@ -311,7 +320,7 @@ User C ┘
 ```
 
 **One IM conversation (group) = one agent session**: the mapping key = `Conversation.key`
-(channel+kind+tenant+id+thread). Multiple users share the same context, so group chat needs to handle four semantics:
+(channel[@account]+kind+tenant+id+thread). Multiple users share the same context, so group chat needs to handle four semantics:
 
 **(1) Speaker identity injection**
 
@@ -339,11 +348,11 @@ and by default does not know who said it. The bridge therefore injects a speaker
 
 - **Depends on platform data** (§3.3): authorization decisions need "**who clicked / who said it**" (`callback_actor_identity`, which mainstream platforms
   all provide) ⇒ `initiator` / `participants` can be implemented; "**is a group admin**" is **not provided** by most platforms
-  (`member_roles`) ⇒ the `admins` tier falls back to the configured `group.admins` allowlist (or degrades to `initiator`).
+  (`member_roles`) ⇒ the `admins` tier falls back to the configured admins (`access.admins` per channel/account, else `group.admins`; or it degrades to `initiator`).
 - **HITL `group.hitl_scope`**: `initiator` (default, only that turn's initiator) / `participants` (any group member) /
   `admins` (**configured admins**, not a platform role). A click by an unauthorized person is **ignored with a reply hint**, and produces no side effect
   (to prevent others from approving dangerous operations on the initiator's behalf).
-- **Commands** (handled locally by the bridge, never forwarded; a message is a command only when it is *exactly* `<prefix><name>` after an optional leading `@` mention — see §6.6): `/stop` cancels the current turn; `/new` starts a fresh agent session for the conversation (interrupt, drop queued turns, delete + recreate the agentd session; the project/view is untouched); `/whoami` replies with the sender's platform id (to discover an id to add as admin); `/status` replies with a read-only snapshot (session/agent/model, context usage, project mode + working dir, agentd base + version/pid via `GET /api/info`, turn state, queued turns, pending interactions, uptime) — redacted in a group (no agentd base / working dir, short session id); `/send <path>` delivers one file on demand (joined to the project dir when relative, then gated by `media.outbound.patterns`, §7.3); `/config` shows the configuration (**admin-only, direct chat only**): by default the current **agentd server** (`/api/info` + `/api/config?section=servers`), with `--all` adding the redacted bridge config and the full agentd config; `/help` lists the commands. Because matching is exact, `/stop now` and `/status of the build` are **forwarded to the model**, not redirected; to send a literal command as text, **double the prefix** (`//help` → `/help`). `/stop` in a group defaults to **only that turn's initiator** (`command_scope: initiator`, configurable to `admins`); `/new` is **admin-only** (`group.admins`). **Admins are a superset**: a configured admin may always run a command. Every outcome replies with a short readable notice (nothing is silently swallowed).
+- **Commands** (handled locally by the bridge, never forwarded; a message is a command only when it is *exactly* `<prefix><name>` after an optional leading `@` mention — see §6.6): `/stop` cancels the current turn; `/new` starts a fresh agent session for the conversation (interrupt, drop queued turns, delete + recreate the agentd session; the project/view is untouched); `/whoami` replies with the sender's platform id (to discover an id to add as admin); `/status` replies with a read-only snapshot (session/agent/model, context usage, project mode + working dir, agentd base + version/pid via `GET /api/info`, turn state, queued turns, pending interactions, uptime) — redacted in a group (no agentd base / working dir, short session id); `/send <path>` delivers one file on demand (joined to the project dir when relative, then gated by `media.outbound.patterns`, §7.3); `/config` shows the configuration (**admin-only, direct chat only**): by default the current **agentd server** (`/api/info` + `/api/config?section=servers`), with `--all` adding the redacted bridge config and the full agentd config; `/login wechat` starts a QR login for the bot mapped to the sender by `login_via` (**direct chat only**, §5.4); `/help` lists the commands. Because matching is exact, `/stop now` and `/status of the build` are **forwarded to the model**, not redirected; to send a literal command as text, **double the prefix** (`//help` → `/help`). `/stop` in a group defaults to **only that turn's initiator** (`command_scope: initiator`, configurable to `admins`); `/new` is **admin-only** (configured admins: `access.admins` per channel/account, else `group.admins`). **Admins are a superset**: a configured admin may always run a command. Every outcome replies with a short readable notice (nothing is silently swallowed).
 
 **(4) Context and cost**
 
@@ -369,7 +378,8 @@ and by default does not know who said it. The bridge therefore injects a speaker
 - WeCom: direct chat by `userid`; group chat by `chatid` (in a group, usually only messages that @ the bot arrive).
 - Feishu: p2p / group; a topic group's thread is part of the conversation key.
 - QQ: three entry points c2c (friend) / group (group) / channel (channel), mapping to `direct` / `group` respectively.
-- Personal WeChat: mainly direct chat; group capabilities are limited, so it degrades according to `Capabilities`.
+- Personal WeChat: **direct-only** — the reference plugin hardcodes `ChatType: "direct"` and group routing is
+  unimplemented (`Capabilities.groups=false`); there is no group deployment to degrade from.
 
 ### 2.6 Bot Identity Synchronization (name + description → agent)
 
@@ -387,9 +397,9 @@ context, so that **the bot's external identity and the agent's self-perception a
 | WeCom | not provided (the callback carries only `aibotid`) | not provided | **required** |
 | Feishu | `GET /open-apis/bot/v3/info` → `app_name` | application info `description` | optional |
 | QQ (api-v2) | `d.user.username` (from the WebSocket `READY` event) | not provided | optional |
-| Personal WeChat | logged-in account nickname (`whoami`) | signature (best-effort) | optional |
+| Personal WeChat | **not exposed** — the remark name/nickname are client-local, and the iLink API returns no profile | **not exposed** | per-bot `identity.display_name` (required) |
 
-**Rule**: name/description resolve in this order — **per-channel `channels.<name>.identity`** → **global `identity`** default → **the platform's own values**. The identity is per-channel because one bridge process serves several bots with different platform names and different exposure (Feishu exposes `app_name`, WeCom exposes nothing). **WeCom exposes neither the name nor the description, so both are mandatory when WeCom is enabled** — supplied at either level (`channels.wecom.identity` or the global `identity`), and startup validation fails if neither provides them. The name is **never** inferred from message text (e.g. an inline `@name`) — that is fragile and was explicitly rejected.
+**Rule**: name/description resolve in this order — **per-bot `channels.wechat.bots[].identity`** (WeChat; no channel-level WeChat identity, §5.4) → **per-channel `channels.<name>.identity`** → **global `identity`** default → **the platform's own values**. The identity is per-channel (and per-account where several bots share a channel) because one bridge process serves several bots with different platform names and different exposure (Feishu exposes `app_name`, WeCom exposes nothing). **WeCom exposes neither the name nor the description, so both are mandatory when WeCom is enabled** — supplied at either level (`channels.wecom.identity` or the global `identity`), and startup validation fails if neither provides them. The name is **never** inferred from message text (e.g. an inline `@name`) — that is fragile and was explicitly rejected.
 
 **Alignment with the agent's own identity**: `GET /api/agent` returns each agent's `description` (from the agent's
 markdown's `description` frontmatter). The bridge puts both the "IM bot identity" and the "current agent identity" into the context,
@@ -437,8 +447,11 @@ participants: Alice, Bob            # optional, only when sync_participants
 
 | IM scenario | Maps to agent | Identity injection |
 |---|---|---|
-| Direct message (1 user ↔ bot) | One DM = one session | bot name + description (optional) |
-| Group chat (N users ↔ bot) | **One conversation** (key = conversation identifier, including thread) = one session | bot name + description + per-speaker label |
+| Direct message (1 user ↔ bot) | One DM = one session (on a multi-account channel: one DM **per account**) | bot name + description (optional) |
+| Group chat (N users ↔ bot) | **One conversation** (key = conversation identifier, including account/thread) = one session | bot name + description + per-speaker label |
+
+> The account is part of the conversation identifier (`Conversation.key`), so the **same peer on two accounts is two
+> sessions**; it is not a per-user split (§2.5, §5.4).
 
 ### 2.8 Project sharing vs isolation
 
@@ -452,6 +465,9 @@ the same **filesystem** is a single, explicit deployment choice — **`projects.
 |---|---|
 | `shared` (default) | every conversation uses the **same** project instance(s): they read/write the same working directory. Safe for a single owner / trusted set; writable changes land directly in the source project. |
 | `isolated` | every conversation leases its **own view** (worktree / overlay / copy) of the source project, created and destroyed on demand through agentd's control API. Cross-conversation file effects are impossible; a view is **ephemeral** (torn down on release) and a change does **not** flow back to the source. |
+
+> Multi-account channels (§5.4) are still just conversations: `shared` spans **all accounts**, while `isolated`
+> separates them because the lease is keyed by `Conversation` (whose key includes the account).
 
 > An earlier revision derived the policy from the agent's read/write tool set (read-only ⇒ share, writable ⇒
 > isolate, plus `on_conflict` / switch guards). That double axis (`shared|isolated` × `read-only|writable`) is
@@ -652,8 +668,12 @@ The two solve problems at **different layers** and cannot substitute for each ot
 
 ```python
 class IMConnector(Protocol):
-    name: str  # "wecom" | "feishu" | "qq" | "wechat"
+    name: str  # platform name: "wecom" | "feishu" | "qq" | "wechat"
+    account: str | None  # multi-account channels: bot instance id (§5.4), else None
     capabilities: Capabilities  # §3.3, drives rendering and degradation
+
+    @property
+    def instance_id(self) -> str: ...  # "wechat@assistant" when account is set, else name
 
     # Lifecycle: the connector "emits" inbound items to the upstream (messages / card interactions / platform events, see §3.2)
     async def start(self, emit: Callable[[IncomingItem], Awaitable[None]]) -> None: ...
@@ -682,6 +702,11 @@ class IMConnector(Protocol):
     ) -> ConversationInfo: ...  # group name/members (optional)
 ```
 
+- **One connector instance per account** on multi-account channels (§5.4). `instance_id` is the registry key and the
+  health/metric label; `Conversation.account` selects the instance, so the same platform can run several bots
+  side by side without sharing routes, cursors or credentials. Every inbound item is **stamped by its instance**
+  (`Conversation.account`; `InboundMessage.channel` stays the platform name), and the app routes by
+  `(channel, account)`.
 - The connector is responsible only for **platform SDK details**: connection/reconnection/heartbeat, event parsing, AES decryption, media upload,
   card structures, rate limiting.
 - The connector does **not** do session mapping, prompt assembly, Markdown rendering, or HITL decisions (all in the core layer).
@@ -692,15 +717,19 @@ class IMConnector(Protocol):
 ```python
 @dataclass(frozen=True)
 class Conversation:
-    channel: str  # connector name
+    channel: str  # platform name
     kind: Literal["direct", "group", "channel"]
     id: str  # chatid / open_chat_id / group_openid / channel_id
     name: str | None = None  # group/conversation display name (§2.6, nullable)
     thread: str | None = None  # optional: topic/sub-thread
     tenant: str | None = None  # optional: origin/deployment dimension (§2.1 Tenant)
+    account: str | None = None  # optional: bot instance id on multi-account channels (§5.4)
 
     @property
-    def key(self) -> str: ...  # stable unique key: f"{channel}:{kind}:{tenant}:{id}:{thread}"
+    def key(self) -> str:
+        # account-scoped: f"{channel}@{account}:{kind}:{tenant}:{id}:{thread}"
+        # single-account (account=None): the legacy f"{channel}:{kind}:{tenant}:{id}:{thread}"
+        ...
 
 
 @dataclass(frozen=True)
@@ -863,7 +892,7 @@ class Capabilities:
 > **Authorization data availability** (determines the `hitl_scope` / `command_scope` tier of §2.5(3)): **clicker/sender identity**
 > is provided by mainstream platforms (`callback_actor_identity: true`), enabling `initiator` / `participants`;
 > **group member roles (owner/admin)** are **not provided** by most platforms (`member_roles: false`), so the `admins` tier falls back to the configured
-> `group.admins` allow-list (or is downgraded to `initiator`). Whether Feishu can obtain roles via an extra API is **pending integration testing**.
+> configured admin list (`access.admins` per channel/account, else `group.admins`; or it is downgraded to `initiator`). Whether Feishu can obtain roles via an extra API is **pending integration testing**.
 
 **Authorization data (preliminary assessment; `pending integration testing` items are back-filled after verification per §13.1):**
 
@@ -1010,10 +1039,14 @@ class PendingInteraction:
     scope: str = "initiator"      # initiator | participants | admins (§2.5(3) / group.hitl_scope)
     options: list[str] = field(default_factory=list)  # numbered fallback for channels without buttons (§4.6)
 
-- **Mapping key** = `Conversation.key` (channel+kind+tenant+id+thread). **One IM conversation = one Route =
-  one agent session**; direct chat is likewise one conversation one session (no per-user splitting).
+- **Mapping key** = `Conversation.key` (channel[@account]+kind+tenant+id+thread). **One IM conversation = one Route =
+  one agent session**; direct chat is likewise one conversation one session (no per-user splitting). The optional
+  `channel@account` prefix keeps multi-account bots' conversations separate.
 - Storage: SQLite (`aiosqlite`), table `routes` (primary key `Conversation.key`), with a **unique index** on `session_id`
   — SSE events and HITL reconciliation are both looked up in reverse by `sessionID` (§4.3/§8.3); this guarantees conversations are not lost after a bridge restart.
+- WeChat runtime state lives in `wechat_accounts` (binding + token), `wechat_state` (cursor) and
+  `wechat_context_tokens` (per-peer reply tokens; §5.4). The route key already carries the bot id, so no
+  route-schema change is needed.
 - One Route corresponds to one agentd session; on the SDK side this is naturally "serial within the same conversation" — this is exactly the basis for queueing
   multi-user messages in a group chat in arrival order (§2.5(2)).
 - **Project ownership** (§2.8): `projects.mode` decides the mapping — `shared` gives every conversation the same
@@ -1271,7 +1304,7 @@ permission.v2.asked
 - **Question reply**: `POST …/question/{rid}/reply` body `{"answers": [[label,…], …]}` (one list of labels per question,
   in the order of `questions`); or `…/reject`. Multi-select (`multiple`) uses multi-button/multi-select cards.
 - **In-group authorization (§2.5(3))**: the card takes effect only when the **authorization rule** of `pending_interactions[rid]` allows it —
-  `scope=initiator`→only `owner`; `participants`→group members; `admins`→`group.admins`. Clicks by other members are
+  `scope=initiator`→only `owner`; `participants`→group members; `admins`→configured admins (per channel/account, else `group.admins`). Clicks by other members are
   **ignored with a one-line notice**, and never release a dangerous operation on behalf of the initiator. Direct chats are always the person themself.
 - **Timeout**: agentd's `interactionTimeout`/`interactionFallback` is the last line of defense; the bridge itself also sets
   `permissions.timeout_s`, and on timeout gives up by default (reject) and notifies the user.
@@ -1512,19 +1545,22 @@ a curated local mirror of its protocol lives at `docs/REF-WECHAT-ILINK-BOT.md`).
 `wechatbot.dev` (`corespeed-io/wechatbot`) is a **third-party reimplementation** of the same protocol,
 referenced only for its multi-language SDK notes — **not** the authority and **not** an official WeChat SDK.
 
-- **Login & transport**: **QR-code login** (credentials persisted locally), then **long-poll** delivery
-  (`getUpdates` with a `get_updates_buf` cursor — resumable), typing indicator (`sendTyping`), multi-account;
-  every media path is **AES-128-ECB**. **Single chat only** — the plugin hardcodes `ChatType: "direct"`
+> **Status: implemented; basic real-device verification done.** QR login, inbound text/image and outbound text were
+> exercised against a real personal WeChat account. The remaining §13.1 items (outbound video/file, voice handling,
+> typing, `-14` recovery, two-bot concurrency and the bare `login_via` command) are still pending device verification.
+
+- **Login & transport**: **QR-code login per account** (credentials persisted per account), then one **long-poll**
+  loop per account (`getUpdates` with its own `get_updates_buf` cursor — resumable), typing indicator (`sendTyping`),
+  **multi-bot** (below); every media path is **AES-128-ECB**. **Single chat only** — the plugin hardcodes `ChatType: "direct"`
   (group routing is unimplemented). `item_list` carries text / image / voice / file / video (item types
   1–5, plus `tool_call_*` 11–12) and a **quote** (`ref_msg`, with a local quote cache and a selected
   substring). `message_state` is `0` new / `1` generating / `2` done.
 - **Login UX (there is no app key to request)**: the credential is a **`bot_token` from a QR login** on the
-  **personal account that will act as the bot** (use a spare account). Two entry points: (1) **CLI**
-  `tether login wechat` — prints an ASCII/PNG QR in a terminal and polls for ~8 min, then writes `cred_path`;
-  (2) **inside an already-connected IM** — an **admin** sends `/login wechat` in a **direct chat**, and the
-  bridge replies with the QR **image** and polls (the QR is a login credential, so **never a group**). The token
-  can go **stale** (server `errcode -14`; the reference plugin pauses the account for an hour), so re-login must
-  be possible on demand through the same entry.
+  **personal account that will act as the bot** (use a spare account), stored per bot in SQLite. A sender listed
+  in `login_via` sends the bare `/login wechat` in a **direct chat**, and the bridge replies with the QR **image**
+  and polls (the QR is a login credential, so **never a group**). No name/id/key is typed. The token can go
+  **stale** (server `errcode -14`; the reference plugin pauses the account for an hour), so re-login must be
+  possible on demand through the same entry — **per bot**, without touching the others. There is no login CLI.
 - No Markdown, no buttons, no editing → `Capabilities` fully degraded: text purification, cards become numbered options,
   streaming degrades to "one-shot send".
 - **Compliance/stability (unverified — no official basis either way)**: `openclaw-weixin` is under Tencent's GitHub
@@ -1545,6 +1581,75 @@ referenced only for its multi-language SDK notes — **not** the authority and *
 - **Integration shape**: like QQ (§5.3), a **thin client over the documented protocol** (no third-party SDK
   dependency): QR login, long-poll, AES-128-ECB, send/media. The reference is `Tencent/openclaw-weixin`'s backend
   protocol document.
+
+**Multi-bot design**
+
+> Scope: this only multiplies **direct-chat** bots on one bridge. Personal WeChat remains **direct-only**
+> (`Capabilities.groups=false`; the reference plugin hardcodes `ChatType: "direct"`), so multi-bot does **not**
+> add group routing. Login selects a bot from `login_via`; it is not a general admin check.
+
+- **One bot = one connector instance.** `channels.wechat.bots[]` declares `id` (hidden, immutable route-key segment),
+  `identity.display_name` (**required** — WeChat exposes no nickname or remark name), optional
+  `identity.description`, `enabled` (run switch) and `login_via[] = {channel, user}`. Runtime state lives in
+  SQLite (§3.6/§9): `wechat_accounts(slot, ilink_bot_id, token, base_url, user_id, bound_at, token_saved_at)`,
+  `wechat_state(slot, cursor)`, `wechat_context_tokens(slot, peer_id, token)`; there is no credential JSON file.
+  `id` becomes `Conversation.account`; `Conversation.key` is
+  `wechat@<id>:…`, so routes, dedup, queues and sessions are isolated per bot. Each instance owns its `bot_token`,
+  persisted `get_updates_buf` cursor, per-peer `context_token` cache and `ilink_bot_id`; one bot's expiry/reconnect
+  never blocks another. A replayed poll after restart is safe because dedup is keyed by
+  `Conversation.key + message_id` (§8.2).
+- **Identity.** WeChat (iLink) exposes neither the bot nickname nor remark names (both are client-local), so every
+  bot must configure `identity.display_name`; there is **no channel-level `channels.wechat.identity`** (it would
+  duplicate the per-bot value). `description` is optional. The configured name is injected into the agent's
+  `<bridge-context>` and does **not** change WeChat profile data.
+- **Login selection.** `/login wechat` takes **no argument**: the bridge resolves the target bot from
+  `(initiating channel, sender id)` in `login_via`. A bot may list multiple entries (e.g. WeCom + Feishu + QQ) so an
+  operator can use their preferred connected channel; the QR is sent back to that direct chat. The same
+  `(channel, user)` must map to at most one bot (otherwise the bare command is ambiguous and startup validation
+  fails). At least one mapped channel must be enabled and (when `access.allow_users` is non-empty) at least one mapped
+  user must be allowed inbound, since there is no CLI fallback. `login_via` is the login authorization; it does not
+  require membership in `access.admins`.
+- **Admission (no allowlist, no force).** On `confirmed`:
+  - the bot has no binding → **bind** (first login is allowed for a mapped operator);
+  - the `ilink_bot_id` equals the bot's binding → **re-login**;
+  - a different id is already bound to this bot → **reject**; the operator must clear the bot's DB rows
+    (`wechat_accounts`/`wechat_state`/`wechat_context_tokens`) with the bridge stopped before logging in a different
+    account;
+  - the id is bound to **another** bot → **reject** (two `getUpdates` loops on one account would split events).
+  There is no `login.allow`, `allow_admin_new`, `--allow-new` or `--force`.
+- **Runtime state.** `wechat_accounts` stores the binding **and** the token in one row; `wechat_state` stores the
+  long-poll cursor; `wechat_context_tokens` stores per-peer reply tokens. `save_wechat_login` runs in one
+  `BEGIN IMMEDIATE` transaction: it checks that the `ilink_bot_id` is not bound to another bot, rejects a different
+  id on this bot, then writes the row. The DB file is 0600 (and must live in a private directory, not `/tmp`).
+  Renaming `id` re-keys the bot (old routes/binding stay under the old key); `identity.display_name` can be changed
+  without touching routes. Disabling/removing a bot does not delete its rows; re-enabling the same `id` resumes
+  them. A one-time startup migration imports the old `~/.tether/wechat/<id>.json` + `.state.json` and deletes them.
+- **Concurrency.** At most one pending QR login **per bot**: a second `/login wechat` for the same bot (from any
+  channel/user) is refused while the first is polling. Different bots may log in in parallel.
+  Two people scanning the **same** QR is a server-side race: the first `confirmed` wins; the bridge processes only
+  that one and the QR is consumed.
+- **Activation.** An in-chat `/login` is the **only** login entry point and applies the new token immediately: for
+  an `enabled: true` bot it restarts only that bot's long-poll; for a disabled bot it stores the token but does not
+  start it (pre-provisioning). There is no CLI login/unbind; changing a bound account requires stopping the bridge,
+  clearing the bot's rows, then starting and using `/login`.
+- **Config reload.** `bots[].identity` and `login_via` are hot-applicable; adding/removing bots or changing
+  `enabled` builds a different connector set and still needs a restart.
+- **Startup / failure isolation.** A bot that was never bound starts in `unbound`; one whose token is missing/stale
+  despite a binding record starts in `login_required` (the channel and other bots keep running). `/healthz`, `/status`
+  and connector metrics are per instance (`wechat@<id>`). A runtime `errcode -14` stops **only that bot's** long-poll,
+  marks it `login_required` and raises an alert. Already-running Turns are not interrupted: outbound sends for that
+  bot are skipped (logged) while it is down, and the conversation is reconciled after re-login (§8.3). Transient
+  transport/`ret` errors back off exponentially **per bot** (with jitter, reset after a successful poll); only `-14`
+  is terminal until re-login.
+- **Sending.** The instance is selected by `conv.account`, so a reply always uses the token of the bot that received
+  the message; `context_token`s are cached **per bot and peer** (persisted next to that bot's credentials), never
+  shared across bots.
+- **Project isolation.** `projects.mode: shared` also means the bots share one working directory. If they must not
+  read each other's files, use `projects.mode: isolated`: leases are per `Conversation`, so the key's bot segment
+  also separates the views (§2.8).
+- **Observability.** `/status` lists each bot's state: `unbound`, `up`, `login_required`, or `disabled`; a group reply
+  still redacts agentd/session details (unchanged, §6.6). `/healthz` aggregates: `ok` only when **every** enabled
+  connector instance is `up` (WeChat: every enabled bot), `degraded` when at least one is `up`, `down` when none is.
 
 ### 5.5 New platform checklist (extensibility acceptance)
 
@@ -1666,12 +1771,12 @@ Key points:
 - **Commands** (prefix configurable via `commands.prefix`, default `/`) are parsed and handled **locally** by the bridge, never forwarded to the model:
   - `/stop` — cancel the currently executing Turn (`POST …/interrupt` + reject pending permissions).
   - `/new` — start a fresh agent session for the conversation (interrupt the running turn, drop queued turns, delete and recreate the
-    agentd session; the project/view is untouched). **Admin-only** (`group.admins`).
+    agentd session; the project/view is untouched). **Admin-only** (configured admins).
   - `/whoami` — reply with the sender's platform id (so an operator can discover the id to add as admin).
   - `/status` — reply with a read-only snapshot (session/agent/model, context usage, project mode + working dir, agentd base + **version/pid**
-    via `GET /api/info`, each connector's transport state — `connectors: wecom=up feishu=up`, turn state, queued turns, pending interactions,
-    uptime); **redacted by conversation type** (a group hides the agentd details, working directory and connector states and shortens the
-    session id). If agentd is unreachable the agentd line says `(unreachable)`.
+    via `GET /api/info`, each connector instance's transport state — `connectors: wecom=up feishu=up wechat@assistant=up`, turn state,
+    queued turns, pending interactions, uptime); **redacted by conversation type** (a group hides the agentd details, working directory and
+    connector states and shortens the session id). If agentd is unreachable the agentd line says `(unreachable)`.
   - `/send <path>` — deliver one file to this conversation on demand. The path is joined to the project directory when relative, then
     `resolve()`d and checked against `media.outbound.patterns` (§7.3); a missing, too-large or **disallowed** path is reported, never
     sent. Open to any participant — the `patterns` policy is the gate.
@@ -1679,6 +1784,11 @@ Key points:
     (`GET /api/config?section=servers&server=<name>` + `GET /api/info`); `--all` adds the bridge's own (redacted) config and the full
     agentd config. **Admins only**, and **direct chat only**. The bridge's `Config` carries resolved secrets, so it is **redacted**;
     agentd's config is already redacted.
+  - `/login wechat` — start a QR login for the WeChat bot mapped to this sender by `login_via` (§5.4). It takes **no
+    argument**: the bridge resolves `(initiating channel, sender id)` → bot and sends the QR **image** back to this direct
+    chat. **Direct chat only** (the QR is a credential — never in a group). `login_via` is the login authorization, not
+    `access.admins`. A second request for the same bot while one is polling is refused. If the bot is offline, use another
+    mapped channel or the CLI.
   - `/help` — list the commands (name, usage, description).
 - **Matching**: a message is a command only when, after dropping any leading `@` mention and surrounding whitespace, it is exactly
   `<prefix><name>` (case-insensitively). A command that declares an argument (`/send <path>`) additionally accepts trailing text, while
@@ -1687,8 +1797,8 @@ Key points:
 - **Escaping**: to send a literal command as text, **double the prefix** — `//help` is delivered to the model as `/help`. Only a doubled
   prefix followed by a real command is collapsed; `// TODO`, `//server/share`, `//help me` are forwarded untouched.
 - **Authorization**: `/stop` in a group defaults to **only that Turn's initiator** (`command_scope: initiator`, configurable to
-  `admins`); `/new` is admin-only (`group.admins`); `/config` is admin-only **and** refused outside a direct chat; `/whoami` /
-  `/status` / `/help` / `/send` are open to anyone (for `/send` the `patterns` policy is the real gate). **Admins are a superset** — a
+  `admins`); `/new` is admin-only (configured admins); `/config` and `/login` are admin-only **and** refused outside a direct chat;
+  `/whoami` / `/status` / `/help` / `/send` are open to anyone (for `/send` the `patterns` policy is the real gate). **Admins are a superset** — a
   configured admin may always run a command. Every terminal outcome (unauthorized, idle, no-op, failure) replies with a short readable
   notice; a command never fails silently.
 - In a group chat where the platform only delivers @ messages, a command naturally also requires an @ trigger (see §2.5).
@@ -1851,6 +1961,8 @@ See §4.5. Core points:
 ### 8.1 Serial per Conversation, Concurrent Across Conversations
 
 - One Route → one Agent Session; the SDK is naturally serial for the same session, so the bridge needs no extra lock.
+- **Accounts are separate Routes** (`Conversation.key` includes `account`), so their turns run concurrently and never
+  share a session; an account-level outage or re-login does not interrupt another account's turns.
 - Turns of different Routes are processed concurrently (asyncio tasks).
 - Two consecutive messages on the same Route: `queue` by default (the second is queued and executed in order on the SDK side).
 - **One-on-one chat**: `sessions.busy_delivery: steer` can be configured (inject supplementary info from the same user into the current Turn).
@@ -1923,7 +2035,7 @@ Secrets are injected only from environment variables / `.env`, and **are not wri
 here it is a Python host, adopting 12-factor env injection, and YAML holds only non-secret configuration).
 
 ```yaml
-reload: false                         # watch config.yaml and hot-apply group/access/permissions/commands/identity/sessions/media
+reload: false                         # hot-apply group/access/permissions/commands/identity/sessions/media + WeChat login policy, per-account login/identity (§5.4)
 
 server:
   base_url: http://127.0.0.1:8787
@@ -1990,17 +2102,6 @@ identity:
   sync_participants: false            # whether to also inject group members (privacy/size)
   preamble_tag: bridge-context        # context wrapping tag (for anti-forgery cleaning)
 
-channels:
-  wecom:
-    identity:                         # REQUIRED for WeCom (it exposes no name/description)
-      display_name: "..."
-      description: "..."
-    reconnect_max_ms: 30000           # long-connection reconnect backoff ceiling (ms)
-  feishu:
-    identity:                         # optional; unset = use the platform's bot name
-      display_name: null
-      description: null
-
 streaming:
   mode: auto                          # auto|native|edit|chunk|final
   min_interval_ms: 700                # minimum interval between two snapshot updates (§6.2)
@@ -2049,23 +2150,45 @@ commands:
 access:                               # inbound allowlist (§10.1)
   allow_users: []                     # allowed user ids (empty = unrestricted)
   allow_groups: []                    # allowed group ids (empty = unrestricted)
+  admins:                             # per-channel/bot admin lists
+    wecom: null                       # null = fall back to group.admins; [] = no admins
+    feishu: null
+    qq: null
+    wechat: {}                        # bot id -> user ids
 
 channels:
   wecom:
     enabled: true
     bot_id: ${WECOM_BOT_ID}
     secret: ${WECOM_BOT_SECRET}
+    identity:                         # REQUIRED for WeCom (it exposes no name/description)
+      display_name: "..."
+      description: "..."
+    reconnect_max_ms: 30000           # long-connection reconnect backoff ceiling (ms)
   feishu:
     enabled: false
     app_id: ${FEISHU_APP_ID:-}
     app_secret: ${FEISHU_APP_SECRET:-}
+    identity:                         # optional; unset = use the platform's bot name
+      display_name: null
+      description: null
   qq:
     enabled: false
     appid: ${QQ_BOT_APPID:-}
     secret: ${QQ_BOT_SECRET:-}
   wechat:
     enabled: false
-    cred_path: ~/.tether/wechat.json     # QR-login credentials this connector persists
+    qr_timeout_s: 480                 # QR polling window (8 min)
+    bots:                             # one connector instance per bot
+      - id: assistant                 # hidden stable route-key segment; do not rename casually
+        enabled: true                 # false = pre-provision only (no long-poll)
+        identity:
+          display_name: "微信助手"     # required: WeChat exposes no nickname/remark
+          description: "微信小助手"    # optional
+        login_via:                    # bare `/login wechat` resolves (channel,user) -> this bot
+          - {channel: wecom, user: "<wecom-user-id>"}
+          - {channel: feishu, user: "<feishu-open-id>"}
+
 
 # Health/metrics (§11)
 metrics:
@@ -2086,7 +2209,12 @@ Fail at startup (fail-fast):
   `command_scope`/`cross_user_delivery`, `permissions.fallback`, `projects.mode`/`isolation`/`cow.mode`;
 - `spool_dir` is not writable; `min_interval_ms ≤ 0`; `inline_limit_bytes` is too large, causing a base64 memory risk;
 - `projects.mode=isolated` requires `control_url` + `source_directory` (§2.8);
-- If `model.context_limit` is set, it must be > 0.
+- If `model.context_limit` is set, it must be > 0;
+- `channels.wechat`: enabled with **no** bot; bot `id`s are duplicated or do not match
+  `[a-z0-9][a-z0-9_-]{0,31}` (the id is a route-key segment — `@`/`:` are reserved); a bot has no
+  `identity.display_name`; two bots resolve to the same `ilink_bot_id`; the same `(channel,user)` appears in
+  `login_via` for two bots; `login_via` has no **enabled** channel; `login_via` has no user permitted by a
+  non-empty `access.allow_users`; `qr_timeout_s ≤ 0` (§5.4).
 
 ### 9.2 Recommendations to Accompany the agentd Configuration
 
@@ -2143,6 +2271,13 @@ inputModalities: [text, image]       # the endpoint model's actual capabilities
 ### 10.3 Secrets
 
 - Bearer tokens and every IM secret are all injected from env via `${VAR}` references; redacted in logs (token, aes_key, bot secret).
+- **WeChat QR credentials** (`bot_token`) are not env secrets: they are written by the login flow into the route
+  SQLite store together with the binding (`wechat_accounts`), so the DB must stay **0600** and live in a private
+  directory (the default `~/.tether/tether.sqlite3`, never `/tmp`). The DB also contains routes; backups/copies are
+  sensitive. Tokens,
+  `context_token`s and QR contents never appear in `/status`, `/config`, logs or rejection replies (§5.4).
+- Login admission is **default-deny** for new bindings (§5.4): only an already-bound id or an allowlisted id can
+  complete a scan; the in-chat entry has no bypass.
 - `.env` is not committed (`.gitignore`); `.env.example` lists only key names.
 
 ### 10.4 File security
@@ -2168,7 +2303,7 @@ inputModalities: [text, image]       # the endpoint model's actual capabilities
 - Isolation-related: active project lease count, isolated-view (worktree/overlay/container) create/fail count, project switch count.
 - Key alerts: agentd unreachable, prolonged SSE disconnection, Connector authentication failure, rising HITL timeout rate.
 
-**Implemented**: a process-wide counter/gauge registry (`tether.metrics`) incremented by the app, the engine and the connectors; an **optional HTTP endpoint** (`metrics.listen`) serving `GET /healthz` (JSON: `status`, `uptime_s`, `connectors` — a per-channel transport-state map `up`/`down`, per-base `agentd` reachability, `active_turns`, `leases`) and `GET /metrics` (Prometheus text); and a **periodic `metrics` structured log** (`metrics.log_interval_s`). Counters: `inbound_messages`, `prompts`, `turns`, `sse_reconnects`, `sse_prolonged_disconnects`, `hitl_asks`, `hitl_timeouts`, `isolated_leases_created`/`isolated_lease_failures`, `rate_limit_hits`, `media_bytes_out`, `media_send_failures`; gauges: `uptime_s`, `active_turns`, `leases`, `queue_depth`, `sse_disconnected`, `connector_connected_<channel>`. Alerts are structured log events: `sse_disconnected` (per disconnect), `sse_disconnected_prolonged` (alert level after `_SSE_PROLONGED_AFTER` consecutive failed reconnects), `connector_down` (error level once a channel's transport has been down for `_CONNECTOR_DOWN_ALERT_S`; its state is sampled every `_CONNECTOR_HEALTH_INTERVAL_S` and also shown in `/status`, §6.6), `route_unavailable`, `stale_turn_recovered`. **Not planned** (low value at this single-instance, single-operator scale — the counters/gauges/alerts above, plus structured logs and `/status`, already cover day-to-day visibility): outbound message counts, turn duration, media bytes received, render-downgrade counts, the per-route debug view, and project-switch count.
+**Implemented**: a process-wide counter/gauge registry (`tether.metrics`) incremented by the app, the engine and the connectors; an **optional HTTP endpoint** (`metrics.listen`) serving `GET /healthz` (JSON: `status`, `uptime_s`, `connectors` — a per-**connector-instance** transport-state map (`wecom`, `wechat@assistant`, …) with `true`/`false`, per-base `agentd` reachability, `active_turns`, `leases`) and `GET /metrics` (Prometheus text); and a **periodic `metrics` structured log** (`metrics.log_interval_s`). Counters: `inbound_messages`, `prompts`, `turns`, `sse_reconnects`, `sse_prolonged_disconnects`, `hitl_asks`, `hitl_timeouts`, `isolated_leases_created`/`isolated_lease_failures`, `rate_limit_hits`, `media_bytes_out`, `media_send_failures`; gauges: `uptime_s`, `active_turns`, `leases`, `queue_depth`, `sse_disconnected`, `connector_connected_<channel>[_<account>]` (multi-account channels are per instance, e.g. `connector_connected_wechat_assistant`), `wechat_login_required_<bot>`, `wechat_login_pending_<bot>`. Alerts are structured log events: `sse_disconnected` (per disconnect), `sse_disconnected_prolonged` (alert level after `_SSE_PROLONGED_AFTER` consecutive failed reconnects), `connector_down` (error level once a channel's transport has been down for `_CONNECTOR_DOWN_ALERT_S`; its state is sampled every `_CONNECTOR_HEALTH_INTERVAL_S` and also shown in `/status`, §6.6), `wechat_login_required` (error level per account; `errcode -14`, needs a re-scan), `wechat_login_rejected` (counter; a duplicate/different binding was refused), `route_unavailable`, `stale_turn_recovered`. **Not planned** (low value at this single-instance, single-operator scale — the counters/gauges/alerts above, plus structured logs and `/status`, already cover day-to-day visibility): outbound message counts, turn duration, media bytes received, render-downgrade counts, the per-route debug view, and project-switch count.
 
 ---
 
@@ -2267,6 +2402,10 @@ Common commands: `uv sync --extra wecom`, `uv run tether --config config.yaml`,
   - Streaming: `StreamingController`'s trailing-edge / drop-if-busy / boundary and final flush / rate-limit backoff /
     `max_live_chars` chunking (§6.2/§6.5, using a frozen clock).
   - Mapping and idempotency: session mapping, dedup key `Conversation.key:message_id` (§8.2).
+  - Multi-bot: `Conversation.key` isolation (`wechat@a` vs `wechat@b`); duplicate-bot and duplicate-`ilink_bot_id`
+    rejection; `login_via` resolution (bare `/login wechat`, one mapping per `(channel,user)`); same-id re-login vs
+    different-id rejection with the unbind hint; per-bot `errcode -14` marks only that bot `login_required` while the
+    other keeps polling (§5.4).
   - Media: decision tree (modality/size/source, §4.4).
   - Identity: `<bridge-context>` assembly + anti-forgery sanitization (`bridge-context` markers / `[xxx]:` prefixes),
     `identity.source`/`inject` (§2.6/§4.8).
@@ -2320,7 +2459,7 @@ Confirm item by item for each platform:
 | **M2 WeCom full experience** | Markdown RICH profile (table/code-block downgrade); **run status/usage/thinking display (§6.7)**; template-card HITL (permission/question); inbound media (`download_file` decryption → inline/file/url/spool); outbound media (tool media → chunked upload → image/file/voice/video); `attachment.omitted` notice. **Exit: §13.1 backfill** |
 | **M3 Feishu** | Long-connection Connector; text/p2p round-trip (**done**); card streaming + card-Markdown rendering (**done**); card interaction callbacks → HITL + `acknowledge`; media. **Exit: §13.1 backfill** |
 | **M4 QQ** | **api-v2 thin client (no SDK)**: Access Token + WS gateway (Identify/Heartbeat/Resume) + REST; 单聊/群/频道; text/markdown/keyboard/rich-media; recall. **Exit: §13.1 backfill** |
-| **M5 WeChat personal** | openclaw-weixin (iLink Bot) **thin-client** Connector (direct-only; extreme downgrade). **Exit: §13.1 backfill** |
+| **M5 WeChat personal** | **Implemented; basic real-device verification done** (QR login, inbound text/image, outbound text). The connector is the openclaw-weixin (iLink Bot) **thin client**, **multi-bot** (per-bot QR login via `login_via`, long-poll, credentials, failure isolation; §5.4), direct-only; extreme downgrade. **Remaining device checks:** outbound video/file, voice handling, typing, `-14` recovery, two-bot concurrency, and bare `login_via`. **Exit:** §13.1 backfill plus those checks. |
 | **M6 hardening** | **Done:** project sharing vs isolation (`projects.mode: shared | isolated`; per-conversation views via agentd's control API `POST/GET/DELETE /admin/projects`, impl `none`/`copy`/`worktree`/`overlay`, with `inboundPermissions` + `sandbox` passthrough, §2.8/§2.9); SSRF protection; observability `GET /healthz` + `/metrics` (§11 core; the remaining listed metrics are **not planned**, §11); stale-turn watchdog + isolated re-acquire (§8.3). **Not planned:** adaptive rate limiting (§8.4), per-session `?after=` replay / explicit overflow handling (§8.3), migration/replay — each only matters at scale or for migrating existing data, not for this single-instance, single-operator bridge. |
 | **M7 enhancements** | **None outstanding.** Per-platform **voice→text** is handled inside each connector (§5.1 WeCom reads the platform's inline transcript; §5.3/§5.4 prefer the same, otherwise the raw attachment), not by a bridge-side ASR subagent. **Not planned:** long-term file archiving, Web admin console. **Done:** message recall (§8.6, Feishu). |
 
@@ -2349,13 +2488,14 @@ Confirm item by item for each platform:
 | D15 | MVP does only WeCom (M1 text, M2 full experience) | User-specified; WeCom has the most complete long-connection/streaming/card capabilities |
 | D16 | **No trigger filtering**: forward whatever the platform delivers (remove `respond_on`); commands are intercepted locally by the bridge and not forwarded (§2.5) | Tether does not duplicate IM bot policy; the platform is the authority on delivery |
 | D17 | Group conversations **inject speaker labels** and sanitize forged prefixes; within a group, **no cross-user steer by default**, replies @-mention the initiator (§2.5(1)(2), §8.1) | Preserves "who is speaking" when multiple people share context, avoiding crosstalk and irrelevant answers |
-| D18 | Within a group, **HITL by default allows only the initiator to answer**; `/stop` is by default limited to the turn's **initiator** (`command_scope: initiator`, configurable `admins`), and `/new` (fresh session) is **admin-only** (`group.admins`; empty = disabled) (§2.5(3), §4.6, §6.6) | Prevents others from approving dangerous operations on the initiator's behalf or interrupting/resetting their conversation |
+| D18 | Within a group, **HITL by default allows only the initiator to answer**; `/stop` is by default limited to the turn's **initiator** (`command_scope: initiator`, configurable `admins`), and `/new` (fresh session) is **admin-only** (configured admins: `access.admins` per channel/account, else `group.admins`; empty = disabled) (§2.5(3), §4.6, §6.6) | Prevents others from approving dangerous operations on the initiator's behalf or interrupting/resetting their conversation |
 | D19 | **The bot name + description are synced into the agent context** (`<bridge-context>` lead + anti-forgery sanitization; aligned with the agent `description` per `identity.source`; re-injected after name/description changes, agent switches, compaction) (§2.6, §4.8) | Keeps the bot's external identity consistent with the agent's self-perception |
 | D20 | **A project is either `shared` or `isolated`** (`projects.mode`, §2.8): `shared` = one project for all conversations (single owner / trusted set, writes land in the source); `isolated` = each conversation leases its own view (worktree/overlay/copy) through agentd's control API. The earlier capability-driven `auto` (read-only share / writable isolate, plus `on_conflict`/switch guards) was **dropped as over-complex** | One explicit axis the operator already knows; simpler to reason about and implement |
 | D21 | **Isolation is `shared` or `isolated`** (`projects.mode`, D20): `isolated` leases per-conversation views from **agentd's control API** (`none`/`copy`/`worktree`/`overlay`); the bridge never forks Go processes (container/remote would be host-orchestrated). Abstracted via `ProjectProvider` (§2.8/§2.9/§3.7) | One clear boundary; reuses agentd's built-in isolation runner |
 | D22 | **Isolation is shared across `agentd`'s transports via a transport-agnostic project runner in `cmd/`** (`Transport` is a parameter); **a writable project has a single owner `(project, transport)`**, read-only can be shared; the SDK provides only policy (**+ the `Sandbox` hook (SDK layer), §17.2**) (§17.3, §3.7) | Isomorphic to the sandbox: share the mechanism, not the instance; avoids writing one per transport |
 | D23 | **Message recall is best-effort and platform-dependent** (§8.6): handled only where the platform emits a recall event (Feishu `im.message.recalled_v1`); cancels queued/in-flight turns, never "unsends" an already-sent reply; a platform without the event (WeCom long connection) is a no-op | The bridge cannot delete its own outbound messages; recall can only cancel uncommitted work |
 | D24 | **Feishu voice bubbles are not transcribed** (§5.2): a **voice bubble** (`audio`) event carries only `{file_key, duration}` — no transcript (unlike WeCom, whose `message.voice.content` *is* the transcript); a **voice input** ("speech to text") already arrives as a `post`/text message and needs no ASR. | The platform's ASR API needs a paid tenant + `ffmpeg` and only benefits voice *bubbles* — **dropped 2026-10-16** (low value). A voice bubble is delivered as a raw attachment. |
+| D25 | **WeChat runs multiple bots as separate connector instances** (§5.4): `channels.wechat.bots[]` has a hidden stable `id` (route key), required `identity.display_name`, `enabled` and `login_via[] = {channel,user}`; runtime token/binding/cursor/context tokens live in SQLite. Bare `/login wechat` resolves the bot from `(channel,sender)`; `login_via` is the login authorization (no admin requirement); the same `(channel,user)` maps to one bot. First bind is allowed; same `ilink_bot_id` re-logs in; a different bound id is rejected (the operator must clear the binding row); duplicate ids across bots are rejected; `-14` affects only one bot. There is no login CLI, no `login.allow`/`allow_admin_new`/`--allow-new`/`--force`, and no channel-level WeChat identity. | Multiple WeChat identities can run side by side; per-bot isolation prevents one token/long-poll from taking down the others; resolving login from the sender's own channel keeps `/login wechat` argument-free and avoids exposing bot names/ids in chat. |
 
 ---
 
@@ -2619,7 +2759,8 @@ Three hard constraints (details in `DESIGN-AGENTD.md` §7):
 
 | Type | Definition | Where it appears |
 |---|---|---|
-| `Conversation` | IM conversation context (channel/kind/id/name/thread/tenant), with `key` as a stable unique key | §3.2 |
+| `Conversation` | IM conversation context (channel/account/kind/id/name/thread/tenant), with `key` as a stable unique key | §3.2 |
+| `Account` | One bot identity within a multi-account channel (own credentials/long-poll/identity); selected by `Conversation.account` | §2.1, §5.4 |
 | `Sender` | Sender (id/name/is_bot) | §3.2 |
 | `Attachment` | Inbound attachment (kind/mime/name/size/handle…) | §3.2 |
 | `InboundMessage` | Normalized inbound message (text/mentions/attachments/conversation/sender/quoted) | §3.2 |

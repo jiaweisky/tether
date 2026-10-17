@@ -184,3 +184,17 @@ def test_the_command_catalog_matches_the_kind_literal():
     names = [spec.name for spec in COMMANDS]
     assert len(names) == len(set(names)), "a command name is listed twice"
     assert set(names) == set(get_args(CommandKind)), "COMMANDS and CommandKind drifted"
+
+
+def test_parse_login_command():
+    assert parse_command("/login") is not None
+    cmd = parse_command("/login wechat")
+    assert cmd is not None and cmd.kind == "login" and cmd.args == "wechat"
+    cmd = parse_command("/login wechat assistant")
+    assert cmd is not None and cmd.args == "wechat assistant"
+    # `/login` is a local command, not a message forwarded to the model.
+    assert parse_command("/loginx") is None
+
+
+def test_help_lists_login():
+    assert "/login wechat" in help_text()
