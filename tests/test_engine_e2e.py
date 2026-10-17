@@ -497,6 +497,18 @@ def test_route_normalizes_dict_model():
 
 
 @pytest.mark.asyncio
+async def test_prompt_request_error_detail_is_shown(tmp_path):
+    app, conn, client = await make_app(tmp_path)
+    client.fail_next_prompt_with = (
+        "too_large",
+        "request body exceeds the 1048576-byte limit",
+        413,
+    )
+    await app._on_message(inbound("hi"))
+    assert "request body exceeds the 1048576-byte limit" in conn.last_text()
+
+
+@pytest.mark.asyncio
 async def test_attachment_omitted_is_noticed(tmp_path):
     app, conn, client = await make_app(tmp_path)
     await app._on_message(inbound("hi"))

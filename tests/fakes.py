@@ -27,7 +27,6 @@ class FakeAgentClient:
         self.permission_replies: list[tuple[str, str, str]] = []
         self.question_replies: list[tuple[str, str, list[list[str]]]] = []
         self.rejected_questions: list[tuple[str, str]] = []
-        self.uploaded: list[dict[str, Any]] = []
         self._counter = 0
         self._permissions: list[PendingPermission] = []
         self._questions: list[PendingQuestion] = []
@@ -37,7 +36,7 @@ class FakeAgentClient:
         self.active: set[str] = set()
         self.message_store: dict[str, list[dict[str, Any]]] = {}
         self.agents: list[AgentInfo] = [AgentInfo("build", description="Build agent")]
-        self.fail_next_prompt_with: str | None = None
+        self.fail_next_prompt_with: str | tuple[str, str, int | None] | None = None
         self.permission_reply_error: str | None = None
 
     async def aclose(self) -> None:
@@ -84,9 +83,12 @@ class FakeAgentClient:
     # execution
     async def prompt(self, sid, *, prompt, files=None, id=None, delivery="queue"):
         if self.fail_next_prompt_with is not None:
-            code = self.fail_next_prompt_with
+            failure = self.fail_next_prompt_with
             self.fail_next_prompt_with = None
-            raise AgentError(code)
+            if isinstance(failure, tuple):
+                code, message, status = failure
+                raise AgentError(code, message, status=status)
+            raise AgentError(failure)
         self.prompts.append(
             {"sid": sid, "prompt": prompt, "files": files or [], "id": id, "delivery": delivery}
         )
@@ -107,11 +109,6 @@ class FakeAgentClient:
 
     async def history(self, sid, *, after=0, limit=200):
         return []
-
-    async def upload_file(self, sid, *, data, mime, name=None, provider_id=None):
-        fid = f"file_{len(self.uploaded)}"
-        self.uploaded.append({"sid": sid, "mime": mime, "name": name, "size": len(data)})
-        return {"fileId": fid}
 
     # interaction
     async def reply_permission(self, sid, rid, *, reply, message=None):

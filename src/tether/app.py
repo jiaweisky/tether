@@ -596,7 +596,11 @@ class TetherApp:
                     await self.router.recreate_session(route)
                     continue
                 log.warning("prompt_failed", error=exc.code)
-                await self._notice(connector, route.conversation, user_message(exc.code))
+                await self._notice(
+                    connector,
+                    route.conversation,
+                    user_message(exc.code, detail=exc.detail, status=exc.status),
+                )
                 await self._discard(engine)
                 return
 

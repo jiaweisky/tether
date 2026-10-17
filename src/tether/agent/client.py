@@ -7,7 +7,6 @@ unwrapped here.
 
 from __future__ import annotations
 
-import base64
 import json
 from collections.abc import AsyncIterator
 from typing import Any
@@ -213,23 +212,6 @@ class HttpAgentClient:
         if isinstance(data, dict):
             return list(data.get("events") or data.get("data") or [])
         return []
-
-    async def upload_file(
-        self,
-        sid: str,
-        *,
-        data: bytes,
-        mime: str,
-        name: str | None = None,
-        provider_id: str | None = None,
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {"mime": mime, "data": base64.b64encode(data).decode()}
-        if name:
-            payload["name"] = name
-        if provider_id:
-            payload["providerID"] = provider_id
-        result = await self._request("POST", f"/api/session/{sid}/file", json=payload)
-        return result if isinstance(result, dict) else {}
 
     # -- interaction -------------------------------------------------------
     async def reply_permission(
