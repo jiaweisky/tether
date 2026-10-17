@@ -2207,7 +2207,7 @@ Fail at startup (fail-fast):
 - A connector is enabled but lacks a secret/manifest; `server.base_url` is unreachable (optional: retry with delay instead of failing);
 - Invalid enum: `streaming.mode`/`reasoning_style`, `identity.inject`/`source`, `group.hitl_scope`/
   `command_scope`/`cross_user_delivery`, `permissions.fallback`, `projects.mode`/`isolation`/`cow.mode`;
-- `spool_dir` is not writable; `min_interval_ms ≤ 0`; `inline_limit_bytes` is too large, causing a base64 memory risk;
+- `min_interval_ms ≤ 0`;
 - `projects.mode=isolated` requires `control_url` + `source_directory` (§2.8);
 - If `model.context_limit` is set, it must be > 0;
 - `channels.wechat`: enabled with **no** bot; bot `id`s are duplicated or do not match
