@@ -169,7 +169,7 @@ Built directly on the api-v2 spec (no SDK); confirm the gateway, then the messag
   - → backfill §3.3 markdown level.
 
 ### 5. Streaming / editing
-- ✅ (2026-10-16) a turn is a **single final message** (no `🤔 Thinking…`): the bridge sets `progress_placeholder: false` for QQ. `stream_messages` is **not used** — the client renders it as *"该消息类型暂不支持查看"* and it is append-only; groups have no stream endpoint either. ⬜ (optional) revisit if the client ever renders streamed messages.
+- ✅ (2026-10-16) a turn is a **single final message** (no `🤔 Thinking…`): the bridge sets `progress_placeholder: false` for QQ. `stream_messages` is **not used** — the client renders it as *"This message type is not supported for viewing yet"* and it is append-only; groups have no stream endpoint either. ⬜ (optional) revisit if the client ever renders streamed messages.
   - → §5.3 streaming note.
 
 ### 6. Interaction (HITL)
@@ -193,7 +193,7 @@ Built directly on the api-v2 spec (no SDK); confirm the gateway, then the messag
 ### 8. Rate limiting / quotas
 - ⬜ passive-reply window + count (C2C 60 min / ≤4, group 5 min / ≤5) → the `msg_id`+`msg_seq` handling
   and the proactive fallback.
-- ⬜ proactive quotas (per-Bot / per-relation QPS + daily caps) and the user's "允许主动发送" toggle.
+- ⬜ proactive quotas (per-Bot / per-relation QPS + daily caps) and the user's "allow proactive sending" toggle.
   - → `rate_limit_per_min`, §5.3.
 
 ### 9. Recall / authorization

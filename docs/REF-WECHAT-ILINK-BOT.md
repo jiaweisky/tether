@@ -1,12 +1,20 @@
-# 微信 iLink Bot 协议参考（本地镜像）
+# WeChat iLink Bot Protocol Reference (Local Mirror)
 
-> **本地、精选镜像**：本文是 **`Tencent/openclaw-weixin`**（npm `@tencent-weixin/openclaw-weixin`）的 **后端 API 协议**（其 `docs/protocol.md`）的本地镜像，供离线参考。
+> **Local curated mirror**: this file mirrors the backend API protocol (`docs/protocol.md`) of
+> **`Tencent/openclaw-weixin`** (npm `@tencent-weixin/openclaw-weixin`) for offline reference.
 >
-> - **不是公众号/企微那套官方开放 API**：`openclaw-weixin` 在腾讯 GitHub org 下、后端是腾讯域名（`ilinkai.weixin.qq.com`），走的是**个人微信扫码登录**。个人号自动化的**合规性/稳定性未证实**——腾讯**无公开政策**（既未明确允许，也未明确禁止）。
-> - **权威来源（canonical）**：`https://github.com/Tencent/openclaw-weixin` — 协议：`https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol.md`。
-> - `wechatbot.dev`（`corespeed-io/wechatbot`）是该协议的**第三方复刻**，仅作次级参考。
-> - **抓取日期**：2026-10-16。表格/示例按原文逐字复制；相对链接已改为绝对 URL（`https://github.com/Tencent/openclaw-weixin/blob/main/...`）。
-> - **本地源码**：`~/Documents/openclaw-weixin`（`@tencent-weixin/openclaw-weixin@2.4.10`）——下方"能力小结"依据其 `src/` 源码。
+> - **Not the official Open Platform API for Official Accounts/WeCom**: `openclaw-weixin` lives under
+>   Tencent's GitHub org and uses a Tencent backend domain (`ilinkai.weixin.qq.com`), but it drives a
+>   **personal WeChat account via QR login**. Compliance and stability of personal-account automation are
+>   **unverified** — Tencent has **no public policy** either way.
+> - **Canonical source**: `https://github.com/Tencent/openclaw-weixin` — protocol:
+>   `https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol.md`.
+> - `wechatbot.dev` (`corespeed-io/wechatbot`) is a **third-party reimplementation** of this protocol,
+>   referenced only as a secondary source.
+> - **Fetched**: 2026-10-16. Tables/examples are copied verbatim; relative links are rewritten as absolute
+>   URLs (`https://github.com/Tencent/openclaw-weixin/blob/main/...`).
+> - **Local source**: `~/Documents/openclaw-weixin` (`@tencent-weixin/openclaw-weixin@2.4.10`); the
+>   capability summary below is based on its `src/` code.
 
 ---
 
@@ -14,7 +22,7 @@
 
 This document describes the HTTP JSON protocol used by the `openclaw-weixin` channel plugin. It is intended for developers implementing or integrating a compatible Weixin backend. Normal plugin users only need the [main README](https://github.com/Tencent/openclaw-weixin/blob/main/README.md).
 
-[简体中文](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md)
+[Simplified Chinese](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md)
 
 ## How to read this reference
 
@@ -503,59 +511,89 @@ Success requires HTTP `200` and a nonempty `x-encrypted-param` response header. 
 
 ---
 
-## 附：插件 README 要点（`README.zh_CN.md`）
+## Appendix: Plugin README highlights (`README.zh_CN.md`)
 
-- **扫码登录**并自动保存凭证；一个 Gateway 可跑**多个微信账号**。
-- 支持 **文本 / 图片 / 语音 / 文件 / 视频**；**长轮询**收消息 + **输入状态**。
-- 含**引用消息本地缓存**（默认保留：文本 30 天/账号、媒体 7 天/256 MiB/账号、单文件 25 MiB）。
-- 依赖 OpenClaw 运行时（`openclaw` CLI）与 Node `>=22.13.0`。
-- 维护者：`github.com/zengyi1001`；License MIT。
+- **QR login** with automatic credential storage; one Gateway can run **multiple WeChat accounts**.
+- Supports **text / image / voice / file / video**; **long-poll** inbound + **typing status**.
+- Includes a **local quote cache** (defaults: text 30 days/account, media 7 days/256 MiB/account,
+  single file 25 MiB).
+- Requires the OpenClaw runtime (`openclaw` CLI) and Node `>=22.13.0`.
+- Maintainer: `github.com/zengyi1001`; License MIT.
 
 ---
 
-## 凭据与登录（Tether 视角）
+## Credentials and login (Tether view)
 
-- **没有 AppID/AppSecret 可申请**：凭据来自**扫码登录**换来的 **`bot_token`**（没有开发者门户、无需"定义机器人"）。
-- **流程**：`POST /ilink/bot/get_bot_qrcode?bot_type=3` → `{qrcode, qrcode_img_content}` → 展示二维码 → 轮询 `GET /ilink/bot/get_qrcode_status?qrcode=...` → `confirmed` 返回 `{bot_token, ilink_bot_id, baseurl, ilink_user_id}` → 存 `{token, baseUrl, userId}`。
-- **参考实现如何存**：`~/.openclaw/openclaw-weixin/accounts/<ilink_bot_id>.json`（`{token, baseUrl, userId, savedAt}`）；账号索引 `accounts.json`；`context_token` 落 `accounts/<id>.context-tokens.json`；授权白名单 `credentials/openclaw-weixin-<id>-allowFrom.json`。
-- **Tether 如何存**：每个 bot 一个槽位 `channels.wechat.bots[] = {id, identity, enabled, login_via[]}`；`id` 是隐藏、稳定的路由 key，`identity.display_name` 是必需的人类可读名（微信不暴露昵称/备注名）。**运行时状态全部在 SQLite**：`wechat_accounts(slot, ilink_bot_id, token, base_url, user_id, bound_at, token_saved_at)`、`wechat_state(slot, cursor)`、`wechat_context_tokens(slot, peer_id, token)`；没有凭据 JSON。DB 默认 `~/.tether/tether.sqlite3`，必须 0600 且放在私有目录（不能放 `/tmp`）。启动时会把旧的 `~/.tether/wechat/<id>.json` + `.state.json` 导入并删除。
-- **地址**：API 基址用登录返回的 `baseurl`（默认 `https://ilinkai.weixin.qq.com`）；CDN `https://novac2c.cdn.weixin.qq.com/c2c`；`bot_type=3`。
-- **登录窗口**：`waitForWeixinLogin` 超时 **8 分钟**（480s）。
-- **失效 / 重登**：服务端 `errcode = -14`（token 失效）→ 参考实现把该账号**冻结 1 小时**；Tether 应视其为"需重登"，支持随时再扫。
-- **扫哪个号，哪个号就是 bot** → **务必用专门的小号**。
+- **There is no AppID/AppSecret to request**: the credential is a **`bot_token` obtained through QR login**
+  (there is no developer portal and no "bot definition" step).
+- **Flow**: `POST /ilink/bot/get_bot_qrcode?bot_type=3` → `{qrcode, qrcode_img_content}` → display the QR →
+  poll `GET /ilink/bot/get_qrcode_status?qrcode=...` → on `confirmed` receive
+  `{bot_token, ilink_bot_id, baseurl, ilink_user_id}` → store `{token, baseUrl, userId}`.
+- **How the reference implementation stores it**:
+  `~/.openclaw/openclaw-weixin/accounts/<ilink_bot_id>.json` (`{token, baseUrl, userId, savedAt}`);
+  account index `accounts.json`; `context_token` in `accounts/<id>.context-tokens.json`; authorization
+  allowlist `credentials/openclaw-weixin-<id>-allowFrom.json`.
+- **How Tether stores it**: one slot per bot: `channels.wechat.bots[] = {id, identity, enabled, login_via[]}`.
+  `id` is a hidden, stable route key; `identity.display_name` is the required human-readable name (WeChat
+  exposes no nickname or remark name). **All runtime state is in SQLite**:
+  `wechat_accounts(slot, ilink_bot_id, token, base_url, user_id, bound_at, token_saved_at)`,
+  `wechat_state(slot, cursor)` and `wechat_context_tokens(slot, peer_id, token)`. There is no credential JSON.
+  The DB defaults to `~/.tether/tether.sqlite3`; it must be `0600` in a private directory (not `/tmp`).
+  At startup, legacy `~/.tether/wechat/<id>.json` + `.state.json` files are imported and deleted.
+- **Addresses**: the API base is the `baseurl` returned by login (default `https://ilinkai.weixin.qq.com`);
+  CDN `https://novac2c.cdn.weixin.qq.com/c2c`; `bot_type=3`.
+- **Login window**: `waitForWeixinLogin` times out after **8 minutes** (480 s).
+- **Invalidation / re-login**: server `errcode = -14` (token stale) → the reference implementation freezes the
+  account for **1 hour**; Tether treats it as "re-login required" and supports a new scan at any time.
+- **Whichever account scans becomes the bot** → **use a dedicated spare account**.
 
-## 登录 UX（已实现）
+## Login UX (implemented)
 
-- **唯一入口：已连接的 IM 内**。在 `login_via` 映射的**单聊**里发 `/login wechat`（**无参数**）→ 桥按 `(渠道, 发送者 id)` 找到 bot → 二维码图片回该单聊 → 扫码 → `confirmed` → 写入 DB + 回执；若该 bot `enabled=true`，**立即只重启该 bot 的长轮询**（`enabled=false` 只预登录、不启动）。`login_via` 本身就是登录授权，不要求 `access.admins`；至少一个映射渠道必须启用（否则启动校验失败，没有 CLI 兜底）；同一 bot 同一时间只允许一个待扫码登录。**没有 CLI 登录**。
-  - **绝不放群**（二维码=登录凭据，群里谁都能绑）。
-- **换绑**：先停 bridge，删除 SQLite 中该 bot 的 `wechat_accounts` / `wechat_state` / `wechat_context_tokens` 行，再启动并 `/login`；目前没有 in-chat unbind 命令。
-- **登录准入**：扫码确认的 `ilink_bot_id`：① 该 bot 尚未绑定 → 允许首次绑定；② 与已绑定 id 相同 → 允许重登；③ 已绑定另一个 id → **拒绝**，需先清除绑定；④ 该 id 已绑定另一个 bot → **拒绝**。拒绝不写入 token（`wechat_login_rejected`）。
-- token 失效（`-14`）时，**只停该 bot 的长轮询**（标记 `login_required`，其余 bot 继续），通过**同一入口**重新扫码即可。
-- **单实例约束**：同一 `ilink_bot_id` 只能绑定一个 bot；两个 `getUpdates` 循环会拆分事件流，启动校验直接报错。
+- **Only entry point: inside an already-connected IM.** Send the bare `/login wechat` (**no arguments**) in a
+  **direct chat** mapped by `login_via` → the bridge resolves the bot from `(channel, sender id)` → the QR
+  image is returned to that direct chat → scan → `confirmed` → write to SQLite + receipt. If the bot is
+  `enabled=true`, **only that bot's long-poll is restarted immediately** (`enabled=false` stores the login
+  without starting). `login_via` is the login authorization; it does not require `access.admins`. At least one
+  mapped channel must be enabled (otherwise startup validation fails; there is no CLI fallback); only one
+  pending QR login per bot is allowed. **There is no CLI login.**
+  - **Never send a QR to a group** (a QR is a login credential; anyone in the group could bind it).
+- **Rebind**: stop the bridge, delete that bot's `wechat_accounts` / `wechat_state` /
+  `wechat_context_tokens` rows in SQLite, start again and run `/login`. There is no in-chat unbind command yet.
+- **Login admission**: for the confirmed `ilink_bot_id`: (1) the bot has no binding → allow the first bind;
+  (2) it matches the bound id → allow re-login; (3) the bot is bound to another id → **reject**, clear the
+  binding first; (4) the id is bound to another bot → **reject**. A rejection never writes a token
+  (`wechat_login_rejected`).
+- When a token goes stale (`-14`), **only that bot's long-poll stops** (marked `login_required`; other bots
+  continue); re-scan through the **same entry point**.
+- **Single-instance constraint**: one `ilink_bot_id` can be bound to only one bot; two `getUpdates` loops
+  would split the event stream, so startup validation fails immediately.
 
-## 能力小结（对齐 Tether 的 `Capabilities`）
+## Capability summary (aligned with Tether's `Capabilities`)
 
-| 维度 | 结论 | 依据 |
+| Dimension | Result | Basis |
 |---|---|---|
-| **身份来源** | **不暴露**（备注名/昵称是客户端本地数据；需配置 `name`/identity） | 源码无 `whoami`/nickname/profile API |
-| markdown | **NONE** | 仅 `text_item` |
-| 代码块 / 表格 / 标题 / 内联图 | ✖ | 无富文本 |
-| 编辑消息 | ✖ | 无按 `message_id` 编辑 |
-| 原生流式 | ✖（疑似；有 `message_state=1 生成中`，但无"更新同一条"的接口） | `message_state` |
-| 按钮 / 表单 / reaction | ✖ | 协议无 |
-| **输入中（typing）** | **✔** | `sendTyping` + `getconfig` 的 `typing_ticket` |
-| 主动消息 | 可能 ✔（缺 `context_token` 仅警告仍发；服务端是否接受未证） | `sendMessage` |
-| 群聊 | **✖**（direct-only，`ChatType: "direct"` 写死） | `src/messaging/process-message.ts` |
-| **语音原生转写** | **✔** | `voice_item.text`（`inbound.ts` 直接作正文） |
-| **引用** | **✔** | `ref_msg`（+ 本地引用缓存 + `partial_text` 片段） |
-| 媒体入 | ✔ image / voice / file / video | item 类型 2–5（voice 走 SILK→WAV） |
-| 媒体出 | ✔ image / video / file（**无语音**） | `src/messaging/send-media.ts` |
-| **输入中（typing）** | ✔ | `sendTyping` + ticket（keepalive 5s） |
-| **工具进度消息** | ✔ | `tool_call_start/result`（选项 11/12） |
-| **斜杠命令** | ✔（插件本地） | `handleSlashCommand` |
-| **鉴权白名单** | ✔ `allowFrom`（默认仅账号主人） | `process-message.ts` 鉴权段 |
-| 投递模型 | `direct always`（推测） | 长轮询私聊 |
-| 速率上限 | ? | 未知 |
-| 额外 | 工具进度可渲染（`tool_call_*_item` 11/12）；长轮询游标可续拉 | 协议 |
+| **Identity source** | **Not exposed** (remark/nickname are client-local; configure `identity.display_name`) | No `whoami`/nickname/profile API in the source |
+| Markdown | **NONE** | Only `text_item` |
+| Code blocks / tables / headings / inline images | ✖ | No rich text |
+| Message editing | ✖ | No edit-by-`message_id` API |
+| Native streaming | ✖ (likely; `message_state=1` means generating, but there is no "update the same message" API) | `message_state` |
+| Buttons / forms / reactions | ✖ | Not in the protocol |
+| **Typing** | **✔** | `sendTyping` + the `typing_ticket` from `getConfig` |
+| Proactive messages | Possibly ✔ (a missing `context_token` only logs a warning and still sends; server acceptance unverified) | `sendMessage` |
+| Group chat | **✖** (direct-only; `ChatType: "direct"` is hard-coded) | `src/messaging/process-message.ts` |
+| **Native voice transcript** | **✔** | `voice_item.text` (used directly as the body by `inbound.ts`) |
+| **Quote** | **✔** | `ref_msg` (+ local quote cache + `partial_text` substring) |
+| Inbound media | ✔ image / voice / file / video | Item types 2–5 (voice goes SILK→WAV) |
+| Outbound media | ✔ image / video / file (**no voice**) | `src/messaging/send-media.ts` |
+| **Typing** | ✔ | `sendTyping` + ticket (5 s keepalive) |
+| **Tool progress messages** | ✔ | `tool_call_start/result` (items 11/12) |
+| **Slash commands** | ✔ (plugin-local) | `handleSlashCommand` |
+| **Authorization allowlist** | ✔ `allowFrom` (defaults to the account owner only) | `process-message.ts` authorization block |
+| Delivery model | `direct always` (assumed) | Long-poll direct chat |
+| Rate limit | ? | Unknown |
+| Extra | Tool progress is renderable (`tool_call_*_item` 11/12); the long-poll cursor is resumable | Protocol |
 
-**结论**：四平台中**交互最弱**（**无 markdown / 按钮 / 编辑 / 流式**），且**仅私聊**（无群）；但 **媒体（收齐、发无语音）+ 语音转写 + 引用（含片段）+ typing + 工具进度** 齐全；HITL 走**编号文本回退**。个人号自动化 → **稳定性 / 合规性未证实**（无官方政策依据）。
+**Conclusion**: the weakest interaction model of the four platforms (**no Markdown / buttons / editing /
+streaming**) and **direct-only** (no groups); however, **media (all inbound, outbound without voice) + native
+voice transcript + quotes (including substrings) + typing + tool progress** are complete. HITL falls back to
+**numbered text**. Personal-account automation → **stability/compliance unverified** (no official policy basis).

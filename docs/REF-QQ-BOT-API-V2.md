@@ -1,58 +1,58 @@
-# QQ 机器人 api-v2 参考（本地镜像）
+# QQ Bot api-v2 Reference (Local Mirror)
 
-> **本地、精选镜像**：本文件是 QQ 机器人开放平台 **api-v2** 官方文档的本地精选镜像，仅用于离线参考。
+> **Local, curated mirror**: This file is a locally curated mirror of the official **api-v2** documentation for the QQ Bot Open Platform, intended for offline reference only.
 >
-> - **非官方**：本文件非腾讯/QQ 官方发布产物，如有出入请以官方文档为准。
-> - **官方文档根地址（canonical root）**：https://bot.q.qq.com/wiki/develop/api-v2/
-> - **抓取日期**：2026-10-16
-> - **表格 / schema / 示例**均按原文逐字复制，未做翻译或改写。
-> - 有意**排除**「频道 / guild」历史管理集群，仅镜像「单聊 / 群 / 协议 / 相关」内容集合。
+> - **Unofficial**: This file is not an official Tencent/QQ release. If there are discrepancies, refer to the official documentation.
+> - **Official documentation root (canonical root)**: https://bot.q.qq.com/wiki/develop/api-v2/
+> - **Crawl date**: 2026-10-16
+> - **English edition**: prose, headings, table text, and example content have been translated from the original Chinese; code syntax, schemas, identifiers, and URLs are preserved. If there is any discrepancy, the official Chinese documentation is authoritative.
+> - The legacy "channel / guild" management cluster is intentionally **excluded**; only the "direct chat / group / protocol / related" content collections are mirrored.
 
 ---
 
-## 1. 起步指南
+## 1. Getting Started Guide
 
-### 启动接入
+### Onboarding
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/getting-started.html
 
-# 启动接入
+# Onboarding
 
-## 账号注册
+## Account Registration
 
-QQ 机器人：一个机器人可以被添加到 `群聊/频道` 内互动对话，QQ 用户也可以直接跟机器人 `单独对话`。
+QQ bot: A bot can be added to `group chats/channels` for interactive conversations, and QQ users can also `chat directly` with the bot.
 
-注册地址：[QQ 开放平台官网 (opens new window)](https://q.qq.com/#/)
+Registration URL: [QQ Open Platform website (opens new window)](https://q.qq.com/#/)
 
-## 接入票据
+## Integration Credentials
 
-注册创建机器人后：获得的开发机器人接入票据 `AppID` `AppSecret`
+After registering and creating a bot, you obtain the development bot integration credentials `AppID` and `AppSecret`
 
-名称
+Name
 
-描述
+Description
 
-备注
+Remarks
 
 AppID
 
-机器人 ID
+Bot ID
 
-必须使用
+Required
 
 AppSecret
 
-机器人密钥
+Bot secret
 
-用于请求签名的密钥
+Key used for request signing
 
-Token 的鉴权方式已废弃，请使用更安全的 `Access Token` 鉴权方式。
+Token-based authentication is deprecated; use the more secure `Access Token` authentication method.
 
-开发过程中如遇任何问题，可联系 QQ 机器人反馈助手反馈。
+If you encounter any problems during development, you can contact the QQ Bot feedback assistant.
 
 ## SDK DEMO
 
-快速搭建机器人服务端可参考以下 SDK DEMO。（SDK 仅提供接入参考，详情能力以官方文档能力描述为准）
+To quickly build a bot server, refer to the following SDK DEMOs. (The SDKs are provided for integration reference only; for detailed capabilities, refer to the official documentation.)
 
 Go: [botgo (opens new window)](https://github.com/tencent-connect/botgo)
 
@@ -60,31 +60,31 @@ Python: [botpy (opens new window)](https://github.com/tencent-connect/botpy)
 
 NodeJs: [bot-node-sdk (opens new window)](https://github.com/tencent-connect/bot-node-sdk)
 
-### 获取访问凭证
+### Obtain an Access Credential
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/access-token.html
 
-# 获取访问凭证
+# Obtain an Access Credential
 
-QQ 机器人开放平台提供以下类型的访问凭证：
+The QQ Bot Open Platform provides the following types of access credentials:
 
-凭证类型
+Credential type
 
-是否需要用户授权
+Requires user authorization
 
-说明
+Description
 
 access\_token
 
-否
+No
 
-机器人身份调用 API 时使用的凭证，可读写的数据范围由机器人的权限范围决定。适用于机器人主动发消息、管理群聊等场景。
+Credential used when calling APIs as the bot identity; the readable and writable data scope is determined by the bot's permission scope. Suitable for scenarios such as the bot sending proactive messages and managing group chats.
 
-## 获取 access\_token
+## Obtain an access\_token
 
-### 请求
+### Request
 
-基本
+Basic Information
 
 HTTP URL
 
@@ -94,113 +94,113 @@ HTTP Method
 
 POST
 
-### 请求参数
+### Request Parameters
 
-**属性**
+**Attribute**
 
-**类型**
+**Type**
 
-**必填**
+**Required**
 
-**说明**
+**Description**
 
 appId
 
 string
 
-是
+Yes
 
-在开放平台管理端上获得。
+Obtained from the Open Platform admin console.
 
 clientSecret
 
 string
 
-是
+Yes
 
-在开放平台管理端上获得。
+Obtained from the Open Platform admin console.
 
-### 返回参数
+### Response Parameters
 
-**成功响应**
+**Success Response**
 
-**属性**
+**Attribute**
 
-**类型**
+**Type**
 
-**说明**
+**Description**
 
 access\_token
 
 string
 
-获取到的凭证。
+The obtained credential.
 
 expires\_in
 
 number
 
-凭证有效时间，单位：秒。目前是 7200 秒之内的值。
+Credential validity period, in seconds. Currently a value within 7200 seconds.
 
-**失败响应**
+**Failure Response**
 
-**属性**
+**Attribute**
 
-**类型**
+**Type**
 
-**说明**
+**Description**
 
 code
 
 number
 
-错误码，取值见下方「业务错误码」。
+Error code; see "Business Error Codes" below for values.
 
 message
 
 string
 
-错误信息，仅用于人工排查，内容可能随时调整。
+Error message, for manual troubleshooting only; the content may change at any time.
 
-注意
+Note
 
-该接口的业务错误通过响应体的 `code` 返回，即使调用失败，HTTP 返回码仍为 `200`。请优先依据 `code` 判断请求是否成功，不要只依赖 HTTP 返回码；也不要依据 `message` 判定错误类型。详见下方「错误返回码」。
+Business errors for this API are returned via the `code` field in the response body. Even if the call fails, the HTTP status code is still `200`. Prefer using `code` to determine whether the request succeeded rather than relying solely on the HTTP status code; also do not use `message` to determine the error type. See "Error Return Codes" below for details.
 
-### 错误码
+### Error Codes
 
-#### 业务错误码
+#### Business Error Codes
 
-**错误码**
+**Error Code**
 
-**错误信息**
+**Error Message**
 
-**排查指南**
+**Troubleshooting Guide**
 
 100001
 
 Too many requests
 
-请求过于频繁，请降低调用频率后重试
+Too many requests; reduce the call frequency and try again
 
 100007
 
 appid invalid
 
-AppID 无效，或机器人状态不正常（被封禁或已删除），请检查 AppID 是否正确以及机器人状态
+The AppID is invalid, or the bot status is abnormal (banned or deleted). Check whether the AppID is correct and the bot status.
 
 100016
 
 invalid appid or secret
 
-AppID 或 ClientSecret 不正确，请检查传入的 appId 和 clientSecret 是否与开放平台管理端一致
+The AppID or ClientSecret is incorrect. Check whether the passed appId and clientSecret match those in the Open Platform admin console.
 
 10004
 
-机器人不存在
+Bot does not exist
 
-AppID 对应的机器人不存在，请确认 AppID 是否正确
+No bot exists for the AppID; confirm that the AppID is correct.
 
-### 调用示例
+### Call Example
 
 ```
 curl --location 'https://api.bot.qq.com/app/getAppAccessToken' \
@@ -211,9 +211,9 @@ curl --location 'https://api.bot.qq.com/app/getAppAccessToken' \
 }'
 ```
 
-### 返回示例
+### Response Example
 
-**成功**
+**Success**
 
 ```
 {
@@ -222,7 +222,7 @@ curl --location 'https://api.bot.qq.com/app/getAppAccessToken' \
 }
 ```
 
-**失败**
+**Failure**
 
 ```
 {
@@ -231,74 +231,74 @@ curl --location 'https://api.bot.qq.com/app/getAppAccessToken' \
 }
 ```
 
-## 凭证有效期与刷新
+## Credential Validity Period and Refresh
 
-目前 `access_token` 生命周期默认 `7200` 秒（2 小时），开发者需要在过期后自行刷新 `access_token`，保证调用链路权限正常。
+Currently the `access_token` lifetime defaults to `7200` seconds (2 hours). Developers need to refresh the `access_token` themselves after it expires to ensure permissions remain valid throughout the call chain.
 
--   每次请求不会刷新新的 `access_token`，在有效期内重复获取会返回相同的值
--   在上一个 `access_token` 接近过期时间 `60` 秒内，获取 `access_token` 时，会获得一个新的 `access_token`，老的 `access_token` 在这个 `60` 秒内仍然有效
--   建议开发者在服务端设置定时刷新凭证的业务逻辑，以防止过期
+-   Each request does not refresh a new `access_token`; repeated retrieval within the validity period returns the same value
+-   Within `60` seconds before the previous `access_token` expires, retrieving `access_token` returns a new `access_token`; the old `access_token` remains valid during these `60` seconds
+-   Developers are advised to implement scheduled credential refresh logic on the server side to prevent expiration
 
-## 使用访问凭证
+## Using an Access Credential
 
-在每次调用 OpenAPI 开放接口时，需要在 HTTP 请求头中引入 `access_token` 进行调用权限验证。
+Each time an OpenAPI endpoint is called, `access_token` must be included in the HTTP request header for call permission verification.
 
-**请求头**：
+**Request Header**:
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 Authorization
 
 string
 
-是
+Yes
 
-格式值：`QQBot ACCESS_TOKEN`
+Format value: `QQBot ACCESS_TOKEN`
 
-**示例**：
+**Example**:
 
 ```
 curl --location 'https://api.bot.qq.com/users/@me' \
 --header 'Authorization: QQBot ACCESS_TOKEN'
 ```
 
-注意
+Note
 
-为了安全考虑，请勿在应用前端使用访问凭证。请在应用服务端发起 API 访问请求。
+For security reasons, do not use access credentials in the application frontend. Initiate API requests from the application server.
 
-### API 调用指南
+### API Call Guide
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/api-call-guide.html
 
-# API 调用指南
+# API Call Guide
 
-QQ 机器人开放平台提供了基于 HTTPS 协议的 OpenAPI 接口，开发者可以通过这些接口实现消息收发、群聊管理、频道管理等功能。
+The QQ Bot Open Platform provides OpenAPI endpoints based on the HTTPS protocol. Developers can use these endpoints to implement features such as sending and receiving messages, group chat management, and channel management.
 
-## 调用方式
+## Calling Methods
 
-### 统一请求地址
+### Unified Request URL
 
 ```
 https://api.bot.qq.com
 ```
 
-### 鉴权方式
+### Authentication Method
 
-调用 API 时，需要将 access\_token 放入请求 Header 中：
+When calling APIs, place access\_token in the request header:
 
 ```
 Authorization: QQBot {ACCESS_TOKEN}
 ```
 
-### 请求示例
+### Request Example
 
-以发送单聊消息为例：
+Take sending a direct chat message as an example:
 
 ```
 curl -X POST 'https://api.bot.qq.com/v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/messages' \
@@ -311,15 +311,15 @@ curl -X POST 'https://api.bot.qq.com/v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/m
 }'
 ```
 
-### 响应结构
+### Response Structure
 
-API 调用成功时，响应体直接返回业务数据；调用失败时，响应体包含 `err_code`、`message` 等错误信息：
+When an API call succeeds, the response body returns the business data directly; when the call fails, the response body contains error information such as `err_code` and `message`:
 
--   **err\_code**：错误码。成功时为 0
--   **message**：错误信息
--   **trace\_id**：链路追踪 ID，用于问题排查
+-   **err\_code**: Error code. 0 on success
+-   **message**: Error message
+-   **trace\_id**: Trace ID, used for troubleshooting
 
-**成功响应示例**：
+**Success Response Example**:
 
 ```
 {
@@ -328,1071 +328,1071 @@ API 调用成功时，响应体直接返回业务数据；调用失败时，响�
 }
 ```
 
-**失败响应示例**：
+**Failure Response Example**:
 
 ```
 {
   "err_code": 40034005,
-  "message": "回复消息msg_id已过期",
+  "message": "Reply message msg_id has expired",
   "trace_id": "4a8a61565b909f199b1ec169fdd6f49e"
 }
 ```
 
-注意
+Note
 
-请不要依据 `message` 来判定一个请求是否失败，`message` 可能会随时调整，建议根据 `err_code` 判断请求是否失败。
+Do not use `message` to determine whether a request failed; `message` may change at any time. Use `err_code` to determine whether a request failed.
 
-## 唯一身份机制
+## Unique Identity Mechanism
 
-不同的 `bot(AppID)` 获取到的用户 `openid`，群 `openid`，频道 `openid` 均不相同，若跨业务有关联用户身份需求，后续提供跨 `AppID` 绑定后，使用类似 `unionid` 的机制打通身份。
+Different `bot(AppID)`s obtain different user `openid`s, group `openid`s, and channel `openid`s. If there is a need to associate user identities across businesses, once cross-`AppID` binding is provided in the future, a mechanism similar to `unionid` can be used to unify identities.
 
-举例
+Example
 
--   不同 `bot` 在单聊场景，获取到的用户唯一识别 `openid` 不一样，称为 `user_openid`
--   不同 `bot` 在群聊场景，获取到的群唯一识别号 `openid` 不一样，称为 `group_openid`
--   `bot` 在群聊场景，获取到用户在群内的唯一识别号，称为 `member_openid`
+-   In direct chat scenarios, different `bot`s obtain different unique user identifiers `openid`, called `user_openid`
+-   In group chat scenarios, different `bot`s obtain different unique group identifiers `openid`, called `group_openid`
+-   In group chat scenarios, a `bot` obtains the unique identifier of a user within the group, called `member_openid`
 
-## 全链路追踪
+## End-to-End Tracing
 
-平台的链路追踪 `TraceID` 可通过两种方式获取：
+The platform's trace `TraceID` can be obtained in two ways:
 
--   **HTTP 响应头**：`X-Tps-trace-ID` 字段
--   **响应 Body**：返回体中的 `trace_id` 字段
+-   **HTTP response header**: the `X-Tps-trace-ID` field
+-   **Response body**: the `trace_id` field in the response body
 
-如果开发者有无法自行定位的问题，需要找平台协助时，可提取该 ID 提交给平台方，方便查询相关日志。
+If developers encounter issues they cannot troubleshoot themselves and need platform assistance, they can extract this ID and submit it to the platform to facilitate log lookup.
 
-## OpenAPI 错误码
+## OpenAPI Error Codes
 
-错误码分为两部分：
+Error codes consist of two parts:
 
--   HTTP 状态码
--   HTTP Body 返回的 JSON 中的 `err_code`
+-   HTTP status code
+-   `err_code` in the JSON returned in the HTTP body
 
-### HTTP 状态码
+### HTTP Status Codes
 
-值
+Value
 
-含义
+Meaning
 
 200
 
-成功
+Success
 
 204
 
-成功，但是无包体，一般用于删除操作
+Success, but no body; generally used for delete operations
 
 201, 202
 
-异步操作成功，虽然说成功，但是会返回一个 error body，需要特殊处理
+Asynchronous operation succeeded; although it is successful, it returns an error body and requires special handling
 
 401
 
-认证失败
+Authentication failed
 
 404
 
-未找到 API
+API not found
 
 405
 
-HTTP Method 不允许
+HTTP method not allowed
 
 429
 
-频率限制
+Rate limited
 
 500
 
-处理失败
+Processing failed
 
 504
 
-处理失败
+Processing failed
 
-### 公共错误码
+### Common Error Codes
 
-> 以下为所有接口通用的公共错误码。各接口特有的错误码请查阅具体接口文档中的「错误码」章节。
+> The following are common error codes applicable to all APIs. For error codes specific to each API, refer to the "Error Codes" section in the corresponding API documentation.
 
-值
+Value
 
-含义
+Meaning
 
 10001
 
-UnknownAccount 账号异常
+UnknownAccount Account abnormal
 
 10003
 
-UnknownChannel 子频道异常
+UnknownChannel Sub-channel abnormal
 
 10004
 
-UnknownGuild 频道异常
+UnknownGuild Channel abnormal
 
 11281
 
-ErrorCheckAdminFailed 检查是否是管理员失败，系统错误，一般重试一次会好，最多只能重试一次
+ErrorCheckAdminFailed Failed to check whether the user is an administrator; system error, usually resolves after one retry; retry at most once
 
 11282
 
-ErrorCheckAdminNotPass 检查是否是管理员未通过，该接口需要管理员权限，但是用户在添加机器人的时候并未授予该权限，属于逻辑错误，可以提示用户进行授权
+ErrorCheckAdminNotPass Administrator check failed; this API requires administrator permission, but the user did not grant this permission when adding the bot. This is a logic error; prompt the user to authorize.
 
 11251
 
-ErrorWrongAppid 参数中的 appid 错误，开发者填的 token 错误，appid 无法识别
+ErrorWrongAppid The appid in the parameters is wrong; the token filled in by the developer is wrong, and the appid cannot be recognized
 
 11252
 
-ErrorCheckAppPrivilegeFailed 检查应用权限失败，系统错误，一般重试一次会好，最多只能重试一次
+ErrorCheckAppPrivilegeFailed Failed to check application permissions; system error, usually resolves after one retry; retry at most once
 
 11253
 
-ErrorCheckAppPrivilegeNotPass 检查应用权限不通过，该机器人应用未获得调用该接口的权限，需要向平台申请
+ErrorCheckAppPrivilegeNotPass Application permission check failed; this bot application has not been granted permission to call this API and must apply to the platform
 
 11254
 
-ErrorInterfaceForbidden 应用接口被封禁，该机器人虽然获得了该接口权限，但是被封禁了
+ErrorInterfaceForbidden The application API is banned; although this bot has been granted permission for this API, it has been banned
 
 11261
 
-ErrorWrongAppid 参数中缺少 appid，同 11251
+ErrorWrongAppid appid is missing from the parameters; same as 11251
 
 11262
 
-ErrorCheckRobot 当前接口不支持使用机器人 Bot Token 调用
+ErrorCheckRobot This API does not support being called with a bot Bot Token
 
 11263
 
-ErrorCheckGuildAuth 检查频道权限失败，系统错误，一般重试一次会好，最多只能重试一次
+ErrorCheckGuildAuth Failed to check channel permissions; system error, usually resolves after one retry; retry at most once
 
 11264
 
-ErrorGuildAuthNotPass 检查小站权限未通过，管理员添加机器人的时候未授予该接口权限，属于逻辑错误，可提示用户进行授权，如果已经给予授权，请检查传递的 guild id 是否正确
+ErrorGuildAuthNotPass Guild permission check failed; the administrator did not grant this API permission when adding the bot. This is a logic error; you can prompt the user to authorize. If authorization has already been granted, check whether the passed guild id is correct.
 
 11265
 
-ErrorRobotHasBaned 机器人已经被封禁
+ErrorRobotHasBaned The bot has been banned
 
 11241
 
-ErrorWrongToken 参数中缺少 token
+ErrorWrongToken token is missing from the parameters
 
 11242
 
-ErrorCheckTokenFailed 校验 token 失败，系统错误，一般重试一次会好，最多只能重试一次
+ErrorCheckTokenFailed Failed to verify token; system error, usually resolves after one retry; retry at most once
 
 11243
 
-ErrorCheckTokenNotPass 校验 token 未通过，用户填充的 token 错误，需要开发者进行检查
+ErrorCheckTokenNotPass Token verification failed; the token filled in by the user is wrong and the developer needs to check it
 
 11273
 
-ErrorCheckUserAuth 检查用户权限失败，当前接口不支持使用 Bearer Token 调用
+ErrorCheckUserAuth Failed to check user permissions; this API does not support being called with a Bearer Token
 
 11274
 
-ErrorUserAuthNotPass 检查用户权限未通过，用户 OAuth 授权时未给与该接口权限，可提示用户重新进行授权
+ErrorUserAuthNotPass User permission check failed; the user did not grant this API permission during OAuth authorization. You can prompt the user to authorize again.
 
 11275
 
-ErrorWrongAppid 无 appid，同 11251
+ErrorWrongAppid No appid; same as 11251
 
 11301
 
-ErrorGetHTTPHeader HTTP Header 无效
+ErrorGetHTTPHeader Invalid HTTP header
 
 11302
 
-ErrorGetHeaderUIN HTTP Header 无效
+ErrorGetHeaderUIN Invalid HTTP header
 
 11303
 
-ErrorGetNick 获取昵称失败
+ErrorGetNick Failed to get nickname
 
 11304
 
-ErrorGetAvatar 获取头像失败
+ErrorGetAvatar Failed to get avatar
 
 11305
 
-ErrorGetGuildID 获取频道 ID 失败
+ErrorGetGuildID Failed to get channel ID
 
 11306
 
-ErrorGetGuildInfo 获取频道信息失败
+ErrorGetGuildInfo Failed to get channel information
 
 12001
 
-ReplaceIDFailed 替换 id 失败
+ReplaceIDFailed Failed to replace id
 
 12002
 
-RequestInvalid 请求体错误
+RequestInvalid Invalid request body
 
 12003
 
-ResponseInvalid 回包错误
+ResponseInvalid Invalid response packet
 
 20028
 
-ChannelHitWriteRateLimit 子频道消息触发限频
+ChannelHitWriteRateLimit Sub-channel message rate limit triggered
 
 50006
 
-CannotSendEmptyMessage 消息为空
+CannotSendEmptyMessage Message is empty
 
 50035
 
-InvalidFormBody form-data 内容异常
+InvalidFormBody Abnormal form-data content
 
 50037
 
-带有 markdown 消息只支持 markdown 或者 keyboard 组合
+Messages with markdown only support markdown or keyboard combinations
 
 50038
 
-非同频道同子频道
+Not the same channel and sub-channel
 
 50039
 
-获取消息失败
+Failed to get message
 
 50040
 
-消息模版类型错误
+Message template type error
 
 50041
 
-markdown 有空值
+markdown contains empty values
 
 50042
 
-markdown 列表长达最大值
+markdown list reached the maximum length
 
 50043
 
-guild\_id 转换失败
+guild\_id conversion failed
 
 50045
 
-不能回复机器人自己产生的消息
+Cannot reply to messages generated by the bot itself
 
 50046
 
-非 at 机器人消息
+Message does not @ the bot
 
 50047
 
-非机器人产生的消息 或者 at 机器人消息
+Message not generated by a bot, or a message @ing the bot
 
 50048
 
-message id 不能为空
+message id cannot be empty
 
 50049
 
-只能修改含有 keyboard 元素的消息
+Only messages containing keyboard elements can be modified
 
 50050
 
-修改消息时，keyboard 元素不能为空
+When modifying a message, the keyboard element cannot be empty
 
 50051
 
-只能修改机器人自己发送的消息
+Only messages sent by the bot itself can be modified
 
 50053
 
-修改消息错误
+Error modifying message
 
 50054
 
-markdown 模版参数错误
+markdown template parameter error
 
 50055
 
-无效的 markdown content
+Invalid markdown content
 
 50056
 
-不允许发送 markdown content
+Sending markdown content is not allowed
 
 50057
 
-markdown 参数只支持原生语法或者模版二选一
+The markdown parameter supports either native syntax or a template, not both
 
 301000~301099
 
-子频道权限错误
+Sub-channel permission error
 
 301000
 
-参数错误
+Parameter error
 
 301001
 
-查询频道信息错误
+Error querying channel information
 
 301002
 
-查询子频道权限错误
+Error querying sub-channel permissions
 
 301003
 
-修改子频道权限错误
+Error modifying sub-channel permissions
 
 301004
 
-私密子频道关联的人数到达上限
+The number of people associated with the private sub-channel has reached the limit
 
 301005
 
-调用 Rpc 服务失败
+Failed to call RPC service
 
 301006
 
-非群成员没有查询权限
+Non-group members do not have query permission
 
 301007
 
-参数超过数量限制
+Parameters exceed the quantity limit
 
 302000
 
-参数错误
+Parameter error
 
 302001
 
-查询频道信息错误
+Error querying channel information
 
 302002
 
-查询日程列表失败
+Failed to query schedule list
 
 302003
 
-查询日程失败
+Failed to query schedule
 
 302004
 
-修改日程失败
+Failed to modify schedule
 
 302005
 
-删除日程失败
+Failed to delete schedule
 
 302006
 
-创建日程失败
+Failed to create schedule
 
 302007
 
-获取创建者信息失败
+Failed to get creator information
 
 302008
 
-子频道 ID 不能为空
+Sub-channel ID cannot be empty
 
 302009
 
-频道系统错误，请联系客服
+Channel system error; please contact customer service
 
 302010
 
-暂无修改日程权限
+No permission to modify schedule
 
 302011
 
-日程活动已被删除
+The schedule event has been deleted
 
 302012
 
-每天只能创建 10 个日程，明天再来吧！
+You can only create 10 schedules per day; come back tomorrow!
 
 302013
 
-创建日程触发安全打击
+Schedule creation triggered a security block
 
 302014
 
-日程持续时间超过 7 天，请重新选择
+The schedule duration exceeds 7 days; please select again
 
 302015
 
-开始时间不能早于当前时间
+The start time cannot be earlier than the current time
 
 302016
 
-结束时间不能早于开始时间
+The end time cannot be earlier than the start time
 
 302017
 
-Schedule 对象为空
+The Schedule object is empty
 
 302018
 
-参数类型转换失败
+Parameter type conversion failed
 
 302019
 
-调用下游失败，请联系客服
+Failed to call downstream; please contact customer service
 
 302020
 
-日程内容违规、账号违规
+Schedule content violates rules; account violates rules
 
 302021
 
-频道内当日新增活动达上限
+The number of new events in the channel for the day has reached the limit
 
 302022
 
-不能绑定非当前频道的子频道
+Cannot bind a sub-channel that does not belong to the current channel
 
 302023
 
-开始时跳转不可绑定日程子频道
+Cannot bind a schedule sub-channel when redirecting at start time
 
 302024
 
-绑定的子频道不存在
+The bound sub-channel does not exist
 
 304003
 
-URL\_NOT\_ALLOWED url 未报备
+URL\_NOT\_ALLOWED url is not registered
 
 304004
 
-ARK\_NOT\_ALLOWED 没有发 ark 消息权限
+ARK\_NOT\_ALLOWED No permission to send ARK messages
 
 304005
 
-EMBED\_LIMIT embed 长度超限
+EMBED\_LIMIT embed length exceeds limit
 
 304006
 
-SERVER\_CONFIG 后台配置错误
+SERVER\_CONFIG backend configuration error
 
 304007
 
-GET\_GUILD 查询频道异常
+GET\_GUILD error querying channel
 
 304008
 
-GET\_BOT 查询机器人异常
+GET\_BOT error querying bot
 
 304009
 
-GET\_CHENNAL 查询子频道异常
+GET\_CHENNAL error querying sub-channel
 
 304010
 
-CHANGE\_IMAGE\_URL 图片转存错误
+CHANGE\_IMAGE\_URL image transfer error
 
 304011
 
-NO\_TEMPLATE 模板不存在
+NO\_TEMPLATE template does not exist
 
 304012
 
-GET\_TEMPLATE 取模板错误
+GET\_TEMPLATE error retrieving template
 
 304014
 
-TEMPLATE\_PRIVILEGE 没有模板权限
+TEMPLATE\_PRIVILEGE no template permission
 
 304016
 
-SEND\_ERROR 发消息错误
+SEND\_ERROR error sending message
 
 304017
 
-UPLOAD\_IMAGE 图片上传错误
+UPLOAD\_IMAGE image upload error
 
 304018
 
-SESSION\_NOT\_EXIST 机器人没连上 gateway
+SESSION\_NOT\_EXIST bot is not connected to gateway
 
 304019
 
-AT\_EVERYONE\_TIMES @全体成员 次数超限
+AT\_EVERYONE\_TIMES @all members count limit exceeded
 
 304020
 
-FILE\_SIZE 文件大小超限
+FILE\_SIZE file size exceeds limit
 
 304021
 
-GET\_FILE 下载文件错误
+GET\_FILE error downloading file
 
 304022
 
-PUSH\_TIME 推送消息时间限制
+PUSH\_TIME push message time limit
 
 304023
 
-PUSH\_MSG\_ASYNC\_OK 推送消息异步调用成功，等待人工审核
+PUSH\_MSG\_ASYNC\_OK push message async call succeeded, awaiting manual review
 
 304024
 
-REPLY\_MSG\_ASYNC\_OK 回复消息异步调用成功，等待人工审核
+REPLY\_MSG\_ASYNC\_OK reply message async call succeeded, awaiting manual review
 
 304025
 
-BEAT 消息被打击
+BEAT message was blocked by security
 
 304026
 
-MSG\_ID 回复的消息 id 错误
+MSG\_ID reply message id error
 
 304027
 
-MSG\_EXPIRE 回复的消息过期
+MSG\_EXPIRE replied message expired
 
 304028
 
-MSG\_PROTECT 非 At 当前用户的消息不允许回复
+MSG\_PROTECT replying to a message that does not @ the current user is not allowed
 
 304029
 
-CORPUS\_ERROR 调语料服务错误
+CORPUS\_ERROR error calling corpus service
 
 304030
 
-CORPUS\_NOT\_MATCH 语料不匹配
+CORPUS\_NOT\_MATCH corpus mismatch
 
 304031
 
-私信已关闭
+Direct message is closed
 
 304032
 
-私信不存在
+Direct message does not exist
 
 304033
 
-拉私信错误
+Error retrieving direct message
 
 304034
 
-不是私信成员
+Not a member of the direct message
 
 304035
 
-推送消息超过子频道数量限制
+Push message exceeds the sub-channel count limit
 
 304036
 
-没有 markdown 模板的权限
+No permission for markdown template
 
 304037
 
-没有发消息按钮组件的权限
+No permission to send message button component
 
 304038
 
-消息按钮组件不存在
+Message button component does not exist
 
 304039
 
-消息按钮组件解析错误
+Message button component parsing error
 
 304040
 
-消息按钮组件消息内容错误
+Message button component message content error
 
 304044
 
-取消息设置错误
+Error retrieving message settings
 
 304045
 
-子频道主动消息数限频
+Rate limit on the number of proactive messages in a sub-channel
 
 304046
 
-不允许在此子频道发主动消息
+Proactive messages are not allowed in this sub-channel
 
 304047
 
-主动消息推送超过限制的子频道数
+Proactive message push exceeds the limit of sub-channels
 
 304048
 
-不允许在此频道发主动消息
+Proactive messages are not allowed in this channel
 
 304049
 
-私信主动消息数限频
+Rate limit on the number of proactive direct messages
 
 304050
 
-私信主动消息总量限频
+Rate limit on the total number of proactive direct messages
 
 304051
 
-消息设置引导请求构造错误
+Error constructing message settings guide request
 
 304052
 
-发消息设置引导超频
+Sending message settings guide exceeded rate limit
 
 306001
 
-param invalid 撤回消息参数错误
+param invalid invalid parameters for recalling message
 
 306002
 
-msgid error 消息 id 错误
+msgid error message id error
 
 306003
 
-fail to get message 获取消息错误(可重试)
+fail to get message error getting message (retryable)
 
 306004
 
-no permission to delete message 没有撤回此消息的权限
+no permission to delete message no permission to recall this message
 
 306005
 
-retract message error 消息撤回失败(可重试)
+retract message error failed to recall message (retryable)
 
 306006
 
-fail to get channel 获取子频道失败(可重试)
+fail to get channel failed to get sub-channel (retryable)
 
 501000~501999
 
-公告错误
+Announcement error
 
 501001
 
-参数校验失败
+Parameter validation failed
 
 501002
 
-创建子频道公告失败(可重试)
+Failed to create sub-channel announcement (retryable)
 
 501003
 
-删除子频道公告失败(可重试)
+Failed to delete sub-channel announcement (retryable)
 
 501004
 
-获取频道信息失败(可重试)
+Failed to get channel information (retryable)
 
 501005
 
-MessageID 错误
+MessageID error
 
 501006
 
-创建频道全局公告失败(可重试)
+Failed to create channel global announcement (retryable)
 
 501007
 
-删除频道全局公告失败(可重试)
+Failed to delete channel global announcement (retryable)
 
 501008
 
-MessageID 不存在
+MessageID does not exist
 
 501009
 
-MessageID 解析失败
+MessageID parsing failed
 
 501010
 
-此条消息非子频道内消息
+This message is not a message within a sub-channel
 
 501011
 
-创建精华消息失败(可重试)
+Failed to create featured message (retryable)
 
 501012
 
-删除精华消息失败(可重试)
+Failed to delete featured message (retryable)
 
 501013
 
-精华消息超过最大数量
+Featured messages exceed the maximum count
 
 501014
 
-安全打击
+Blocked by security
 
 501015
 
-此消息不允许设置
+This message cannot be set
 
 501016
 
-频道公告子频道推荐超过最大数量
+Channel announcement sub-channel recommendations exceed the maximum count
 
 501017
 
-非频道主或管理员
+Not a channel owner or administrator
 
 501018
 
-推荐子频道 ID 无效
+Invalid recommended sub-channel ID
 
 501019
 
-公告类型错误
+Announcement type error
 
 501020
 
-创建推荐子频道类型频道公告失败
+Failed to create recommended sub-channel type channel announcement
 
 502000~502099
 
-禁言相关错误
+Mute-related error
 
 502001
 
-频道 id 无效
+Invalid channel id
 
 502002
 
-频道 id 为空
+Channel id is empty
 
 502003
 
-用户 id 无效
+Invalid user id
 
 502004
 
-用户 id 为空
+User id is empty
 
 502005
 
-timestamp 不合法
+Invalid timestamp
 
 502006
 
-timestamp 无效
+Timestamp is invalid
 
 502007
 
-参数转换错误
+Parameter conversion error
 
 502008
 
-rpc 调用失败
+rpc call failed
 
 502009
 
-安全打击
+Blocked by security
 
 502010
 
-请求头错误
+Request header error
 
 503001
 
-频道 id 无效
+Invalid channel id
 
 503002
 
-频道 id 为空
+Channel id is empty
 
 503003
 
-获取子频道信息失败
+Failed to get sub-channel information
 
 503004
 
-超出发布帖子的频次限制
+Exceeded the rate limit for publishing posts
 
 503005
 
-帖子标题为空
+Post title is empty
 
 503006
 
-帖子内容为空
+Post content is empty
 
 503007
 
-帖子ID为空
+Post ID is empty
 
 503008
 
-获取X-Uin失败
+Failed to get X-Uin
 
 503009
 
-帖子ID无效或不合法
+Post ID is invalid or illegal
 
 503010
 
-通过Uin获取TinyID失败
+Failed to get TinyID via Uin
 
 503011
 
-帖子ID里面的时间戳无效或不合法
+The timestamp in the post ID is invalid or illegal
 
 503012
 
-帖子不存在或已删除
+Post does not exist or has been deleted
 
 503013
 
-服务器内部错误
+Internal server error
 
 503014
 
-帖子JSON内容解析失败
+Failed to parse post JSON content
 
 503015
 
-帖子内容转换失败
+Failed to convert post content
 
 503016
 
-链接数量超过限制
+Number of links exceeds limit
 
 503017
 
-字数超过限制
+Character count exceeds limit
 
 503018
 
-图片数量超过限制
+Number of images exceeds limit
 
 503019
 
-视频数量超过限制
+Number of videos exceeds limit
 
 503020
 
-标题长度超过限制
+Title length exceeds limit
 
 504000~504999
 
-消息频率相关错误
+Message rate-related error
 
 504001
 
-请求参数无效错误
+Invalid request parameter error
 
 504002
 
-获取 HTTP 头失败
+Failed to get HTTP header
 
 504003
 
-获取 BOT UIN 错误
+Error getting BOT UIN
 
 504004
 
-获取消息频率设置信息错误
+Error getting message rate settings
 
 610000-619999
 
-频道权限错误
+Channel permission error
 
 610001
 
-获取频道 ID 失败
+Failed to get channel ID
 
 610002
 
-获取 HTTP 头失败
+Failed to get HTTP header
 
 610003
 
-获取机器人号码失败
+Failed to get bot number
 
 610004
 
-获取机器人角色失败
+Failed to get bot role
 
 610005
 
-获取机器人角色内部错误
+Internal error getting bot role
 
 610006
 
-拉取机器人权限列表失败
+Failed to fetch bot permission list
 
 610007
 
-机器人不在频道内
+Bot is not in the channel
 
 610008
 
-无效参数
+Invalid parameter
 
 610009
 
-获取 API 接口详情失败
+Failed to get API endpoint details
 
 610010
 
-API 接口已授权
+API endpoint already authorized
 
 610011
 
-获取机器人信息失败
+Failed to get bot information
 
 610012
 
-限频失败
+Rate limiting failed
 
 610013
 
-已限频
+Rate limited
 
 610014
 
-api 授权链接发送失败
+Failed to send api authorization link
 
 620001-629999
 
-表情表态错误
+Emoji reaction error
 
 620001
 
-表情表态无效参数
+Invalid parameter for emoji reaction
 
 620002
 
-已经达到表情反应的类型数量上限
+The maximum number of emoji reaction types has been reached
 
 620003
 
-已经设置过该表情表态
+This emoji reaction has already been set
 
 620004
 
-没有设置过该表情表态
+This emoji reaction has not been set
 
 620005
 
-没有权限设置表情表态
+No permission to set emoji reaction
 
 620006
 
-操作限频
+Operation rate limited
 
 620007
 
-表情表态操作失败，请重试
+Emoji reaction operation failed, please retry
 
 630001-639999
 
-互动回调数据更新
+Interaction callback data update
 
 630001
 
-互动回调数据更新无效参数
+Invalid parameter for interaction callback data update
 
 630002
 
-互动回调数据更新获取AppID失败
+Failed to get AppID for interaction callback data update
 
 630003
 
-互动回调数据AppID不匹配
+AppID mismatch for interaction callback data
 
 630004
 
-互动回调数据更新内部存储错误
+Internal storage error for interaction callback data update
 
 630005
 
-互动回调数据更新内部存储读取错误
+Internal storage read error for interaction callback data update
 
 630006
 
-互动回调数据更新读取请求AppID失败
+Failed to read AppID from request for interaction callback data update
 
 630007
 
-互动回调数据太大
+Interaction callback data is too large
 
 1000000~2999999
 
-发消息错误
+Error sending message
 
 1100100
 
-安全打击：消息被限频
+Security block: message rate-limited
 
 1100101
 
-安全打击：内容涉及敏感，请返回修改
+Security block: content involves sensitive material, please modify and resubmit
 
 1100102
 
-安全打击：抱歉，暂未获得新功能体验资格
+Security block: sorry, you have not yet obtained eligibility to try the new feature
 
 1100103
 
-安全打击
+Blocked by security
 
 1100104
 
-安全打击：该群已失效或当前群已不存在
+Security block: this group is no longer valid or no longer exists
 
 1100300
 
-系统内部错误
+Internal system error
 
 1100301
 
-调用方不是群成员
+Caller is not a group member
 
 1100302
 
-获取指定频道名称失败
+Failed to get specified channel name
 
 1100303
 
-主页频道非管理员不允许发消息
+Non-administrators are not allowed to send messages in the homepage channel
 
 1100304
 
-@次数鉴权失败
+@ count authentication failed
 
 1100305
 
-TinyId 转换 Uin 失败
+TinyId to Uin conversion failed
 
 1100306
 
-非私有频道成员
+Not a member of the private channel
 
 1100307
 
-非白名单应用子频道
+Non-whitelisted application sub-channel
 
 1100308
 
-触发频道内限频
+Rate limit triggered within the channel
 
 1100499
 
-其他错误
+Other error
 
 3000000~3999999
 
-编辑消息错误
+Error editing message
 
 3300006
 
-安全打击
+Blocked by security
 
-### 通用数据结构
+### Common Data Structures
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/event-emit/payload.html
 
-# 通用数据结构
+# Common Data Structures
 
-`payload` 指的是在 `webhook` 或 `websocket` 连接上传输的数据，网关的上下行消息采用的都是同一个结构，如下：
+`payload` refers to the data transmitted over a `webhook` or `websocket` connection. The uplink and downlink messages of the gateway use the same structure, as follows:
 
 ```
 {
@@ -1404,43 +1404,43 @@ TinyId 转换 Uin 失败
 }
 ```
 
-字段
+Field
 
-描述
+Description
 
 id
 
-事件id
+Event id
 
 op
 
-指的是 opcode，参考连接维护
+Refers to the opcode; see connection maintenance
 
 s
 
-下行消息都会有一个序列号，标识消息的唯一性，客户端需要再发送心跳的时候，携带客户端收到的最新的 s
+Every downlink message has a sequence number that identifies the uniqueness of the message. When the client sends a heartbeat, it needs to carry the latest s received by the client.
 
 t
 
-代表事件类型。主要用在 op 为 0 Dispatch 的时候
+Represents the event type. Mainly used when op is 0 Dispatch.
 
 d
 
-代表事件内容，不同事件类型的事件内容格式都不同，请注意识别。主要用在 op 为 0 Dispatch 的时候
+Represents the event content. The content format differs for each event type, so please identify it carefully. Mainly used when op is 0 Dispatch.
 
-## OpCode 含义
+## OpCode Meaning
 
-所有 `opcode` 列表如下：
+The list of all `opcode` values is as follows:
 
 **CODE**
 
-**名称**
+**Name**
 
-**接入方式**
+**Access Method**
 
-**客户端行为**
+**Client Behavior**
 
-**描述**
+**Description**
 
 0
 
@@ -1450,7 +1450,7 @@ webhook/websocket
 
 Receive
 
-服务端进行消息推送
+Server pushes messages
 
 1
 
@@ -1460,7 +1460,7 @@ websocket
 
 Send/Receive
 
-客户端或服务端发送心跳
+Client or server sends heartbeat
 
 2
 
@@ -1470,7 +1470,7 @@ websocket
 
 Send
 
-客户端发送鉴权
+Client sends authentication
 
 6
 
@@ -1480,7 +1480,7 @@ websocket
 
 Send
 
-客户端恢复连接
+Client resumes connection
 
 7
 
@@ -1490,7 +1490,7 @@ websocket
 
 Receive
 
-服务端通知客户端重新连接
+Server notifies client to reconnect
 
 9
 
@@ -1500,7 +1500,7 @@ websocket
 
 Receive
 
-当 identify 或 resume 的时候，如果参数有错，服务端会返回该消息
+When identify or resume is used, if any parameter is incorrect, the server returns this message
 
 10
 
@@ -1510,7 +1510,7 @@ websocket
 
 Receive
 
-当客户端与网关建立 ws 连接之后，网关下发的第一条消息
+The first message sent by the gateway after the client establishes a ws connection with the gateway
 
 11
 
@@ -1520,7 +1520,7 @@ websocket
 
 Receive/Reply
 
-当发送心跳成功之后，就会收到该消息
+Received after a heartbeat is sent successfully
 
 12
 
@@ -1530,127 +1530,127 @@ webhook
 
 Reply
 
-仅用于 http 回调模式的回包，代表机器人收到了平台推送的数据
+Used only for the response packet in http callback mode, indicating that the bot has received the data pushed by the platform
 
 13
 
-回调地址验证
+Callback address verification
 
 webhook
 
 Receive
 
-开放平台对机器人服务端进行验证
+The Open Platform verifies the bot server
 
-客户端行为含义如下：
+The meanings of client behaviors are as follows:
 
--   `Receive` 客户端接收到服务端 `push` 的消息
--   `Send` 客户端发送消息
--   `Reply` 客户端接收到服务端发送的消息之后的回包（HTTP 回调模式）
+-   `Receive` The client receives a message `push`ed by the server
+-   `Send` The client sends a message
+-   `Reply` The response packet after the client receives a message sent by the server (HTTP callback mode)
 
-## 事件订阅 Intents
+## Event Subscription Intents
 
-事件的 `intents` 是一个标记位，每一位都代表不同的事件，如果需要接收某类事件，就将该位置为 `1`。
+The `intents` of an event is a bitmask, where each bit represents a different event. If you need to receive a certain type of event, set that bit to `1`.
 
-每个 `intents` 位代表的是一类事件，可以使用 `websocket` 传输的数据中的 `t` 字段的值来区分。
+Each `intents` bit represents a type of event, which can be distinguished by the value of the `t` field in the data transmitted over `websocket`.
 
-事件和位移的关系如下：
+The relationship between events and bit shifts is as follows:
 
 ```
 GUILDS (1 << 0)
-  - GUILD_CREATE           // 当机器人加入新guild时
-  - GUILD_UPDATE           // 当guild资料发生变更时
-  - GUILD_DELETE           // 当机器人退出guild时
-  - CHANNEL_CREATE         // 当channel被创建时
-  - CHANNEL_UPDATE         // 当channel被更新时
-  - CHANNEL_DELETE         // 当channel被删除时
+  - GUILD_CREATE           // When the bot joins a new guild
+  - GUILD_UPDATE           // When guild information changes
+  - GUILD_DELETE           // When the bot leaves a guild
+  - CHANNEL_CREATE         // When a channel is created
+  - CHANNEL_UPDATE         // When a channel is updated
+  - CHANNEL_DELETE         // When a channel is deleted
 
 GUILD_MEMBERS (1 << 1)
-  - GUILD_MEMBER_ADD       // 当成员加入时
-  - GUILD_MEMBER_UPDATE    // 当成员资料变更时
-  - GUILD_MEMBER_REMOVE    // 当成员被移除时
+  - GUILD_MEMBER_ADD       // When a member joins
+  - GUILD_MEMBER_UPDATE    // When member information changes
+  - GUILD_MEMBER_REMOVE    // When a member is removed
 
-GUILD_MESSAGES (1 << 9)    // 消息事件，仅 *私域* 机器人能够设置此 intents。
-  - MESSAGE_CREATE         // 发送消息事件，代表频道内的全部消息，而不只是 at 机器人的消息。内容与 AT_MESSAGE_CREATE 相同
-  - MESSAGE_DELETE         // 删除（撤回）消息事件
+GUILD_MESSAGES (1 << 9)    // Message events; only *private domain* bots can set this intents.
+  - MESSAGE_CREATE         // Message send event, representing all messages in the channel, not just messages that @ the bot. Content is the same as AT_MESSAGE_CREATE
+  - MESSAGE_DELETE         // Message delete (recall) event
 
 GUILD_MESSAGE_REACTIONS (1 << 10)
-  - MESSAGE_REACTION_ADD    // 为消息添加表情表态
-  - MESSAGE_REACTION_REMOVE // 为消息删除表情表态
+  - MESSAGE_REACTION_ADD    // Add an emoji reaction to a message
+  - MESSAGE_REACTION_REMOVE // Remove an emoji reaction from a message
 
 DIRECT_MESSAGE (1 << 12)
-  - DIRECT_MESSAGE_CREATE   // 当收到用户发给机器人的私信消息时
-  - DIRECT_MESSAGE_DELETE   // 删除（撤回）消息事件
+  - DIRECT_MESSAGE_CREATE   // When a direct message sent by a user to the bot is received
+  - DIRECT_MESSAGE_DELETE   // Message delete (recall) event
 
 GROUP_AND_C2C_EVENT (1 << 25)
-  - C2C_MESSAGE_CREATE      // 用户单聊发消息给机器人时候
-  - FRIEND_ADD              // 用户添加使用机器人
-  - FRIEND_DEL              // 用户删除机器人
-  - C2C_MSG_REJECT          // 用户在机器人资料卡手动关闭"主动消息"推送
-  - C2C_MSG_RECEIVE         // 用户在机器人资料卡手动开启"主动消息"推送开关
-  - GROUP_AT_MESSAGE_CREATE // 用户在群里@机器人时收到的消息
-  - GROUP_ADD_ROBOT         // 机器人被添加到群聊
-  - GROUP_DEL_ROBOT         // 机器人被移出群聊
-  - GROUP_MSG_REJECT        // 群管理员主动在机器人资料页操作关闭通知
-  - GROUP_MSG_RECEIVE       // 群管理员主动在机器人资料页操作开启通知
+  - C2C_MESSAGE_CREATE      // When a user sends a direct chat message to the bot
+  - FRIEND_ADD              // User adds and uses the bot
+  - FRIEND_DEL              // User removes the bot
+  - C2C_MSG_REJECT          // User manually turns off "proactive message" push on the bot profile card
+  - C2C_MSG_RECEIVE         // User manually turns on the "proactive message" push switch on the bot profile card
+  - GROUP_AT_MESSAGE_CREATE // Message received when a user @s the bot in a group
+  - GROUP_ADD_ROBOT         // Bot is added to a group chat
+  - GROUP_DEL_ROBOT         // Bot is removed from a group chat
+  - GROUP_MSG_REJECT        // Group administrator manually turns off notifications on the bot profile page
+  - GROUP_MSG_RECEIVE       // Group administrator manually turns on notifications on the bot profile page
 
 INTERACTION (1 << 26)
-  - INTERACTION_CREATE     // 互动事件创建时
+  - INTERACTION_CREATE     // When an interaction event is created
 
 MESSAGE_AUDIT (1 << 27)
-  - MESSAGE_AUDIT_PASS     // 消息审核通过
-  - MESSAGE_AUDIT_REJECT   // 消息审核不通过
+  - MESSAGE_AUDIT_PASS     // Message audit passed
+  - MESSAGE_AUDIT_REJECT   // Message audit failed
 
-FORUMS_EVENT (1 << 28)  // 论坛事件，仅 *私域* 机器人能够设置此 intents。
-  - FORUM_THREAD_CREATE     // 当用户创建主题时
-  - FORUM_THREAD_UPDATE     // 当用户更新主题时
-  - FORUM_THREAD_DELETE     // 当用户删除主题时
-  - FORUM_POST_CREATE       // 当用户创建帖子时
-  - FORUM_POST_DELETE       // 当用户删除帖子时
-  - FORUM_REPLY_CREATE      // 当用户回复评论时
-  - FORUM_REPLY_DELETE      // 当用户回复评论时
-  - FORUM_PUBLISH_AUDIT_RESULT      // 当用户发表审核通过时
+FORUMS_EVENT (1 << 28)  // Forum event; only *private-domain* bots can set this intents.
+  - FORUM_THREAD_CREATE     // When a user creates a thread
+  - FORUM_THREAD_UPDATE     // When a user updates a thread
+  - FORUM_THREAD_DELETE     // When a user deletes a thread
+  - FORUM_POST_CREATE       // When a user creates a post
+  - FORUM_POST_DELETE       // When a user deletes a post
+  - FORUM_REPLY_CREATE      // When a user replies to a comment
+  - FORUM_REPLY_DELETE      // When a user replies to a comment
+  - FORUM_PUBLISH_AUDIT_RESULT      // When a user's post passes audit
 
 AUDIO_ACTION (1 << 29)
-  - AUDIO_START             // 音频开始播放时
-  - AUDIO_FINISH            // 音频播放结束时
-  - AUDIO_ON_MIC            // 上麦时
-  - AUDIO_OFF_MIC           // 下麦时
+  - AUDIO_START             // When audio starts playing
+  - AUDIO_FINISH            // When audio finishes playing
+  - AUDIO_ON_MIC            // When going on mic
+  - AUDIO_OFF_MIC           // When going off mic
 
-PUBLIC_GUILD_MESSAGES (1 << 30) // 消息事件，此为公域的消息事件
-  - AT_MESSAGE_CREATE       // 当收到@机器人的消息时
-  - PUBLIC_MESSAGE_DELETE   // 当频道的消息被删除时
+PUBLIC_GUILD_MESSAGES (1 << 30) // Message event; this is a public-domain message event
+  - AT_MESSAGE_CREATE       // When a message @mentioning the bot is received
+  - PUBLIC_MESSAGE_DELETE   // When a channel message is deleted
 ```
 
-### 举例
+### Example
 
-如开发者需要接收用户 at 机器人的消息，那么就需要在 `intents` 中设置接收 `PUBLIC_GUILD_MESSAGES`。则需要先计算 `1 << 30` 的值。然后与 `0` 做位或操作，得到最终需要传递的 `intents`。
+If a developer needs to receive messages in which users at-mention the bot, `PUBLIC_GUILD_MESSAGES` must be enabled in `intents`. First calculate the value of `1 << 30`, then perform a bitwise OR with `0` to obtain the final `intents` to pass.
 
-如果涉及到多个事件类型的接收，则需要将多个结果做位或操作，如：`0|1<<30|1<<1` 代表订阅 `PUBLIC_GUILD_MESSAGES` 和 `GUILD_MEMBERS` 这两类事件。
+If multiple event types need to be received, perform a bitwise OR on the multiple results. For example, `0|1<<30|1<<1` means subscribing to both the `PUBLIC_GUILD_MESSAGES` and `GUILD_MEMBERS` event types.
 
-### 权限
+### Permissions
 
-事件类型的订阅，是有权限控制的，除了 `GUILDS`，`PUBLIC_GUILD_MESSAGES`，`GUILD_MEMBERS` 事件是基础的事件，默认有权限订阅之外，其他的特殊事件，都需要经过申请才能够使用，如果在鉴权的时候传递了无权限的 `intents`，`websocket` 会报错，并直接关闭连接。请开发者注意订阅事件的范围需要控制在自己所需要的范围之内。
+Event type subscriptions are subject to permission control. Apart from `GUILDS`, `PUBLIC_GUILD_MESSAGES`, and `GUILD_MEMBERS`, which are basic events that are subscribed to by default, all other special events require an application before use. If `intents` without permission are passed during authentication, `websocket` returns an error and closes the connection directly. Developers should keep the scope of event subscriptions within what they actually need.
 
-如果拥有的某个特殊事件类型的权限被取消，则在当前连接上不会报错，但是将不会收到对应的事件类型，如果重新连接，则报错，所以如果开发者的事件类型权限被取消，请及时调整监听事件代码，避免报错导致的无法连接。
+If permission for a special event type you have is revoked, no error occurs on the current connection, but the corresponding event type will no longer be received. On reconnection, an error occurs. Therefore, if a developer's event type permission is revoked, adjust the event listening code promptly to avoid being unable to connect due to the error.
 
-### WebSocket 方式
+### WebSocket Method
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/event-emit/websocket.html
 
-# WebSocket 方式
+# WebSocket Method
 
-## 发起连接到 Gateway
+## Connecting to the Gateway
 
-第一步先调用 [获取通用WSS 接入点](/wiki/develop/api-v2/openapi/wss/url_get.html) 或 [获取带分片WSS 接入点](/wiki/develop/api-v2/openapi/wss/shard_url_get.html) 接口获取网关地址。
+First, call the [Get General WSS Access Point](/wiki/develop/api-v2/openapi/wss/url_get.html) or [Get Sharded WSS Access Point](/wiki/develop/api-v2/openapi/wss/shard_url_get.html) API to obtain the gateway address.
 
-会得到一个类似下面这样的地址：
+You will get an address similar to the following:
 
 ```
 wss://api.bot.qq.com/websocket/
 ```
 
-然后进行 `websocket` 长连接建立，一旦连接成功，就会返回 OpCode 10 Hello 消息。这个消息主要的内容是心跳周期，单位毫秒(milliseconds)，如下：
+Then establish a persistent `websocket` connection. Once the connection succeeds, an OpCode 10 Hello message is returned. Its main content is the heartbeat interval in milliseconds, as follows:
 
 ```
 {
@@ -1661,11 +1661,11 @@ wss://api.bot.qq.com/websocket/
 }
 ```
 
-## 登录鉴权获得 Session
+## Login Authentication to Obtain a Session
 
-`websocket` 长连接建立之后，需要进行登录鉴权，登录鉴权成功后会获得一个 session 会话 id，只有登录成功后，QQ 后台才会下发事件通知。
+After the persistent `websocket` connection is established, login authentication is required. Once authentication succeeds, a session ID is obtained; only after a successful login does the QQ backend deliver event notifications.
 
-发送一个 OpCode 2 Identify 消息，`payload` 如下：
+Send an OpCode 2 Identify message with the following `payload`:
 
 ```
 {
@@ -1683,27 +1683,27 @@ wss://api.bot.qq.com/websocket/
 }
 ```
 
-**字段**
+**Field**
 
-**描述**
+**Description**
 
 token
 
-格式为 "QQBot {AccessToken}"
+Format: "QQBot {AccessToken}"
 
 intents
 
-是此次连接所需要接收的事件，具体可参考 [事件订阅 Intents](/wiki/develop/api-v2/dev-prepare/event-emit/payload.html#事件订阅-intents)
+The events to receive on this connection. For details, see [Event Subscription Intents](/wiki/develop/api-v2/dev-prepare/event-emit/payload.html#%E4%BA%8B%E4%BB%B6%E8%AE%A2%E9%98%85-intents)
 
 shard
 
-考虑到开发者事件接收时可以实现负载均衡，QQ 提供了分片逻辑，事件通知会落在不同的分片上，该参数是个拥有两个元素的数组。例如：`[0,4]`，代表分为四个片，当前链接是第 0 个片，业务稍后应该继续建立 `shard` 为 `[1,4]`, `[2,4]`, `[3,4]` 的链接，才能完整接收事件，更多详细的内容可以参考 [Shard 机制](#%E5%88%86%E7%89%87%E8%BF%9E%E6%8E%A5-loadbalance)。若无需分片，使用 `[0, 1]` 即可。
+To enable load balancing when receiving events, QQ provides sharding logic: event notifications fall on different shards. This parameter is an array with two elements. For example, `[0,4]` means the connection is divided into four shards and the current connection is shard 0; the business should subsequently establish connections with `shard` set to `[1,4]`, `[2,4]`, and `[3,4]` to receive all events. For more details, see [Shard mechanism](#%E5%88%86%E7%89%87%E8%BF%9E%E6%8E%A5-loadbalance). If sharding is not needed, use `[0, 1]`.
 
 properties
 
-目前无实际作用，可以按照自己的实际情况填写，也可以留空
+Currently has no practical effect; fill it in according to your own situation or leave it empty.
 
-鉴权成功之后，QQ 后台会下发一个 Ready Event，`payload` 如下：
+After successful authentication, the QQ backend delivers a Ready Event with the following `payload`:
 
 ```
 {
@@ -1715,7 +1715,7 @@ properties
     "session_id": "082ee18c-0be3-491b-9d8b-fbd95c51673a",
     "user": {
       "id": "6158788878435714165",
-      "username": "群pro测试机器人",
+      "username": "Group Pro Test Bot",
       "bot": true
     },
     "shard": [0, 0]
@@ -1723,9 +1723,9 @@ properties
 }
 ```
 
-## 发送心跳 Ack
+## Sending Heartbeat Ack
 
-鉴权成功之后，就需要按照周期进行心跳发送。d 为客户端收到的最新的消息的 s，如果是首次连接，d 为传 null，`payload` 如下：
+After successful authentication, heartbeats must be sent periodically. d is the s of the latest message received by the client; on the first connection, pass null for d. The `payload` is as follows:
 
 ```
 {
@@ -1734,7 +1734,7 @@ properties
 }
 ```
 
-心跳发送成功之后会收到 OpCode 11 Heartbeat ACK 消息，`payload` 如下：
+After a heartbeat is sent successfully, an OpCode 11 Heartbeat ACK message is received with the following `payload`:
 
 ```
 {
@@ -1742,9 +1742,9 @@ properties
 }
 ```
 
-## 恢复登录态 Session
+## Resuming the Login Session
 
-有很多原因可能会导致 `websocket` 长连接断开，断开之后短时间内重连会补发中间遗漏的事件，以保障业务逻辑的正确性。断开重连 gateway 后不需要发送重新登录 OpCode 2 Identify 请求。在连接到 `Gateway` 之后，需要发送 OpCode 6 Resume 消息，`payload` 如下：
+Many reasons can cause the persistent `websocket` connection to disconnect. Reconnecting shortly after a disconnect re-delivers events missed in between, ensuring business logic correctness. After disconnecting and reconnecting to the gateway, there is no need to send a new OpCode 2 Identify login request. After connecting to the `Gateway`, send an OpCode 6 Resume message with the following `payload`:
 
 ```
 {
@@ -1757,9 +1757,9 @@ properties
 }
 ```
 
-其中 `seq` 指的是在接收事件时候的 `s` 字段，我们推荐开发者在处理过事件之后记录下 `s` 这样可以在 `resume` 的时候传递给 `websocket`，`websocket` 会自动补发这个 seq 之后的事件。
+Here `seq` refers to the `s` field when receiving events. We recommend that developers record `s` after processing an event so that it can be passed to `websocket` during `resume`; `websocket` will automatically re-deliver events after this seq.
 
-恢复成功之后，就开始补发遗漏事件，所有事件补发完成之后，会下发一个 `Resumed Event`，`payload` 如下：
+After a successful resume, missed events begin to be redelivered. Once all events have been redelivered, a `Resumed Event` is delivered with the following `payload`:
 
 ```
 {
@@ -1770,15 +1770,15 @@ properties
 }
 ```
 
-## 分片连接 LoadBalance
+## Sharded Connection Load Balancing
 
-随着 bot 的增长并被添加到越来越多的频道中，事件越来越多，业务有必要对事件进行水平分割，实现负载均衡。机器人网关实现了一种用户可控制的分片方法，该方法允许跨多个网关连接拆分事件。分片完全由用户控制，并且不需要在单独的连接之间进行状态共享。
+As a bot grows and is added to more and more channels, events increase, and the business needs to split events horizontally to achieve load balancing. The bot gateway implements a user-controllable sharding method that allows events to be split across multiple gateway connections. Sharding is entirely controlled by the user and does not require state sharing between separate connections.
 
-要在连接上启用分片，需要在建立连接的时候指定分片参数，具体参考 [gateway](/wiki/develop/api-v2/dev-prepare/interface-framework/reference.html)
+To enable sharding on a connection, specify the shard parameter when establishing the connection. For details, see [gateway](/wiki/develop/api-v2/dev-prepare/interface-framework/reference.html)
 
-### 获得合适的分片数
+### Determining the Appropriate Number of Shards
 
-使用 [/gateway/bot](/wiki/develop/api-v2/openapi/wss/shard_url_get.html) 接口获取网关地址的时候，会同时返回一个建议的 `shard` 数，及最大并发限制。
+When using the [/gateway/bot](/wiki/develop/api-v2/openapi/wss/shard_url_get.html) API to obtain the gateway address, a recommended `shard` count and the maximum concurrency limit are also returned.
 
 ```
 {
@@ -1793,197 +1793,197 @@ properties
 }
 ```
 
-### 分片规则
+### Sharding Rules
 
-分片是按照频道 id 进行哈希的，同一个频道的信息会固定从同一个链接推送。具体哈希计算规则如下：
+Shards are hashed by channel id, so information for the same channel is always pushed over the same connection. The specific hash calculation rules are as follows:
 
 ```
 shard_id = (guild_id >> 22) % num_shards
 ```
 
-### 最大连接数
+### Maximum Number of Connections
 
-每个机器人创建的连接数不能超过 `remaining` 剩余连接数。
+The number of connections created by each bot cannot exceed the remaining connection count `remaining`.
 
-## WebSocket 错误码
+## WebSocket Error Codes
 
-值
+Value
 
-含义
+Meaning
 
-是否可以重试 RESUME
+Whether RESUME Can Be Retried
 
-是否可以重试 IDENTIFY
+Whether IDENTIFY Can Be Retried
 
 4001
 
-无效的 opcode
+Invalid opcode
 
-否
+No
 
-否
+No
 
 4002
 
-无效的 payload
+Invalid payload
 
-否
+No
 
-否
+No
 
 4007
 
-seq 错误
+Invalid seq
 
-否
+No
 
-**是**
+**Yes**
 
 4006
 
-无效的 session id，无法继续 resume，请 identify
+Invalid session id; cannot continue resume, please identify
 
-否
+No
 
-**是**
+**Yes**
 
 4008
 
-发送 payload 过快，请重新连接，并遵守连接后返回的频控信息
+Payloads sent too quickly. Please reconnect and follow the rate-limit information returned after connecting
 
-**是**
+**Yes**
 
-**是**
+**Yes**
 
 4009
 
-连接过期，请重连并执行 resume 进行重新连接
+Connection expired. Please reconnect and perform resume to re-establish the connection
 
-**是**
+**Yes**
 
-**是**
+**Yes**
 
 4010
 
-无效的 shard
+Invalid shard
 
-否
+No
 
-否
+No
 
 4011
 
-连接需要处理的 guild 过多，请进行合理的分片
+The connection has too many guilds to handle. Please shard appropriately
 
-否
+No
 
-否
+No
 
 4012
 
-无效的 version
+Invalid version
 
-否
+No
 
-否
+No
 
 4013
 
-无效的 intent
+Invalid intent
 
-否
+No
 
-否
+No
 
 4014
 
-intent 无权限
+Intent not authorized
 
-否
+No
 
-否
+No
 
 4900~4913
 
-内部错误，请重连
+Internal error. Please reconnect
 
-否
+No
 
-**是**
+**Yes**
 
 4914
 
-机器人已下架，只允许连接沙箱环境，请断开连接，检验当前连接环境
+The bot has been delisted and may only connect to the sandbox environment. Please disconnect and check the current connection environment
 
-否
+No
 
-否
+No
 
 4915
 
-机器人已封禁，不允许连接，请断开连接，申请解封后再连接
+The bot has been banned and is not allowed to connect. Please disconnect and reconnect after requesting an unban
 
-否
+No
 
-否
+No
 
-针对 WebSocket 错误码的简单处理逻辑：
+Simple handling logic for WebSocket error codes:
 
--   4009 可以重新发起 resume
--   4914，4915 不可以连接，请联系官方解封
--   其他错误，请重新发起 identify
+-   4009: resume can be initiated again
+-   4914, 4915: cannot connect; please contact the official team to request an unban
+-   For other errors, initiate identify again
 
-### Webhook 方式
+### Webhook Method
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/event-emit/webhook.html
 
-# Webhook 方式
+# Webhook Method
 
-QQ 机器人开放平台支持通过使用 HTTP 接口接收事件。开发者可通过[管理端 (opens new window)](https://q.qq.com/qqbot/#/developer/webhook-setting)设定回调地址，监听事件等。
+The QQ Bot Open Platform supports receiving events through HTTP APIs. Developers can configure a callback address and subscribe to events via the [Admin Console (opens new window)](https://q.qq.com/qqbot/#/developer/webhook-setting).
 
-目前回调地址允许配置的端口号为：80、443、8080、8443。
+The ports currently allowed for callback addresses are: 80, 443, 8080, and 8443.
 
-## 签名校验
+## Signature Verification
 
-机器人服务端需要对回调请求进行签名验证以保证数据没有被篡改过。[签名算法](/wiki/develop/api-v2/dev-prepare/interface-framework/sign.html)
+The bot server needs to verify the signature of callback requests to ensure the data has not been tampered with. [Signature Algorithm](/wiki/develop/api-v2/dev-prepare/interface-framework/sign.html)
 
-## 回调地址及事件监听配置
+## Callback Address and Event Subscription Configuration
 
-开发者需要提供一个 HTTPS 回调地址。并选定监听的事件类型。开放平台会将事件通过回调的方式推送给机器人。
+Developers need to provide an HTTPS callback address and select the event types to listen for. The Open Platform pushes events to the bot via callbacks.
 
 ![event_subscription](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/webhook_new.b24ed4d6.png)
 
-配置回调地址后，开放平台会对回调地址进行验证：
+After the callback address is configured, the Open Platform verifies it:
 
--   请求结构(Payload.d)
+-   Request structure (Payload.d)
 
-**字段**
+**Field**
 
-**描述**
+**Description**
 
 plain\_token
 
-需要计算签名的字符串
+String used to calculate the signature
 
 event\_ts
 
-计算签名使用时间戳
+Timestamp used to calculate the signature
 
--   返回结果
+-   Return result
 
-**字段**
+**Field**
 
-**描述**
+**Description**
 
 plain\_token
 
-需要计算签名的字符串
+String used to calculate the signature
 
 signature
 
-签名
+Signature
 
-计算过程如下(golang)：
+The calculation process is as follows (golang):
 
 ```
 func handleValidation(rw http.ResponseWriter, r *http.Request, botSecret string) {
@@ -2008,7 +2008,7 @@ func handleValidation(rw http.ResponseWriter, r *http.Request, botSecret string)
 	}
 	seed = seed[:ed25519.SeedSize]
 	reader := strings.NewReader(seed)
-	// GenerateKey 方法会返回公钥、私钥，这里只需要私钥进行签名生成不需要返回公钥
+	// The GenerateKey method returns a public key and a private key; only the private key is needed here to generate the signature, so the public key does not need to be returned
 	_, privateKey, err := ed25519.GenerateKey(reader)
 	if err != nil {
 		log.Println("ed25519 generate key failed:", err)
@@ -2035,21 +2035,21 @@ func handleValidation(rw http.ResponseWriter, r *http.Request, botSecret string)
 }
 ```
 
-例如机器人账号
+For example, bot account
 
 ```
 appid: 11111111
 secret: DG5g3B4j9X2KOErG
 ```
 
-回调验证请求：
+Callback verification request:
 
 ```
 headers: User-Agent:[QQBot-Callback] X-Bot-Appid:[11111111]
 body: {"d":{"plain_token":"Arq0D5A61EgUu4OxUvOp","event_ts":"1725442341"},"op":13},
 ```
 
-机器人应返回：
+The bot should return:
 
 ```
 body: {"plain_token": "Arq0D5A61EgUu4OxUvOp","signature": "87befc99c42c651b3aac0278e71ada338433ae26fcb24307bdc5ad38c1adc2d01bcfcadc0842edac85e85205028a1132afe09280305f13aa6909ffc2d652c706"}
@@ -2061,15 +2061,15 @@ body: {"plain_token": "Arq0D5A61EgUu4OxUvOp","signature": "87befc99c42c651b3aac0
 
 # opcode
 
-所有opcode列表如下：
+The full list of opcodes is as follows:
 
 CODE
 
-名称
+Name
 
-客户端操作
+Client Operation
 
-描述
+Description
 
 0
 
@@ -2077,7 +2077,7 @@ Dispatch
 
 Receive
 
-服务端进行消息推送
+Server pushes messages
 
 1
 
@@ -2085,7 +2085,7 @@ Heartbeat
 
 Send/Receive
 
-客户端或服务端发送心跳
+Client or server sends heartbeat
 
 2
 
@@ -2093,7 +2093,7 @@ Identify
 
 Send
 
-客户端发送鉴权
+Client sends authentication
 
 6
 
@@ -2101,7 +2101,7 @@ Resume
 
 Send
 
-客户端恢复连接
+Client resumes connection
 
 7
 
@@ -2109,7 +2109,7 @@ Reconnect
 
 Receive
 
-服务端通知客户端重新连接
+Server notifies client to reconnect
 
 9
 
@@ -2117,7 +2117,7 @@ Invalid Session
 
 Receive
 
-当identify或resume的时候，如果参数有错，服务端会返回该消息
+Returned by the server when a parameter is incorrect during identify or resume
 
 10
 
@@ -2125,7 +2125,7 @@ Hello
 
 Receive
 
-当客户端与网关建立ws连接之后，网关下发的第一条消息
+The first message sent by the gateway after the client establishes a WebSocket connection with the gateway
 
 11
 
@@ -2133,7 +2133,7 @@ Heartbeat ACK
 
 Receive/Reply
 
-当发送心跳成功之后，就会收到该消息
+Received after a heartbeat is sent successfully
 
 12
 
@@ -2141,35 +2141,35 @@ HTTP Callback ACK
 
 Reply
 
-仅用于 http 回调模式的回包，代表机器人收到了平台推送的数据()
+Used only as the reply in HTTP callback mode, indicating that the bot has received the data pushed by the platform ()
 
 13
 
-回调地址验证
+Callback address verification
 
 Receive
 
-开放平台对机器人服务端进行验证
+The Open Platform verifies the bot server
 
-客户端操作含义如下：
+The meanings of client operations are as follows:
 
--   `Receive` 客户端接收到服务端 push 的消息
--   `Send` 客户端发送消息
--   `Reply` 客户端接收到服务端发送的消息之后的回包（HTTP 回调模式）
+-   `Receive`: the client receives a message pushed by the server
+-   `Send` The client sends a message
+-   `Reply` The response packet after the client receives a message sent by the server (HTTP callback mode)
 
-### 事件订阅与通知
+### Event Subscription and Notification
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/event-emit.html
 
-# 事件订阅与通知
+# Event Subscription and Notification
 
-说明
+Description
 
-当用户在QQ平台内的一些行为操作或某些接口的有异步返回通知确认机制的场景的时候，QQ 会通过"事件"的方式，通知到开发者服务器，开发者可自行根据具体事件通知来进行下一步响应。譬如用户跟机器人发消息，用户添加机器人好友，机器人被拉入群聊等等事件。
+When users perform certain actions within the QQ platform, or when some APIs have an asynchronous return notification confirmation mechanism, QQ notifies the developer's server through "events", and developers can respond accordingly based on the specific event notification. Examples include a user messaging the bot, a user adding the bot as a friend, or the bot being added to a group chat.
 
-## 通用数据结构 Payload
+## Common Data Structure Payload
 
-`payload` 指的是在 `webhook`或`websocket` 连接上传输的数据，网关的上下行消息采用的都是同一个结构，如下：
+`payload` refers to the data transmitted over a `webhook` or `websocket` connection. The gateway uses the same structure for both upstream and downstream messages, as follows:
 
 ```
 {
@@ -2181,43 +2181,43 @@ Receive
 }
 ```
 
-字段
+Field
 
-描述
+Description
 
 id
 
-事件id
+Event id
 
 op
 
-指的是 opcode，参考连接维护
+Refers to the opcode; see connection maintenance
 
 s
 
-下行消息都会有一个序列号，标识消息的唯一性，客户端需要再发送心跳的时候，携带客户端收到的最新的s
+Every downstream message has a sequence number that identifies it uniquely. When sending a heartbeat, the client must carry the latest s it has received.
 
 t
 
-代表事件类型。主要用在op为 0 Dispatch 的时候
+Represents the event type. Mainly used when op is 0 Dispatch
 
 d
 
-代表事件内容，不同事件类型的事件内容格式都不同，请注意识别。主要用在op为 0 Dispatch 的时候
+Represents the event content. The content format differs for each event type, so identify it carefully. Mainly used when op is 0 Dispatch
 
-### OpCode 含义
+### OpCode Meanings
 
-所有 `opcode` 列表如下：
+The list of all `opcode` values is as follows:
 
 **CODE**
 
-**名称**
+**Name**
 
-接入方式
+Connection Method
 
-**客户端行为**
+**Client Behavior**
 
-**描述**
+**Description**
 
 0
 
@@ -2227,7 +2227,7 @@ webhook/websocket
 
 Receive
 
-服务端进行消息推送
+Server pushes messages
 
 1
 
@@ -2237,7 +2237,7 @@ websocket
 
 Send/Receive
 
-客户端或服务端发送心跳
+Client or server sends heartbeat
 
 2
 
@@ -2247,7 +2247,7 @@ websocket
 
 Send
 
-客户端发送鉴权
+Client sends authentication
 
 6
 
@@ -2257,7 +2257,7 @@ websocket
 
 Send
 
-客户端恢复连接
+Client resumes connection
 
 7
 
@@ -2267,7 +2267,7 @@ websocket
 
 Receive
 
-服务端通知客户端重新连接
+Server notifies client to reconnect
 
 9
 
@@ -2277,7 +2277,7 @@ websocket
 
 Receive
 
-当 identify 或 resume 的时候，如果参数有错，服务端会返回该消息
+When identify or resume is used, if any parameter is incorrect, the server returns this message
 
 10
 
@@ -2287,7 +2287,7 @@ websocket
 
 Receive
 
-当客户端与网关建立 ws 连接之后，网关下发的第一条消息
+The first message sent by the gateway after the client establishes a ws connection with the gateway
 
 11
 
@@ -2297,7 +2297,7 @@ websocket
 
 Receive/Reply
 
-当发送心跳成功之后，就会收到该消息
+Received after a heartbeat is sent successfully
 
 12
 
@@ -2307,73 +2307,73 @@ webhook
 
 Reply
 
-仅用于 http 回调模式的回包，代表机器人收到了平台推送的数据
+Used only for the response packet in http callback mode, indicating that the bot has received the data pushed by the platform
 
 13
 
-回调地址验证
+Callback address verification
 
 webhook
 
 Receive
 
-开放平台对机器人服务端进行验证
+The Open Platform verifies the bot server
 
-客户端行为含义如下：
+The meanings of client behaviors are as follows:
 
-`Receive` 客户端接收到服务端 `push` 的消息
+`Receive`: the client receives a message `push`ed by the server
 
-`Send` 客户端发送消息
+`Send`: the client sends a message
 
-`Reply` 客户端接收到服务端发送的消息之后的回包（HTTP 回调模式）
+`Reply`: the client's response after receiving a message sent by the server (HTTP callback mode)
 
-## Webhook方式
+## Webhook Method
 
-QQ机器人开放平台支持通过使用HTTP接口接收事件。开发者可通过[管理端 (opens new window)](https://q.qq.com/qqbot/#/developer/webhook-setting)设定回调地址，监听事件等。
+The QQ Bot Open Platform supports receiving events through HTTP APIs. Developers can configure a callback address and subscribe to events via the [Admin Console (opens new window)](https://q.qq.com/qqbot/#/developer/webhook-setting).
 
-目前回调地址允许配置的端口号为： 80、443、8080、8443。
+The ports currently allowed for callback addresses are: 80, 443, 8080, and 8443.
 
-### 签名校验
+### Signature Verification
 
-机器人服务端需要对回调请求进行签名验证以保证数据没有被篡改过。 [签名算法](/wiki/develop/api-v2/dev-prepare/interface-framework/sign.html)
+The bot server needs to verify the signature of callback requests to ensure the data has not been tampered with. [Signature Algorithm](/wiki/develop/api-v2/dev-prepare/interface-framework/sign.html)
 
-### 回调地址及事件监听配置
+### Callback Address and Event Subscription Configuration
 
-开发者需要提供一个HTTPS回调地址。并选定监听的事件类型。开放平台会将事件通过回调的方式推送给机器人。
+Developers need to provide an HTTPS callback address and select the event types to listen for. The Open Platform pushes events to the bot via callbacks.
 
 ![event_subscription](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/webhook_new.b24ed4d6.png)
 
-配置回调地址后，开放平台会对回调地址进行验证：
+After the callback address is configured, the Open Platform verifies it:
 
--   请求结构(Payload.d)
+-   Request structure (Payload.d)
 
-**字段**
+**Field**
 
-**描述**
+**Description**
 
 plain\_token
 
-需要计算签名的字符串
+String used to calculate the signature
 
 event\_ts
 
-计算签名使用时间戳
+Timestamp used to calculate the signature
 
--   返回结果
+-   Return result
 
-**字段**
+**Field**
 
-**描述**
+**Description**
 
 plain\_token
 
-需要计算签名的字符串
+String used to calculate the signature
 
 signature
 
-签名
+Signature
 
-计算过程如下(golang)：
+The calculation process is as follows (golang):
 
 ```
 func handleValidation(rw http.ResponseWriter, r *http.Request, botSecret string) {
@@ -2398,7 +2398,7 @@ func handleValidation(rw http.ResponseWriter, r *http.Request, botSecret string)
 	}
 	seed = seed[:ed25519.SeedSize]
 	reader := strings.NewReader(seed)
-	// GenerateKey 方法会返回公钥、私钥，这里只需要私钥进行签名生成不需要返回公钥
+	// The GenerateKey method returns a public key and a private key; only the private key is needed here to generate the signature, so the public key does not need to be returned
 	_, privateKey, err := ed25519.GenerateKey(reader)
 	if err != nil {
 		log.Println("ed25519 generate key failed:", err)
@@ -2426,39 +2426,39 @@ func handleValidation(rw http.ResponseWriter, r *http.Request, botSecret string)
 
 ```
 
-例如机器人账号
+For example, bot account
 
 ```
 appid: 11111111
 secret: DG5g3B4j9X2KOErG
 ```
 
-回调验证请求：
+Callback verification request:
 
 ```
 headers: User-Agent:[QQBot-Callback] X-Bot-Appid:[11111111]
 body: {"d":{"plain_token":"Arq0D5A61EgUu4OxUvOp","event_ts":"1725442341"},"op":13},
 ```
 
-机器人应返回：
+The bot should return:
 
 ```
 body: {"plain_token": "Arq0D5A61EgUu4OxUvOp","signature": "87befc99c42c651b3aac0278e71ada338433ae26fcb24307bdc5ad38c1adc2d01bcfcadc0842edac85e85205028a1132afe09280305f13aa6909ffc2d652c706"}
 ```
 
-## WebSocket方式
+## WebSocket Method
 
-### 发起连接到 Gateway
+### Connecting to the Gateway
 
-第一步先调用 [获取通用WSS 接入点 | QQ机器人文档](/wiki/develop/api-v2/openapi/wss/url_get.html) 或 [获取带分片WSS 接入点 | QQ机器人文档](/wiki/develop/api-v2/openapi/wss/shard_url_get.html) 接口获取网关地址。
+First, call the [Get General WSS Access Point | QQ Bot Documentation](/wiki/develop/api-v2/openapi/wss/url_get.html) or [Get Sharded WSS Access Point | QQ Bot Documentation](/wiki/develop/api-v2/openapi/wss/shard_url_get.html) API to obtain the gateway address.
 
-会得到一个类似下面这样的地址：
+You will get an address similar to the following:
 
 ```
 wss://api.bot.qq.com/websocket/
 ```
 
-然后进行 `websocket` 长连接建立，一旦连接成功，就会返回 [OpCode 10 Hello](/wiki/develop/api-v2/dev-prepare/interface-framework/opcode.html) 消息。这个消息主要的内容是心跳周期，单位毫秒(milliseconds)，如下：
+Then establish a persistent `websocket` connection. Once the connection succeeds, an [OpCode 10 Hello](/wiki/develop/api-v2/dev-prepare/interface-framework/opcode.html) message is returned. Its main content is the heartbeat interval in milliseconds, as follows:
 
 ```
 {
@@ -2469,11 +2469,11 @@ wss://api.bot.qq.com/websocket/
 }
 ```
 
-### 登录鉴权获得 Session
+### Login Authentication to Obtain a Session
 
-`websocket` 长连接建立之后，需要进行登录鉴权，登录鉴权成功后会获得一个 session 会话 id，只有登录成功后，QQ后台才会下发事件通知，
+After the persistent `websocket` connection is established, login authentication is required. Once authentication succeeds, a session ID is obtained; only after a successful login does the QQ backend deliver event notifications,
 
-发送一个 OpCode 2 Identify 消息， `payload` 如下：
+Send an OpCode 2 Identify message with the following `payload`:
 
 ```
 {
@@ -2492,28 +2492,28 @@ wss://api.bot.qq.com/websocket/
 
 ```
 
-**字段**
+**Field**
 
-**描述**
+**Description**
 
 token
 
-格式为"QQBot {AccessToken}"
+Format: "QQBot {AccessToken}"
 
 intents
 
-是此次连接所需要接收的事件，具体可参考 **Intents** \[事件订阅intents\\
+The events to receive on this connection. For details, see **Intents** \[event subscription intents\\
 
 shard
 
-考虑到开发者事件接收时可以实现负载均衡，QQ 提供了分片逻辑，事件通知会落在不同的分片上，该参数是个拥有两个元素的数组。  
-例如：\[0,4\]，代表分为四个片，当前链接是第 0 个片，业务稍后应该继续建立 `shard` 为\[1,4\],\[2,4\],\[3,4\]的链接，才能完整接收事件，更多详细的内容可以参考 **Shard** \[Shard机制\\
+To enable load balancing when receiving events, QQ provides sharding logic: event notifications fall on different shards. This parameter is an array with two elements.  
+For example: \[0,4\] means four shards; the current connection is shard 0, and the business should subsequently establish connections with `shard` set to \[1,4\],\[2,4\],\[3,4\] to receive all events. For more details, see **Shard** \[Shard mechanism\\
 
 properties
 
-目前无实际作用，可以按照自己的实际情况填写，也可以留空
+Currently has no practical effect; fill it in according to your own situation or leave it empty.
 
-鉴权成功之后，QQ 后台会下发一个 Ready Event， `payload` 如下：
+After successful authentication, the QQ backend delivers a Ready Event with the following `payload`:
 
 ```
 {
@@ -2525,7 +2525,7 @@ properties
     "session_id": "082ee18c-0be3-491b-9d8b-fbd95c51673a",
     "user": {
       "id": "6158788878435714165",
-      "username": "群pro测试机器人",
+      "username": "Group Pro Test Bot",
       "bot": true
     },
     "shard": [0, 0]
@@ -2533,9 +2533,9 @@ properties
 }
 ```
 
-### 发送心跳 Ack
+### Sending Heartbeat Ack
 
-鉴权成功之后，就需要按照周期进行心跳发送。d 为客户端收到的最新的消息的 s，如果是首次连接，d 为传 null， `payload` 如下：
+After successful authentication, heartbeats must be sent periodically. d is the s of the latest message received by the client; on the first connection, pass null for d. The `payload` is as follows:
 
 ```
 {
@@ -2544,7 +2544,7 @@ properties
 }
 ```
 
-心跳发送成功之后会收到 [OpCode 11 Heartbeat ACK](/wiki/develop/api-v2/dev-prepare/interface-framework/opcode.html) 消息， `payload` 如下：
+After a heartbeat is sent successfully, an [OpCode 11 Heartbeat ACK](/wiki/develop/api-v2/dev-prepare/interface-framework/opcode.html) message is received with the following `payload`:
 
 ```
 {
@@ -2552,9 +2552,9 @@ properties
 }
 ```
 
-### 恢复登录态 Session
+### Resuming the Login Session
 
-有很多原因可能会导致 `websocket` 长连接断开，断开之后短时间内重连会补发中间遗漏的事件，以保障业务逻辑的正确性。断开重连 gateway 后不需要发送重新登录 [Opcode 2 Identify](/wiki/develop/api-v2/dev-prepare/interface-framework/opcode.html)请求。在连接到 `Gateway` 之后，需要发送 [Opcode 6 Resume](/wiki/develop/api-v2/dev-prepare/interface-framework/opcode.html)消息， `payload` 如下：
+Many reasons can cause the persistent `websocket` connection to disconnect. Reconnecting shortly after a disconnect re-delivers events missed in between, ensuring business logic correctness. After disconnecting and reconnecting to the gateway, there is no need to send a new [Opcode 2 Identify](/wiki/develop/api-v2/dev-prepare/interface-framework/opcode.html) login request. After connecting to the `Gateway`, send an [Opcode 6 Resume](/wiki/develop/api-v2/dev-prepare/interface-framework/opcode.html) message with the following `payload`:
 
 ```
 {
@@ -2567,9 +2567,9 @@ properties
 }
 ```
 
-其中 `seq` 指的是在接收事件时候的 `s` 字段，我们推荐开发者在处理过事件之后记录下 `s` 这样可以在 `resume` 的时候传递给 `websocket`， `websocket` 会自动补发这个 seq 之后的事件。
+Here `seq` refers to the `s` field when receiving events. We recommend that developers record `s` after processing an event so that it can be passed to `websocket` during `resume`; `websocket` will automatically re-deliver events after this seq.
 
-恢复成功之后，就开始补发遗漏事件，所有事件补发完成之后，会下发一个 `Resumed Event`， `payload` 如下：
+After a successful resume, missed events begin to be redelivered. Once all events have been redelivered, a `Resumed Event` is delivered with the following `payload`:
 
 ```
 {
@@ -2580,102 +2580,102 @@ properties
 }
 ```
 
-### 事件订阅Intents
+### Event Subscription Intents
 
-事件的 `intents` 是一个标记位，每一位都代表不同的事件，如果需要接收某类事件，就将该位置为 `1`。
+The `intents` of an event is a bitmask, where each bit represents a different event. If you need to receive a certain type of event, set that bit to `1`.
 
-每个 `intents` 位代表的是一类事件，可以使用使用 `websocket` 传输的数据中的 `t` 字段的值来区分。
+Each `intents` bit represents a category of events and can be distinguished by the value of the `t` field in data transmitted over `websocket`.
 
-事件和位移的关系如下：
+The relationship between events and bit shifts is as follows:
 
 ```
 GUILDS (1 << 0)
-  - GUILD_CREATE           // 当机器人加入新guild时
-  - GUILD_UPDATE           // 当guild资料发生变更时
-  - GUILD_DELETE           // 当机器人退出guild时
-  - CHANNEL_CREATE         // 当channel被创建时
-  - CHANNEL_UPDATE         // 当channel被更新时
-  - CHANNEL_DELETE         // 当channel被删除时
+  - GUILD_CREATE           // When the bot joins a new guild
+  - GUILD_UPDATE           // When guild information changes
+  - GUILD_DELETE           // When the bot leaves a guild
+  - CHANNEL_CREATE         // When a channel is created
+  - CHANNEL_UPDATE         // When a channel is updated
+  - CHANNEL_DELETE         // When a channel is deleted
 
 GUILD_MEMBERS (1 << 1)
-  - GUILD_MEMBER_ADD       // 当成员加入时
-  - GUILD_MEMBER_UPDATE    // 当成员资料变更时
-  - GUILD_MEMBER_REMOVE    // 当成员被移除时
+  - GUILD_MEMBER_ADD       // When a member joins
+  - GUILD_MEMBER_UPDATE    // When member information changes
+  - GUILD_MEMBER_REMOVE    // When a member is removed
 
-GUILD_MESSAGES (1 << 9)    // 消息事件，仅 *私域* 机器人能够设置此 intents。
-  - MESSAGE_CREATE         // 发送消息事件，代表频道内的全部消息，而不只是 at 机器人的消息。内容与 AT_MESSAGE_CREATE 相同
-  - MESSAGE_DELETE         // 删除（撤回）消息事件
+GUILD_MESSAGES (1 << 9)    // Message events; only *private domain* bots can set this intents.
+  - MESSAGE_CREATE         // Message send event, representing all messages in the channel, not just messages that @ the bot. Content is the same as AT_MESSAGE_CREATE
+  - MESSAGE_DELETE         // Message delete (recall) event
 
 GUILD_MESSAGE_REACTIONS (1 << 10)
-  - MESSAGE_REACTION_ADD    // 为消息添加表情表态
-  - MESSAGE_REACTION_REMOVE // 为消息删除表情表态
+  - MESSAGE_REACTION_ADD    // Add an emoji reaction to a message
+  - MESSAGE_REACTION_REMOVE // Remove an emoji reaction from a message
 
 DIRECT_MESSAGE (1 << 12)
-  - DIRECT_MESSAGE_CREATE   // 当收到用户发给机器人的私信消息时
-  - DIRECT_MESSAGE_DELETE   // 删除（撤回）消息事件
+  - DIRECT_MESSAGE_CREATE   // When a direct message sent by a user to the bot is received
+  - DIRECT_MESSAGE_DELETE   // Message delete (recall) event
 
 
 GROUP_AND_C2C_EVENT (1 << 25)
-  - C2C_MESSAGE_CREATE      // 用户单聊发消息给机器人时候
-  - FRIEND_ADD              // 用户添加使用机器人
-  - FRIEND_DEL              // 用户删除机器人
-  - C2C_MSG_REJECT          // 用户在机器人资料卡手动关闭"主动消息"推送
-  - C2C_MSG_RECEIVE         // 用户在机器人资料卡手动开启"主动消息"推送开关
-  - GROUP_AT_MESSAGE_CREATE // 用户在群里@机器人时收到的消息
-  - GROUP_ADD_ROBOT         // 机器人被添加到群聊
-  - GROUP_DEL_ROBOT         // 机器人被移出群聊
-  - GROUP_MSG_REJECT        // 群管理员主动在机器人资料页操作关闭通知
-  - GROUP_MSG_RECEIVE       // 群管理员主动在机器人资料页操作开启通知
+  - C2C_MESSAGE_CREATE      // When a user sends a direct chat message to the bot
+  - FRIEND_ADD              // User adds and uses the bot
+  - FRIEND_DEL              // User removes the bot
+  - C2C_MSG_REJECT          // User manually turns off "proactive message" push on the bot profile card
+  - C2C_MSG_RECEIVE         // User manually turns on the "proactive message" push switch on the bot profile card
+  - GROUP_AT_MESSAGE_CREATE // Message received when a user @s the bot in a group
+  - GROUP_ADD_ROBOT         // Bot is added to a group chat
+  - GROUP_DEL_ROBOT         // Bot is removed from a group chat
+  - GROUP_MSG_REJECT        // Group administrator manually turns off notifications on the bot profile page
+  - GROUP_MSG_RECEIVE       // Group administrator manually turns on notifications on the bot profile page
 
 INTERACTION (1 << 26)
-  - INTERACTION_CREATE     // 互动事件创建时
+  - INTERACTION_CREATE     // When an interaction event is created
 
 MESSAGE_AUDIT (1 << 27)
-  - MESSAGE_AUDIT_PASS     // 消息审核通过
-  - MESSAGE_AUDIT_REJECT   // 消息审核不通过
+  - MESSAGE_AUDIT_PASS     // Message audit passed
+  - MESSAGE_AUDIT_REJECT   // Message audit failed
 
-FORUMS_EVENT (1 << 28)  // 论坛事件，仅 *私域* 机器人能够设置此 intents。
-  - FORUM_THREAD_CREATE     // 当用户创建主题时
-  - FORUM_THREAD_UPDATE     // 当用户更新主题时
-  - FORUM_THREAD_DELETE     // 当用户删除主题时
-  - FORUM_POST_CREATE       // 当用户创建帖子时
-  - FORUM_POST_DELETE       // 当用户删除帖子时
-  - FORUM_REPLY_CREATE      // 当用户回复评论时
-  - FORUM_REPLY_DELETE      // 当用户回复评论时
-  - FORUM_PUBLISH_AUDIT_RESULT      // 当用户发表审核通过时
+FORUMS_EVENT (1 << 28)  // Forum event; only *private-domain* bots can set this intents.
+  - FORUM_THREAD_CREATE     // When a user creates a thread
+  - FORUM_THREAD_UPDATE     // When a user updates a thread
+  - FORUM_THREAD_DELETE     // When a user deletes a thread
+  - FORUM_POST_CREATE       // When a user creates a post
+  - FORUM_POST_DELETE       // When a user deletes a post
+  - FORUM_REPLY_CREATE      // When a user replies to a comment
+  - FORUM_REPLY_DELETE      // When a user replies to a comment
+  - FORUM_PUBLISH_AUDIT_RESULT      // When a user's post passes audit
 
 AUDIO_ACTION (1 << 29)
-  - AUDIO_START             // 音频开始播放时
-  - AUDIO_FINISH            // 音频播放结束时
-  - AUDIO_ON_MIC            // 上麦时
-  - AUDIO_OFF_MIC           // 下麦时
+  - AUDIO_START             // When audio starts playing
+  - AUDIO_FINISH            // When audio finishes playing
+  - AUDIO_ON_MIC            // When going on mic
+  - AUDIO_OFF_MIC           // When going off mic
 
-PUBLIC_GUILD_MESSAGES (1 << 30) // 消息事件，此为公域的消息事件
-  - AT_MESSAGE_CREATE       // 当收到@机器人的消息时
-  - PUBLIC_MESSAGE_DELETE   // 当频道的消息被删除时
+PUBLIC_GUILD_MESSAGES (1 << 30) // Message event; this is a public-domain message event
+  - AT_MESSAGE_CREATE       // When a message @mentioning the bot is received
+  - PUBLIC_MESSAGE_DELETE   // When a channel message is deleted
 ```
 
-#### 举例
+#### Example
 
-如开发者需要接收用户 at 机器人的消息，那么就需要在 `intents` 中设置接收 `PUBLIC_GUILD_MESSAGES`。则需要先计算 `1 << 30` 的值。然后与 `0` 做位或操作，得到最终需要传递的 `intents`。
+If a developer needs to receive messages in which users at-mention the bot, `PUBLIC_GUILD_MESSAGES` must be enabled in `intents`. First calculate the value of `1 << 30`, then perform a bitwise OR with `0` to obtain the final `intents` to pass.
 
-如果涉及到多个事件类型的接收，则需要将多个结果做位或操作，如：`0|1<<30|1<<1` 代表订阅 `PUBLIC_GUILD_MESSAGES` 和 `GUILD_MEMBERS` 这两类事件。
+If multiple event types need to be received, perform a bitwise OR on the multiple results. For example, `0|1<<30|1<<1` means subscribing to both the `PUBLIC_GUILD_MESSAGES` and `GUILD_MEMBERS` event types.
 
-#### 权限
+#### Permissions
 
-事件类型的订阅，是有权限控制的，除了 `GUILDS`，`PUBLIC_GUILD_MESSAGES`，`GUILD_MEMBERS` 事件是基础的事件，默认有权限订阅之外，其他的特殊事件，都需要经过申请才能够使用，如果在鉴权的时候传递了无权限的 `intents`， `websocket` 会报错，并直接关闭连接。请开发者注意订阅事件的范围需要控制在自己所需要的范围之内。
+Event type subscriptions are subject to permission control. Apart from `GUILDS`, `PUBLIC_GUILD_MESSAGES`, and `GUILD_MEMBERS`, which are basic events that are subscribed to by default, all other special events require an application before use. If `intents` without permission are passed during authentication, `websocket` returns an error and closes the connection directly. Developers should keep the scope of event subscriptions within what they actually need.
 
-如果拥有的某个特殊事件类型的权限被取消，则在当前连接上不会报错，但是将不会收到对应的事件类型，如果重新连接，则报错，所以如果开发者的事件类型权限被取消，请及时调整监听事件代码，避免报错导致的无法连接。
+If permission for a special event type you have is revoked, no error occurs on the current connection, but the corresponding event type will no longer be received. On reconnection, an error occurs. Therefore, if a developer's event type permission is revoked, adjust the event listening code promptly to avoid being unable to connect due to the error.
 
-### 分片连接LoadBalance
+### Sharded Connection Load Balancing
 
-随着`bot`的增长并被添加到越来越多的频道中，事件越来越多，业务有必要对事件进行水平分割，实现负载均衡。机器人网关实现了一种用户可控制的分片方法，该方法允许跨多个网关连接拆分事件。 分片完全由用户控制，并且不需要在单独的连接之间进行状态共享。
+As a `bot` grows and is added to more and more channels, events increase, and the business needs to split events horizontally to achieve load balancing. The bot gateway implements a user-controllable sharding method that allows events to be split across multiple gateway connections. Sharding is entirely controlled by the user and does not require state sharing between separate connections.
 
-要在连接上启用分片，需要在建立连接的时候指定分片参数，具体参考[gateway](/wiki/develop/api-v2/dev-prepare/interface-framework/reference.html)
+To enable sharding on a connection, specify the shard parameter when establishing the connection. For details, see [gateway](/wiki/develop/api-v2/dev-prepare/interface-framework/reference.html)
 
-#### 获得合适的分片数
+#### Determining the Appropriate Number of Shards
 
-使用[/gateway/bot](/wiki/develop/api-v2/openapi/wss/shard_url_get.html)接口获取网关地址的时候，会同时返回一个建议的 `shard`数，及最大并发限制。
+When using the [/gateway/bot](/wiki/develop/api-v2/openapi/wss/shard_url_get.html) API to obtain the gateway address, a recommended `shard` count and the maximum concurrency limit are also returned.
 
 ```
 {
@@ -2690,33 +2690,33 @@ PUBLIC_GUILD_MESSAGES (1 << 30) // 消息事件，此为公域的消息事件
 }
 ```
 
-#### 分片规则
+#### Sharding Rules
 
-分片是按照频道id进行哈希的，同一个频道的信息会固定从同一个链接推送。具体哈希计算规则如下：
+Shards are hashed by channel id, so information for the same channel is always pushed over the same connection. The specific hash calculation rules are as follows:
 
 ```
 shard_id = (guild_id >> 22) % num_shards
 ```
 
-#### 最大连接数
+#### Maximum Number of Connections
 
-每个机器人创建的连接数不能超过`remaining`剩余连接数
+The number of connections created by each bot cannot exceed the remaining connection count `remaining`
 
-### 接口调用与鉴权
+### API Calls and Authentication
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/api-use.html
 
-# 接口调用与鉴权
+# API Calls and Authentication
 
-说明
+Description
 
-`QQ 机器人` 服务端开放的 `openapi` 接口，均使用 `https` 方式进行调用，通过 `AccessToken` 机制实现对 `openapi` 接口调用的鉴权。
+The `openapi` APIs exposed by the `QQ Bot` server are all called over `https`, and authentication for `openapi` API calls is implemented through the `AccessToken` mechanism.
 
-## 获取调用凭证
+## Obtaining the Call Credential
 
--   **请求**
+-   **Request**
 
-基本
+Basic Information
 
 HTTP URL
 
@@ -2726,63 +2726,63 @@ HTTP Method
 
 POST
 
--   **请求参数**
+-   **Request Parameters**
 
-**属性**
+**Attribute**
 
-**类型**
+**Type**
 
-**必填**
+**Required**
 
-**说明**
+**Description**
 
 appId
 
 string
 
-是
+Yes
 
-在开放平台管理端上获得。
+Obtained from the Open Platform admin console.
 
 clientSecret
 
 string
 
-是
+Yes
 
-在开放平台管理端上获得。
+Obtained from the Open Platform admin console.
 
--   **返回参数**
+-   **Response Parameters**
 
-**属性**
+**Attribute**
 
-**类型**
+**Type**
 
-**说明**
+**Description**
 
 access\_token
 
 string
 
-获取到的凭证。
+The obtained credential.
 
 expires\_in
 
 number
 
-凭证有效时间，单位：秒。目前是7200秒之内的值。
+Credential validity period in seconds. Currently a value within 7200 seconds.
 
--   **错误码**
+-   **Error Codes**
 
-**错误码**
+**Error Code**
 
-**错误码取值**
+**Error Code Values**
 
 0
 
 ok
 
--   **调用示例**
+-   **Call Example**
 
 ```
 curl --location 'https://api.bot.qq.com/app/getAppAccessToken' \
@@ -2793,7 +2793,7 @@ curl --location 'https://api.bot.qq.com/app/getAppAccessToken' \
 }'
 ```
 
--   **返回示例**
+-   **Response Example**
 
 ```
 {
@@ -2802,41 +2802,41 @@ curl --location 'https://api.bot.qq.com/app/getAppAccessToken' \
 }
 ```
 
--   **其他说明**
+-   **Additional Notes**
 
-目前 `access_token` 生命周期默认 `7200` 秒，每次请求不会刷新新的 `access_token`，开发者需要在过期后自行刷新 `access_token`，保证调用链路权限正常。
+Currently the default `access_token` lifetime is `7200` seconds. Each request does not refresh the `access_token`; developers need to refresh the `access_token` themselves after it expires to ensure the call chain has normal permissions.
 
-在上一个 `access_token` 接近过期时间 `60` 秒内，获取 `access_token` 时，会获得一个新的 `access_token`，老的 `access_token` 在这个`60`秒内仍然有效。
+When obtaining an `access_token` within `60` seconds of the previous `access_token`'s expiration, a new `access_token` is obtained, and the old `access_token` remains valid during these `60` seconds.
 
-## 鉴权方式
+## Authentication Method
 
-在每次调用 https 的 openapi 开放接口请求的时候，需要在 header 内引入 `access_token` 进行调用权限验证。
+For each HTTPS request to an openapi API, include `access_token` in the header to verify call permission.
 
-**统一地址**
+**Unified Address**
 
 ```
 https://api.bot.qq.com
 ```
 
-**请求头**
+**Request Header**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 Authorization
 
 string
 
-是
+Yes
 
-格式值："QQBot ACCESS\_TOKEN"
+Format: "QQBot ACCESS\_TOKEN"
 
-**示例**
+**Example**
 
 ```
 {
@@ -2846,54 +2846,54 @@ string
 }
 ```
 
-### 安全和授权
+### Security and Authorization
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/sign.html
 
-# 安全和授权
+# Security and Authorization
 
-开发者需要对每一次回调请求，根据回调中的签名等信息验证请求者身份，避免安全隐患。目前签名算法使用Ed25519。
+Developers need to verify the requester's identity for every callback request based on the signature and other information in the callback to avoid security risks. The signature algorithm currently used is Ed25519.
 
-## 安全凭证
+## Security Credential
 
-开发者平台的 Bot Secret 用于加密签名字符串和服务器端验证签名字符串的密钥。用户必须严格保管安全凭证，避免泄露。
+The Bot Secret on the Developer Platform is used to encrypt the signature string and as the key for server-side signature verification. Users must keep security credentials strictly confidential to avoid leaks.
 
-## 验证签名
+## Verifying the Signature
 
-### 1. 签名验证参数
+### 1. Signature Verification Parameters
 
-字段名
+Field Name
 
-说明
+Description
 
-参考值
+Reference Value
 
 X-Signature-Ed25519
 
-HTTP Header 中透传 Signature
+Signature passed through in the HTTP header
 
-3ecd\*\*\*（64字节）
+3ecd\*\*\* (64 bytes)
 
 X-Signature-Timestamp
 
-HTTP Header 透传的签名时间戳
+Signature timestamp passed through in the HTTP header
 
 1636373772
 
 HTTP Body
 
-HTTP 请求中 Body 值
+Body value in the HTTP request
 
 {"msg":"hello"}
 
-### 2. 验证签名过程
+### 2. Signature Verification Process
 
-以下代码以Go语言为例,引用 `crypto/ed25519` 包实现 `Ed25519` 算法
+The following code uses Go as an example, referencing the `crypto/ed25519` package to implement the `Ed25519` algorithm
 
--   根据开发者平台的 Bot Secret 值进行repeat操作得到签名32字节的 seed ,根据 seed 调用 Ed25519 算法生成32字节公钥
+-   Repeat the Bot Secret value from the Developer Platform to obtain a 32-byte signing seed, then call the Ed25519 algorithm with the seed to generate a 32-byte public key
 
 ```
-  // 根据botSecret进行repeat操作后得到seed值计算出公钥
+  // Obtain the seed value by repeating botSecret, then calculate the public key
   seed := botSecret
   for len(seed) < ed25519.SeedSize {
     seed = strings.Repeat(seed, 2)
@@ -2905,18 +2905,18 @@ HTTP 请求中 Body 值
 DEMO
 
 ```
-【输入】
+[Input]
 secret: naOC0ocQE3shWLAfffVLB1rhYPG7
 seed: naOC0ocQE3shWLAfffVLB1rhYPG7naOC
-【输出】
+[Output]
 publicKey: [215 195 98 254 120 174 248 31 242 50 135 180 147 98 139 93 176 42 60 79 227 11 33 94 77 25 96 155 93 118 103 58]
 privateKey: [110 97 79 67 48 111 99 81 69 51 115 104 87 76 65 102 102 102 86 76 66 49 114 104 89 80 71 55 110 97 79 67 215 195 98 254 120 174 248 31 242 50 135 180 147 98 139 93 176 42 60 79 227 11 33 94 77 25 96 155 93 118 103 58]
 ```
 
--   获取 HTTP Header 中 X-Signature-Ed25519 的值进行 hec (十六进制解码)操作后的得到 Signature 并进行校验
+-   Get the value of X-Signature-Ed25519 from the HTTP header, perform hex decoding to obtain the Signature, and verify it
 
 ```
-  // 取HTTP header中X-Signature-Ed25519(进行hex解码)并校验 
+  // Get X-Signature-Ed25519 from the HTTP header (hex-decode it) and verify 
   signature := req.Header.Get("X-Signature-Ed25519")
   if signature == "" {
     return false
@@ -2930,10 +2930,10 @@ privateKey: [110 97 79 67 48 111 99 81 69 51 115 104 87 76 65 102 102 102 86 76 
   }
 ```
 
--   获取 HTTP Header 中 X-Signature-Timestamp 的和 HTTP Body 的值按照 timestamp+body 顺序进行组合成签名体msg
+-   Get the values of X-Signature-Timestamp from the HTTP header and the HTTP body, and combine them in timestamp+body order to form the signature body msg
 
 ```
-    // 取HTTP header中 X-Signature-Timestamp 并校验
+    // Get X-Signature-Timestamp from the HTTP header and verify it
   timestamp := req.Header.Get("X-Signature-Timestamp")
   if timestamp == "" {
     return false
@@ -2942,7 +2942,7 @@ privateKey: [110 97 79 67 48 111 99 81 69 51 115 104 87 76 65 102 102 102 86 76 
   if err != nil {
     return false
   }
-  // 按照timestamp+Body顺序组成签名体
+  // Form the signature body in timestamp+Body order
   var msg bytes.Buffer
   msg.WriteString(timestamp)
   msg.Write(httpBody)
@@ -2951,7 +2951,7 @@ privateKey: [110 97 79 67 48 111 99 81 69 51 115 104 87 76 65 102 102 102 86 76 
   }
 ```
 
--   根据公钥、Signature、签名体调用 Ed25519 算法进行验证
+-   Call the Ed25519 algorithm with the public key, Signature, and signature body to verify
 
 ```
   ed25519.Verify(publicKey, msg.Bytes(), sig)
@@ -2960,25 +2960,25 @@ privateKey: [110 97 79 67 48 111 99 81 69 51 115 104 87 76 65 102 102 102 86 76 
 DEMO
 
 ```
-【输入】
+[Input]
 secret: naOC0ocQE3shWLAfffVLB1rhYPG7
 body: { "op": 0,"d": {}, "t": "GATEWAY_EVENT_NAME"}
 timestamp: 1725442341
 
-【输出】
+[Output]
 sig: 865ad13a61752ca65e26bde6676459cd36cf1be609375b37bd62af366e1dc25a8dc789ba7f14e017ada3d554c671a911bfdf075ba54835b23391d509579ed002
 
 ```
 
-### 使用 Websocket 接入
+### Using WebSocket
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/reference.html
 
-# 使用 Websocket 接入
+# Using WebSocket
 
 ### payload
 
-payload 指的是在 websocket 连接上传输的数据，网关的上下行消息采用的都是同一个结构，如下：
+payload refers to the data transmitted over a websocket connection. The gateway uses the same structure for both upstream and downstream messages, as follows:
 
 ```
 {
@@ -2989,21 +2989,21 @@ payload 指的是在 websocket 连接上传输的数据，网关的上下行消�
 }
 ```
 
-`op` 指的是 opcode，全部 opcode 列表参考 [opcode](/wiki/develop/api-v2/dev-prepare/interface-framework/opcode.html)。
+`op` refers to the opcode. For the full opcode list, see [opcode](/wiki/develop/api-v2/dev-prepare/interface-framework/opcode.html).
 
-`s` 下行消息都会有一个序列号，标识消息的唯一性，客户端需要再发送心跳的时候，携带客户端收到的最新的`s`。
+`s` Every downstream message has a sequence number that identifies it uniquely. When sending a heartbeat, the client must include the latest `s` it has received.
 
-`t`和`d` 主要是用在`op`为 `0 Dispatch` 的时候，`t` 代表事件类型，`d` 代表事件内容，不同事件类型的事件内容格式都不同，请注意识别。
+`t` and `d` are mainly used when `op` is `0 Dispatch`: `t` represents the event type and `d` represents the event content. The content format differs for each event type, so identify it carefully.
 
-### 1.连接到 Gateway
+### 1. Connecting to the Gateway
 
-第一步先调用 [/gateway](/wiki/develop/api-v2/openapi/wss/url_get.html) 或 [/gateway/bot](/wiki/develop/api-v2/openapi/wss/shard_url_get.html) 接口获取网关地址。 会得到一个类似下面这样的地址：
+First, call the [/gateway](/wiki/develop/api-v2/openapi/wss/url_get.html) or [/gateway/bot](/wiki/develop/api-v2/openapi/wss/shard_url_get.html) API to obtain the gateway address. You will get an address similar to the following:
 
 ```
 wss://api.bot.qq.com/websocket/
 ```
 
-然后进行 websocket 连接，一旦连接成功，就会返回 [OpCode 10 Hello](/wiki/develop/api-v2/dev-prepare/interface-framework/opcode.html) 消息。这个消息主要的内容是心跳周期，单位毫秒(milliseconds)，如下：
+Then establish a websocket connection. Once the connection succeeds, an [OpCode 10 Hello](/wiki/develop/api-v2/dev-prepare/interface-framework/opcode.html) message is returned. The main content of this message is the heartbeat interval in milliseconds, as follows:
 
 ```
 {
@@ -3014,9 +3014,9 @@ wss://api.bot.qq.com/websocket/
 }
 ```
 
-### 2.鉴权连接
+### 2. Authentication Connection
 
-建立 websocket 连接之后，就需要进行鉴权了，需要发送一个 [OpCode 2 Identify](/wiki/develop/api-v2/dev-prepare/interface-framework/opcode.html) 消息，如下：
+After establishing the websocket connection, you need to authenticate by sending an [OpCode 2 Identify](/wiki/develop/api-v2/dev-prepare/interface-framework/opcode.html) message, as follows:
 
 ```
 {
@@ -3034,15 +3034,15 @@ wss://api.bot.qq.com/websocket/
 }
 ```
 
-`token` 是创建机器人的时候分配的，格式为`Bot {appid}.{app_token}`
+`token` is assigned when the bot is created, in the format `Bot {appid}.{app_token}`
 
-`intents` 是此次连接所需要接收的事件，具体可参考 [Intents](/wiki/develop/api-v2/dev-prepare/interface-framework/event-emit.html#事件类型Intents)
+`intents` specifies the events to receive for this connection; see [Intents](/wiki/develop/api-v2/dev-prepare/interface-framework/event-emit.html#%E4%BA%8B%E4%BB%B6%E7%B1%BB%E5%9E%8BIntents) for details
 
-`shard` 该参数是用来进行水平分片的。该参数是个拥有两个元素的数组。例如：`[0,4]`，代表分为四个片，当前链接是第 0 个片，业务稍后应该继续建立 shard 为`[1,4]`,`[2,4]`,`[3,4]`的链接，才能完整接收事件。更多详细的内容可以参考[Shard](/wiki/develop/api-v2/dev-prepare/interface-framework/event-emit.html#分片连接LoadBalance)。
+`shard` is used for horizontal sharding. This parameter is an array with two elements. For example: `[0,4]` means four shards total and the current connection is shard 0; the service should subsequently establish connections with shard `[1,4]`, `[2,4]`, and `[3,4]` to receive all events. For more details, refer to [Shard](/wiki/develop/api-v2/dev-prepare/interface-framework/event-emit.html#%E5%88%86%E7%89%87%E8%BF%9E%E6%8E%A5LoadBalance).
 
-`properties` 目前无实际作用，可以按照自己的实际情况填写，也可以留空
+`properties` currently has no practical effect; you can fill it in according to your actual situation or leave it empty
 
-鉴权成功之后，后台会下发一个 `Ready Event`，结构如下：
+After successful authentication, the backend sends a `Ready Event` with the following structure:
 
 ```
 {
@@ -3054,7 +3054,7 @@ wss://api.bot.qq.com/websocket/
     "session_id": "082ee18c-0be3-491b-9d8b-fbd95c51673a",
     "user": {
       "id": "6158788878435714165",
-      "username": "群pro测试机器人",
+      "username": "Group Pro Test Bot",
       "bot": true
     },
     "shard": [0, 0]
@@ -3062,9 +3062,9 @@ wss://api.bot.qq.com/websocket/
 }
 ```
 
-### 3.发送心跳
+### 3. Sending Heartbeats
 
-鉴权成功之后，就需要按照周期进行心跳发送。`d`为客户端收到的最新的消息的`s`，如果是第一次连接，传`null`。
+After successful authentication, you need to send heartbeats periodically. `d` is the `s` of the latest message received by the client; for the first connection, pass `null`.
 
 ```
 {
@@ -3073,7 +3073,7 @@ wss://api.bot.qq.com/websocket/
 }
 ```
 
-心跳发送成功之后会收到 [OpCode 11 Heartbeat ACK](/wiki/develop/api-v2/dev-prepare/interface-framework/opcode.html) 消息，如下：
+After a heartbeat is sent successfully, you will receive an [OpCode 11 Heartbeat ACK](/wiki/develop/api-v2/dev-prepare/interface-framework/opcode.html) message, as follows:
 
 ```
 {
@@ -3081,9 +3081,9 @@ wss://api.bot.qq.com/websocket/
 }
 ```
 
-### 4.恢复连接
+### 4. Resuming the Connection
 
-有很多原因都会导致连接断开，断开之后短时间内重连会补发中间遗漏的事件，以保障业务逻辑的正确性。断开重连不需要发送`Identify`请求。在连接到 Gateway 之后，需要发送 [Opcode 6 Resume](/wiki/develop/api-v2/dev-prepare/interface-framework/opcode.html)消息，结构如下：
+Many reasons can cause the connection to drop. Reconnecting shortly after disconnection will resend events missed in between, ensuring business logic correctness. Reconnecting does not require sending an `Identify` request. After connecting to the Gateway, send an [Opcode 6 Resume](/wiki/develop/api-v2/dev-prepare/interface-framework/opcode.html) message with the following structure:
 
 ```
 {
@@ -3096,9 +3096,9 @@ wss://api.bot.qq.com/websocket/
 }
 ```
 
-其中 `seq` 指的是在接收事件时候的 `s` 字段，我们推荐开发者在处理过事件之后记录下 `s` 这样可以在 resume 的时候传递给 websocket，websocket 会自动补发这个 seq 之后的事件。
+Here `seq` refers to the `s` field received with events. We recommend developers record `s` after processing an event so it can be passed to the websocket during resume; the websocket will automatically resend events after this seq.
 
-恢复成功之后，就开始补发遗漏事件，所有事件补发完成之后，会下发一个 `Resumed Event`，结构如下：
+After a successful resume, missed events start being resent. Once all events have been resent, a `Resumed Event` is sent with the following structure:
 
 ```
 {
@@ -3109,165 +3109,165 @@ wss://api.bot.qq.com/websocket/
 }
 ```
 
-### WebSocket（错误码）
+### WebSocket (Error Codes)
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/error-trace/websocket.html
 
 # WebSocket
 
-### 错误码 code
+### Error Code
 
-值
+Value
 
-含义
+Meaning
 
-是否可以重试 RESUME
+Whether RESUME Can Be Retried
 
-是否可以重试 IDENTIFY
+Whether IDENTIFY Can Be Retried
 
 4001
 
-无效的 opcode
+Invalid opcode
 
-否
+No
 
-否
+No
 
 4002
 
-无效的 payload
+Invalid payload
 
-否
+No
 
-否
+No
 
 4007
 
-seq 错误
+Invalid seq
 
-否
+No
 
-**是**
+**Yes**
 
 4006
 
-无效的 session id，无法继续 resume，请 identify
+Invalid session id; cannot continue resume, please identify
 
-否
+No
 
-**是**
+**Yes**
 
 4008
 
-发送 payload 过快，请重新连接，并遵守连接后返回的频控信息
+Payloads sent too quickly. Please reconnect and follow the rate-limit information returned after connecting
 
-**是**
+**Yes**
 
-**是**
+**Yes**
 
 4009
 
-连接过期，请重连并执行 resume 进行重新连接
+Connection expired. Please reconnect and perform resume to re-establish the connection
 
-**是**
+**Yes**
 
-**是**
+**Yes**
 
 4010
 
-无效的 shard
+Invalid shard
 
-否
+No
 
-否
+No
 
 4011
 
-连接需要处理的 guild 过多，请进行合理的分片
+The connection has too many guilds to handle. Please shard appropriately
 
-否
+No
 
-否
+No
 
 4012
 
-无效的 version
+Invalid version
 
-否
+No
 
-否
+No
 
 4013
 
-无效的 intent
+Invalid intent
 
-否
+No
 
-否
-
-4014
-
-intent 无权限
-
-否
-
-否
+No
 
 4014
 
-intent 无权限
+Intent not authorized
 
-否
+No
 
-否
+No
+
+4014
+
+Intent not authorized
+
+No
+
+No
 
 4900~4913
 
-内部错误，请重连
+Internal error. Please reconnect
 
-否
+No
 
-**是**
+**Yes**
 
 4914
 
-机器人已下架,只允许连接沙箱环境,请断开连接,检验当前连接环境
+The bot has been delisted. Only sandbox environment connections are allowed. Please disconnect and verify the current connection environment
 
-否
+No
 
-否
+No
 
 4915
 
-机器人已封禁,不允许连接,请断开连接,申请解封后再连接
+The bot has been banned and connections are not allowed. Please disconnect and reconnect after applying for unbanning
 
-否
+No
 
-否
+No
 
-### 针对 WebSocket 错误码的简单处理逻辑
+### Simple Handling Logic for WebSocket Error Codes
 
--   4009 可以重新发起 resume
--   4914，4915 不可以连接，请联系官方解封
--   其他错误，请重新发起 identify
+-   4009: resume can be initiated again
+-   4914, 4915: cannot connect; please contact the official team to request an unban
+-   For other errors, initiate identify again
 
-## 2. 网关与鉴权
+## 2. Gateway and Authentication
 
-### 获取通用 WSS 接入点（autogen/api gateway.get）
+### Get the General WSS Access Point (autogen/api gateway.get)
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/gateway.get.html
 
-# 获取通用 WSS 接入点
+# Get the General WSS Access Point
 
-获取 WSS 接入地址，通过该地址可建立 WebSocket 长连接。
+Get the WSS access address; a WebSocket long connection can be established through this address.
 
-## 请求
+## Request
 
-### 基础信息
+### Basic Information
 
-字段
+Field
 
-值
+Value
 
 HTTP URL
 
@@ -3277,37 +3277,37 @@ HTTP Method
 
 GET
 
-接口频率限制
+API Rate Limit
 
 2 QPM / 10 QPM burst
 
-### 请求示例
+### Request Example
 
-**获取通用WSS接入点**
+**Get General WSS Access Point**
 
 ```
 GET /gateway
 ```
 
-## 响应
+## Response
 
-### 响应体
+### Response Body
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 url
 
 string
 
-WebSocket 连接地址
+WebSocket connection address
 
-## 响应示例
+## Response Example
 
-**获取WSS网关地址成功**
+**Successfully obtained the WSS gateway address**
 
 ```
 {
@@ -3315,21 +3315,21 @@ WebSocket 连接地址
 }
 ```
 
-### 获取通用 WSS 接入点（openapi/wss/url_get）
+### Get the General WSS Access Point (openapi/wss/url_get)
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/openapi/wss/url_get.html
 
-# 获取通用 WSS 接入点
+# Get the General WSS Access Point
 
-### 接口
+### Endpoint
 
 ```
 GET /gateway
 ```
 
-### 功能描述
+### Description
 
-用于获取 WSS 接入地址，通过该地址可建立 `websocket` 长连接。
+Used to obtain the WSS access address; a `websocket` long connection can be established through this address.
 
 ### Content-Type
 
@@ -3337,17 +3337,17 @@ GET /gateway
 application/json
 ```
 
-### 返回
+### Response
 
-返回一个用于连接 `websocket` 的地址。
+Returns an address for connecting to `websocket`.
 
-### 错误码
+### Error Codes
 
-详见[错误码](/wiki/develop/api-v2/openapi/error/error.html)。
+See [error codes](/wiki/develop/api-v2/openapi/error/error.html) for details.
 
-### 示例
+### Example
 
-响应数据包
+Response data packet
 
 ```
 {
@@ -3355,24 +3355,24 @@ application/json
 }
 ```
 
-### 获取带分片 WSS 接入点
+### Get the Sharded WSS Access Point
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/openapi/wss/shard_url_get.html
 
-# 获取带分片 WSS 接入点
+# Get the Sharded WSS Access Point
 
-### 接口
+### Endpoint
 
 ```
 GET /gateway/bot
 ```
 
-### 功能描述
+### Description
 
-用于获取 WSS 接入地址及相关信息，通过该地址可建立 `websocket` 长连接。相关信息包括：
+Used to obtain the WSS access address and related information; a `websocket` long connection can be established through this address. The related information includes:
 
--   建议的分片数。
--   目前连接数使用情况。
+-   Recommended number of shards.
+-   Current connection usage.
 
 ### Content-Type
 
@@ -3380,69 +3380,69 @@ GET /gateway/bot
 application/json
 ```
 
-### 返回
+### Response
 
-字段名
+Field Name
 
-类型
+Type
 
-描述
+Description
 
 url
 
 string
 
-WebSocket 的连接地址
+WebSocket connection address
 
 shards
 
 int
 
-建议的 shard 数
+Recommended number of shards
 
 session\_start\_limit
 
 [SessionStartLimit](#sessionstartlimit)
 
-创建 Session 限制信息
+Session creation limit information
 
 ### SessionStartLimit
 
-字段名
+Field Name
 
-类型
+Type
 
-描述
+Description
 
 total
 
 int
 
-每 24 小时可创建 Session 数
+Number of sessions that can be created per 24 hours
 
 remaining
 
 int
 
-目前还可以创建的 Session 数
+Number of sessions that can still be created
 
 reset\_after
 
 int
 
-重置计数的剩余时间(ms)
+Remaining time until the count resets (ms)
 
 max\_concurrency
 
 int
 
-每 5s 可以创建的 Session 数
+Number of sessions that can be created per 5s
 
-### 错误码
+### Error Codes
 
-详见[错误码](/wiki/develop/api-v2/openapi/error/error.html)。
+See [error codes](/wiki/develop/api-v2/openapi/error/error.html) for details.
 
-### 示例
+### Example
 
 ```
 {
@@ -3457,21 +3457,21 @@ int
 }
 ```
 
-### 获取用户详情
+### Get User Details
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/openapi/user/me.html
 
-# 获取用户详情
+# Get User Details
 
-### 接口
+### Endpoint
 
 ```
 GET /users/@me
 ```
 
-### 功能描述
+### Description
 
-用于获取当前用户（机器人）详情。
+Used to get details of the current user (bot).
 
 ### Content-Type
 
@@ -3479,17 +3479,17 @@ GET /users/@me
 application/json
 ```
 
-### 返回
+### Response
 
-返回 [User](/wiki/develop/api-v2/openapi/user/model.html#user) 对象。
+Returns a [User](/wiki/develop/api-v2/openapi/user/model.html#user) object.
 
-### 错误码
+### Error Codes
 
-详见[错误码](/wiki/develop/api-v2/openapi/error/error.html)。
+See [error codes](/wiki/develop/api-v2/openapi/error/error.html) for details.
 
-### 示例
+### Example
 
-响应数据包
+Response data packet
 
 ```
 {
@@ -3501,331 +3501,331 @@ application/json
 }
 ```
 
-### 用户对象(User)
+### User Object (User)
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/openapi/user/model.html
 
-# 用户对象(User)
+# User Object (User)
 
-用户对象中所涉及的 ID 类数据，都仅在机器人场景流通，与真实的 ID 无关。请不要理解为真实的 ID
+ID-type data in the user object is only circulated in the bot context and is unrelated to real IDs. Do not interpret it as a real ID
 
 ### User
 
-字段名
+Field Name
 
-类型
+Type
 
-描述
+Description
 
 id
 
 string
 
-用户 id
+User ID
 
 username
 
 string
 
-用户名
+Username
 
 avatar
 
 string
 
-用户头像地址
+User avatar URL
 
 bot
 
 bool
 
-是否是机器人
+Whether the user is a bot
 
 union\_openid
 
 string
 
-特殊关联应用的 openid，需要特殊申请并配置后才会返回。如需申请，请联系平台运营人员。
+The openid of a specially associated application; returned only after special application and configuration. To apply, please contact platform operations staff.
 
 union\_user\_account
 
 string
 
-机器人关联的互联应用的用户信息，与union\_openid关联的应用是同一个。如需申请，请联系平台运营人员。
+User information of the interconnected application associated with the bot; it is the same application associated with union\_openid. To apply, please contact platform operations staff.
 
-### 提示
+### Note
 
-`union_openid` 与 `union_user_account` 只有在单独拉取 member 信息的时候才会提供，在其他的事件中所携带的 user 对象，均无这两个字段的内容。
+`union_openid` and `union_user_account` are provided only when fetching member information separately; the user object carried in other events does not contain these two fields.
 
-### websocket 错误
+### WebSocket Errors
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/gateway/error/error.html
 
-# websocket 错误
+# WebSocket Errors
 
 ### code
 
-值
+Value
 
-含义
+Meaning
 
-是否可以重试 RESUME
+Whether RESUME Can Be Retried
 
-是否可以重试 IDENTIFY
+Whether IDENTIFY Can Be Retried
 
 4001
 
-无效的 opcode
+Invalid opcode
 
-否
+No
 
-否
+No
 
 4002
 
-无效的 payload
+Invalid payload
 
-否
+No
 
-否
+No
 
 4007
 
-seq 错误
+Invalid seq
 
-否
+No
 
-**是**
+**Yes**
 
 4006
 
-无效的 session id，无法继续 resume，请 identify
+Invalid session id; cannot continue resume, please identify
 
-否
+No
 
-**是**
+**Yes**
 
 4008
 
-发送 payload 过快，请重新连接，并遵守连接后返回的频控信息
+Payloads sent too quickly. Please reconnect and follow the rate-limit information returned after connecting
 
-**是**
+**Yes**
 
-**是**
+**Yes**
 
 4009
 
-连接过期，请重连并执行 resume 进行重新连接
+Connection expired. Please reconnect and perform resume to re-establish the connection
 
-**是**
+**Yes**
 
-**是**
+**Yes**
 
 4010
 
-无效的 shard
+Invalid shard
 
-否
+No
 
-否
+No
 
 4011
 
-连接需要处理的 guild 过多，请进行合理的分片
+The connection has too many guilds to handle. Please shard appropriately
 
-否
+No
 
-否
+No
 
 4012
 
-无效的 version
+Invalid version
 
-否
+No
 
-否
+No
 
 4013
 
-无效的 intent
+Invalid intent
 
-否
+No
 
-否
-
-4014
-
-intent 无权限
-
-否
-
-否
+No
 
 4014
 
-intent 无权限
+Intent not authorized
 
-否
+No
 
-否
+No
+
+4014
+
+Intent not authorized
+
+No
+
+No
 
 4900~4913
 
-内部错误，请重连
+Internal error. Please reconnect
 
-否
+No
 
-**是**
+**Yes**
 
 4914
 
-机器人已下架,只允许连接沙箱环境,请断开连接,检验当前连接环境
+The bot has been delisted. Only sandbox environment connections are allowed. Please disconnect and verify the current connection environment
 
-否
+No
 
-否
+No
 
 4915
 
-机器人已封禁,不允许连接,请断开连接,申请解封后再连接
+The bot has been banned and connections are not allowed. Please disconnect and reconnect after applying for unbanning
 
-否
+No
 
-否
+No
 
-### 针对 websocket 错误码的简单处理逻辑
+### Simple Handling Logic for WebSocket Error Codes
 
--   4009 可以重新发起 resume
--   4914，4915 不可以连接，请联系官方解封
--   其他错误，请重新发起 identify
+-   4009: resume can be initiated again
+-   4914, 4915: cannot connect; please contact the official team to request an unban
+-   For other errors, initiate identify again
 
-### 业务报错返回的数据信息(Data)
+### Data Returned on Business Errors (Data)
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/gateway/error/data/model.html
 
-# 业务报错返回的数据信息(Data)
+# Data Returned on Business Errors (Data)
 
 ### Data
 
-字段名
+Field Name
 
-类型
+Type
 
-描述
+Description
 
 message\_audit
 
-[MessageAudited](/wiki/develop/api-v2/gateway/message/model.html#messageaudited) 对象
+[MessageAudited](/wiki/develop/api-v2/gateway/message/model.html#messageaudited) object
 
-消息审核信息，只会填充该对象的 audit\_id 字段
+Message audit information; only the audit\_id field of this object is populated
 
-## 3. 消息收发（单聊/群）
+## 3. Sending and Receiving Messages (Direct Chat/Group)
 
-### 消息收发概述
+### Message Sending and Receiving Overview
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/overview.html
 
-# 消息收发概述
+# Message Sending and Receiving Overview
 
-机器人可在 QQ 单聊、群聊、频道三种场景下收发消息。本页介绍基础概念与通用规则，具体接口与事件请参考对应子分类。
+Bots can send and receive messages in three scenarios: QQ direct chat, group chat, and channel. This page introduces basic concepts and general rules; refer to the corresponding subcategories for specific APIs and events.
 
-## 收发场景
+## Scenarios
 
-场景
+Scenario
 
-发送消息
+Send Message
 
-接收事件
+Receive Event
 
-QQ 单聊
+QQ Direct Chat
 
-[发送单聊消息](/wiki/develop/api-v2/autogen/api/v2_users_user_openid_messages.post.html) / [流式消息](/wiki/develop/api-v2/autogen/api/v2_users_user_openid_stream_messages.post.html)
+[Send Direct Chat Message](/wiki/develop/api-v2/autogen/api/v2_users_user_openid_messages.post.html) / [Streaming Message](/wiki/develop/api-v2/autogen/api/v2_users_user_openid_stream_messages.post.html)
 
 [C2C\_MESSAGE\_CREATE](/wiki/develop/api-v2/autogen/event/c2c_message_create.html)
 
-QQ 群聊
+QQ Group Chat
 
-[发送群消息](/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages.post.html)
+[Send Group Message](/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages.post.html)
 
 [GROUP\_AT\_MESSAGE\_CREATE](/wiki/develop/api-v2/autogen/event/group_at_message_create.html) / [GROUP\_MESSAGE\_CREATE](/wiki/develop/api-v2/autogen/event/group_message_create.html)
 
-频道
+Channel
 
-[发送子频道消息](/wiki/develop/api-v2/server-inter/channel/message/send.html) / [频道私信](/wiki/develop/api-v2/server-inter/channel/message/dms.html)
+[Send Sub-channel Message](/wiki/develop/api-v2/server-inter/channel/message/send.html) / [Channel Direct Message](/wiki/develop/api-v2/server-inter/channel/message/dms.html)
 
-[频道消息事件](/wiki/develop/api-v2/server-inter/channel/message/event.html)
+[Channel Message Event](/wiki/develop/api-v2/server-inter/channel/message/event.html)
 
-### 对话场景图示
+### Conversation Scenario Diagram
 
-说明
+Description
 
-机器人可以被添加各种聊天场景下
+Bots can be added to various chat scenarios
 
-单聊
+Direct Chat
 
-群聊
+Group Chat
 
-文字子频道
+Text Sub-channel
 
-频道私信
+Channel Direct Message
 
-![单聊](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/chat-single.c4f33531.jpg)
+![Direct Chat](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/chat-single.c4f33531.jpg)
 
-![群聊](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/chat-group.d5318db5.jpg)
+![Group Chat](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/chat-group.d5318db5.jpg)
 
-![文字子频道](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/chat-text-channel.6dfae006.jpg)
+![Text Sub-channel](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/chat-text-channel.6dfae006.jpg)
 
-![频道私信](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/chat-c2c.33e2820c.jpg)
+![Channel Direct Message](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/chat-c2c.33e2820c.jpg)
 
-## 主动消息与被动消息
+## Proactive and Passive Messages
 
-类型
+Type
 
-特征
+Feature
 
-说明
+Description
 
-主动消息
+Proactive Message
 
-无任何条件
+No conditions
 
-机器人主动触达用户，用户可在客户端关闭「允许主动发送」开关，关闭后主动消息将发送失败
+The bot proactively reaches out to the user. Users can turn off the "Allow Proactive Sending" switch in the client; once disabled, proactive messages will fail to send
 
-互动召回消息
+Interaction recall message
 
 `is_wakeup=true`
 
-用户主动与机器人对话之后每个周期内可下发 1 条召回消息
+After the user proactively converses with the bot, 1 recall message can be sent per period
 
-被动消息（回复用户）
+Passive message (replying to user)
 
-携带 `msg_id`
+Carries `msg_id`
 
-对用户消息的回复
+Reply to a user message
 
-被动消息（响应事件）
+Passive message (responding to event)
 
-携带 `event_id`
+Carries `event_id`
 
-对事件的回复
+Reply to an event
 
-## 消息类型
+## Message Types
 
-通过 `msg_type` 指定消息内容格式：
+Specify the message content format via `msg_type`:
 
 msg\_type
 
-类型
+Type
 
-内容字段
+Content Field
 
-发送
+Send
 
-接收
+Receive
 
 0
 
-文本
+Text
 
 `content`
 
@@ -3845,196 +3845,196 @@ Markdown
 
 7
 
-富媒体
+Rich Media
 
-`media`（需先上传文件获取 `file_info`）
-
-✅
+`media` (upload the file first to obtain `file_info`)
 
 ✅
 
-除上述之外，响应中还可能收到图片、视频、语音、表情、卡片等类型，详见 [消息类型](/wiki/develop/api-v2/server-inter/message/type/overview.html)。
+✅
 
-## 富媒体消息
+In addition to the above, responses may also contain types such as images, videos, voice, emoji, and cards; see [Message Types](/wiki/develop/api-v2/server-inter/message/type/overview.html) for details.
 
-图片、视频、语音、文件等富媒体需先上传获取 `file_info`，再通过发消息接口（`msg_type=7`）携带 `media.file_info` 发送。
+## Rich Media Messages
 
-上传方式：
+Rich media such as images, videos, voice, and files must first be uploaded to obtain `file_info`, then sent via the send message API (`msg_type=7`) with `media.file_info`.
 
--   **分片上传**：推荐使用，无需开发者提供公网 CDN 地址，参考 [分片上传流程](/wiki/develop/api-v2/server-inter/message/rich-media.html#分片上传（推荐）)
--   **整文件上传**：[单聊上传](/wiki/develop/api-v2/server-inter/message/rich-media.html#url-上传) / [群聊上传](/wiki/develop/api-v2/server-inter/message/rich-media.html#url-上传)
+Upload methods:
 
-> -   `file_info` 有时效性（`ttl`），过期需重新上传。
-> -   单聊和群聊的文件上传接口不互通。
+-   **Multipart upload**: recommended; developers do not need to provide a public CDN address. See [Multipart Upload Process](/wiki/develop/api-v2/server-inter/message/rich-media.html#%E5%88%86%E7%89%87%E4%B8%8A%E4%BC%A0%EF%BC%88%E6%8E%A8%E8%8D%90%EF%BC%89)
+-   **Whole-file upload**: [Direct Chat Upload](/wiki/develop/api-v2/server-inter/message/rich-media.html#url-%E4%B8%8A%E4%BC%A0) / [Group Chat Upload](/wiki/develop/api-v2/server-inter/message/rich-media.html#url-%E4%B8%8A%E4%BC%A0)
 
-## 频率与时效规则
+> -   `file_info` has a validity period (`ttl`); re-upload after it expires.
+> -   The file upload APIs for direct chat and group chat are not interoperable.
 
-### 被动消息
+## Rate and Validity Rules
 
-场景
+### Passive Messages
 
-有效期
+Scenario
 
-每条消息可回复次数
+Validity Period
 
-单聊
+Replies allowed per message
 
-60 分钟
+Direct Chat
 
-4 次
+60 minutes
 
-群聊
+4 times
 
-5 分钟
+Group Chat
 
-5 次
+5 minutes
 
-频道
+5 times
 
-5 分钟
+Channel
+
+5 minutes
 
 \-
 
-### 主动消息
+### Proactive Messages
 
-主动消息与被动消息说明： QQ 用户可以在 QQ 客户端主动设置是否接收机器人发送的主动消息，如果设置了关闭，主动消息一律发送失败。
+Notes on proactive and passive messages: QQ users can choose in the QQ client whether to receive proactive messages sent by bots. If disabled, all proactive messages will fail to send.
 
-#### 单聊
+#### Direct Chat
 
--   主动消息发送频率限制（HTTP接口）
+-   Proactive message sending rate limits (HTTP API)
 
-认证类型
+Authentication Type
 
-场景
+Scenario
 
-Bot 维度频控
+Bot-level rate limit
 
-单关系维度频控
+Per-relationship rate limit
 
-每日上限
+Daily limit
 
-企业认证
+Enterprise verification
 
-单聊
-
-10/qps
-
-20/qpm
-
-1000 条/用户
-
-个人认证
-
-单聊
+Direct Chat
 
 10/qps
 
 20/qpm
 
-1000 条/用户
+1000 messages/user
 
-未认证
+Personal verification
 
-单聊
+Direct Chat
+
+10/qps
+
+20/qpm
+
+1000 messages/user
+
+Unverified
+
+Direct Chat
 
 5/qps & 30/qpm
 
 20/qpm
 
-1000 条/用户
+1000 messages/user
 
--   互动召回消息：在用户主动与机器人对话之后，机器人在未来 30 天内可下发互动召回消息给用户（消息类型与当前机器人拥有的消息类型权限一致），每个周期内可下发一条。分别为：当天、1 - 3 天、3 - 7 天、7 - 30 天，合计：4 个周期。在发消息接口中使用 is\_wakeup 字段声明使用该能力。
+-   Interaction recall messages: After the user proactively converses with the bot, the bot can send interaction recall messages to the user within the next 30 days (the message type is subject to the message type permissions the bot currently has), with one message allowed per period. The periods are: same day, 1-3 days, 3-7 days, and 7-30 days, for a total of 4 periods. Use the is\_wakeup field in the send message API to declare use of this capability.
 
-#### 群聊
+#### Group Chat
 
--   主动消息发送频率限制（HTTP接口）
+-   Proactive message sending rate limits (HTTP API)
 
-认证类型
+Authentication Type
 
-场景
+Scenario
 
-Bot 维度频控
+Bot-level rate limit
 
-单关系维度频控
+Per-relationship rate limit
 
-每日上限
+Daily limit
 
-企业认证
+Enterprise verification
 
-群
-
-60/qpm
-
-20/qpm
-
-1000 条/群
-
-个人认证
-
-群
+Group
 
 60/qpm
 
 20/qpm
 
-1000 条/群
+1000 messages/group
 
-未认证
+Personal verification
 
-群
+Group
+
+60/qpm
+
+20/qpm
+
+1000 messages/group
+
+Unverified
+
+Group
 
 30/qpm
 
 20/qpm
 
-1000 条/群
+1000 messages/group
 
-#### 文字子频道
+#### Text Sub-channel
 
--   主动消息在频道主或管理设置了情况下，按设置的数量进行限频。在未设置的情况遵循如下限制:
-    -   主动推送消息，默认每天往每个子频道可推送的消息数是 20 条，超过会被限制。
-    -   主动推送消息在每个频道中，每天可以往 2 个子频道推送消息。超过后会被限制。
--   不论主动消息还是被动消息，在一个子频道中，每秒 最多可发送 5 条 消息。
--   被动回复消息有效期为 5 分钟，超时会发送失败。
--   发送消息接口要求机器人接口需要连接到 WebSocket 上保持在线状态
--   有关主动消息审核，可以通过 事件订阅 Intents 中审核事件 MESSAGE\_AUDIT 返回 MessageAudited 对象获取结果。
+-   If the channel owner or administrators have configured proactive messages, rate limiting follows the configured quantity. If not configured, the following limits apply:
+    -   For proactive push messages, by default up to 20 messages can be pushed to each sub-channel per day; exceeding this limit is restricted.
+    -   For proactive push messages, each channel can push messages to 2 sub-channels per day. Exceeding this is restricted.
+-   Regardless of whether proactive or passive, at most 5 messages can be sent per second in a sub-channel.
+-   Passive reply messages have a validity period of 5 minutes; sending after timeout will fail.
+-   The send message API requires the bot to maintain an online WebSocket connection
+-   For proactive message auditing, you can obtain results via the MessageAudited object returned by the MESSAGE\_AUDIT audit event in event subscription Intents.
 
-#### 频道私信
+#### Channel Direct Message
 
--   私信场景下，每个机器人每天可以对一个用户发 2 条 主动消息。
--   私信场景下，每个机器人每天累计可以发 200 条 主动消息。
--   被动回复消息有效期为 5 分钟，超时会发送失败。
+-   In the direct message scenario, each bot can send 2 proactive messages to a user per day.
+-   In the direct message scenario, each bot can send a cumulative total of 200 proactive messages per day.
+-   Passive reply messages have a validity period of 5 minutes; sending after timeout will fail.
 
-## 消息去重
+## Message Deduplication
 
-相同 `msg_id` 可能多次推送，请结合 `msg_seq` 去重。被动回复时，相同的 `msg_id + msg_seq` 重复发送会失败，可递增 `msg_seq` 实现对同一消息的多次回复。
+The same `msg_id` may be pushed multiple times; use `msg_seq` for deduplication. For passive replies, sending the same `msg_id + msg_seq` repeatedly will fail; increment `msg_seq` to reply to the same message multiple times.
 
-## 撤回消息
+## Recalling Messages
 
-机器人可撤回自己发送的消息（发送超过 **2 分钟**不可撤回）：
+A bot can recall messages it has sent (messages sent more than **2 minutes** ago cannot be recalled):
 
--   [撤回单聊消息](/wiki/develop/api-v2/autogen/api/v2_users_user_openid_messages_message_id.delete.html)
--   [撤回群聊消息](/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages_message_id.delete.html)
--   [撤回频道消息](/wiki/develop/api-v2/server-inter/channel/message/recall.html) / [撤回频道私信](/wiki/develop/api-v2/server-inter/channel/message/dms.html#撤回私信)
+-   [Recall Direct Chat Message](/wiki/develop/api-v2/autogen/api/v2_users_user_openid_messages_message_id.delete.html)
+-   [Recall Group Chat Message](/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages_message_id.delete.html)
+-   [Recall Channel Message](/wiki/develop/api-v2/server-inter/channel/message/recall.html) / [Recall Channel Direct Message](/wiki/develop/api-v2/server-inter/channel/message/dms.html#%E6%92%A4%E5%9B%9E%E7%A7%81%E4%BF%A1)
 
-### 获取机器人详情（users/@me）
+### Get Bot Details (users/@me)
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/users_me.get.html
 
-# 获取机器人详情
+# Get Bot Details
 
-获取当前用户（机器人）的详情信息。
+Get detailed information about the current user (bot).
 
--   union\_openid 和 union\_user\_account 需特殊申请并配置后才会返回
--   这两个字段仅在单独拉取 member 信息时提供
+-   union\_openid and union\_user\_account are returned only after special application and configuration
+-   These two fields are provided only when fetching member information separately
 
-## 请求
+## Request
 
-### 基础信息
+### Basic Information
 
-字段
+Field
 
-值
+Value
 
 HTTP URL
 
@@ -4044,102 +4044,102 @@ HTTP Method
 
 GET
 
-接口频率限制
+API Rate Limit
 
 50 QPS
 
-### 请求示例
+### Request Example
 
-**获取当前用户信息**
+**Get Current User Information**
 
 ```
 GET /users/@me
 ```
 
-## 响应
+## Response
 
-### 响应体
+### Response Body
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 id
 
 string
 
-用户 ID
+User ID
 
 username
 
 string
 
-用户名
+Username
 
 avatar
 
 string
 
-头像 URL
+Avatar URL
 
 bot
 
 boolean
 
-是否为机器人
+Whether it is a bot
 
 union\_openid
 
 string
 
-跨应用统一用户 OpenID（需特殊申请）
+Cross-application unified user OpenID (special application required)
 
 union\_user\_account
 
 string
 
-跨应用统一用户账号（需特殊申请）
+Cross-application unified user account (special application required)
 
-## 响应示例
+## Response Example
 
-**获取当前用户信息成功**
+**Successfully obtained current user information**
 
 ```
 {
   "id": "5777414462219517083",
-  "username": "阳光小助手",
+  "username": "Sunshine Assistant",
   "avatar": "https://thirdqq.qlogo.cn/g?b=oidb&k=AbCdEfGhIjKlMnOpQrStUv&kti=xyzABC&s=0&t=1781676795",
   "bot": true,
   "union_openid": "9F2E872045CCCC5948BEAF5B5FCCDF22",
   "union_user_account": "",
   "share_url": "https://qun.qq.com/qunpro/robot/qunshare?robot_uin=3889007780&robot_appid=102083127&biz_type=0",
-  "welcome_msg": "欢迎加入我们的群聊"
+  "welcome_msg": "Welcome to our group chat"
 }
 ```
 
-### 发送单聊消息
+### Send Direct Chat Message
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_users_user_openid_messages.post.html
 
-# 发送单聊消息
+# Send Direct Chat Message
 
-向指定用户发送私聊消息。
+Send a direct chat message to the specified user.
 
--   被动消息有效时间 **60 分钟**，每个消息最多回复 **4 次**
--   主动消息频控规则:
-    -   Bot 维度（发送方）：企业认证/个人身份证认证 **10/qps**；未认证 **5/qps** 且 **30/qpm**
-    -   单关系维度（接收方）：**20/qpm**，每个好友 1 天最多接收 **1000** 条
--   互动召回消息：在用户主动与机器人对话之后，机器人在未来 30 天内可下发互动召回消息给用户（消息类型与当前机器人拥有的消息类型权限一致），每个周期内可下发一条。分别为：当天、1 - 3 天、3 - 7 天、7 - 30 天，合计：4 个周期。在发消息接口中使用 is\_wakeup 字段声明使用该能力。
+-   Passive messages are valid for **60 minutes**, with up to **4 replies** per message
+-   Proactive message rate limit rules:
+    -   Bot level (sender): enterprise verification/personal ID verification **10/qps**; unverified **5/qps** and **30/qpm**
+    -   Per-relationship level (receiver): **20/qpm**; each friend can receive at most **1000** messages per day
+-   Interaction recall messages: After the user proactively converses with the bot, the bot can send interaction recall messages to the user within the next 30 days (the message type is subject to the message type permissions the bot currently has), with one message allowed per period. The periods are: same day, 1-3 days, 3-7 days, and 7-30 days, for a total of 4 periods. Use the is\_wakeup field in the send message API to declare use of this capability.
 
-## 请求
+## Request
 
-### 基础信息
+### Basic Information
 
-字段
+Field
 
-值
+Value
 
 HTTP URL
 
@@ -4149,542 +4149,542 @@ HTTP Method
 
 POST
 
-接口频率限制
+API Rate Limit
 
-100 QPS，包括主动、被动等所有消息类型
+100 QPS, including all message types such as proactive and passive
 
-## 路径参数
+## Path Parameters
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 user\_openid
 
 string
 
-是
+Yes
 
-用户 OpenID
+User OpenID
 
-## 请求体
+## Request Body
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 msg\_type
 
 integer
 
-否
+No
 
-消息类型。决定哪个内容字段生效: 0=纯文本(content) 2=Markdown(markdown) 6=输入中状态（input\_notify) 7=富媒体(media)
+Message type. Determines which content field takes effect: 0=plain text (content), 2=Markdown (markdown), 6=typing status (input\_notify), 7=rich media (media)
 
 content
 
 string
 
-否
+No
 
-文本内容。msg\_type=0 时为全文 注意: 传了 markdown 后此字段必须为空
+Text content. Full text when msg\_type=0. Note: if markdown is provided, this field must be empty
 
 markdown
 
 [MessageMarkdown](#schema-messagemarkdown)
 
-否
+No
 
-Markdown 消息。msg\_type=2 时必填 注意: 填写此字段后 content/ark 必须全为空
+Markdown message. Required when msg\_type=2. Note: if this field is provided, content/ark must both be empty
 
 keyboard
 
 [Keyboard](#schema-keyboard)
 
-否
+No
 
-内嵌键盘。短形式只传 id，长形式传 content.rows
+Inline keyboard. The short form passes only id; the long form passes content.rows
 
 msg\_id
 
 string
 
-否
+No
 
-被动回复的消息 ID。从 C2C\_MESSAGE\_CREATE 等事件的 d.id 获取，5 分钟内有效
+Message ID for passive reply. Obtained from d.id of events such as C2C\_MESSAGE\_CREATE; valid for 5 minutes
 
 event\_id
 
 string
 
-否
+No
 
-被动回复的事件 ID。从事件最外层的id获取。与 msg\_id 二选一，支持事件："INTERACTION\_CREATE"、"C2C\_MSG\_RECEIVE"、"FRIEND\_ADD"
+Event ID for passive reply. Obtained from the outermost id of the event. Choose either this or msg\_id. Supported events: "INTERACTION\_CREATE", "C2C\_MSG\_RECEIVE", "FRIEND\_ADD"
 
 msg\_seq
 
 integer
 
-否
+No
 
-回复消息的序号，与 msg\_id 联合使用，避免相同消息 id 回复重复发送，不填默认是 1。相同的 msg\_id + msg\_seq 重复发送会失败。
+Sequence number of the reply message, used together with msg\_id to avoid sending duplicate replies for the same message ID. Defaults to 1 if omitted. Sending the same msg\_id + msg\_seq repeatedly will fail.
 
 media
 
 [MediaInfo](#schema-mediainfo)
 
-否
+No
 
-富媒体消息。msg\_type=7 时填写，file\_info 来自 /v2/users/{user\_openid}/files
+Rich media message. Fill in when msg\_type=7; file\_info comes from /v2/users/{user\_openid}/files
 
 message\_reference
 
 [MessageReference](#schema-messagereference)
 
-否
+No
 
-引用回复。填写后以引用形式展示，关联上下文
+Quoted reply. When provided, it is displayed as a quote and links the context
 
 is\_wakeup
 
 boolean
 
-否
+No
 
-指明发送消息为互动召回消息，与 msg\_id，event\_id 互斥使用
+Indicates that the message being sent is an interaction recall message; mutually exclusive with msg\_id and event\_id
 
 input\_notify
 
 [InputNotify](#schema-inputnotify)
 
-否
+No
 
-输入中状态，msg\_type=6时使用
+Typing status, used when msg\_type=6
 
 **MessageMarkdown**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 template\_id
 
 integer
 
-否
+No
 
-【已废弃】平台 Markdown 模板 ID。使用模板时填写，非模板不传
+[Deprecated] Platform Markdown template ID. Fill in when using a template; omit when not using a template
 
 content
 
 string
 
-否
+No
 
-Markdown 内容。支持的格式参考文档：[Markdown (opens new window)](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/type/markdown.html)
+Markdown content. For supported formats, refer to the documentation: [Markdown (opens new window)](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/type/markdown.html)
 
 custom\_template\_id
 
 string
 
-否
+No
 
-【已废弃】自定义模板 ID，与 template\_id 二选一
+[Deprecated] Custom template ID. Choose either this or template\_id
 
 force\_verify\_image\_resource
 
 boolean
 
-否
+No
 
-是否校验图片转存结果，当为true时，如果出现图片转存失败，则会返回错误，消息不会发送。 默认为false
+Whether to verify the image storage result. When true, if image storage fails, an error is returned and the message is not sent. Defaults to false
 
 **Keyboard**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 id
 
 string
 
-否
+No
 
-内嵌键盘模板 ID。使用平台预设模板时填写此字段
+Inline keyboard template ID. Fill in this field when using a platform preset template
 
 content
 
 [KeyboardContent](#schema-keyboardcontent)
 
-否
+No
 
-自定义键盘布局。与 id 互斥，用于自定义按钮
+Custom keyboard layout. Mutually exclusive with id; used for custom buttons
 
 **KeyboardContent**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 rows
 
 \[\][Row](#schema-row)
 
-否
+No
 
-按钮行列表
+List of button rows
 
 **Row**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 buttons
 
 \[\][Button](#schema-button)
 
-否
+No
 
-行内按钮，从左到右排列
+Buttons in the row, arranged from left to right
 
 **Button**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 id
 
 string
 
-否
+No
 
-按钮 ID。同一键盘内唯一
+Button ID. Unique within the same keyboard
 
 render\_data
 
 [RenderData](#schema-renderdata)
 
-否
+No
 
-按钮渲染
+Button rendering
 
 action
 
 [Action](#schema-action)
 
-否
+No
 
-按钮点击行为
+Button click behavior
 
 group\_id
 
 string
 
-否
+No
 
-分组ID, 同一分组内有一个按钮操作后, 其它按钮则变灰不可点击 注意:只有当action.type = 1 时才有效
+Group ID. After a button in the same group is operated, the other buttons become gray and cannot be clicked. Note: only effective when action.type = 1
 
 **RenderData**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 label
 
 string
 
-否
+No
 
-按钮文字，最多 10 字符
+Button text, up to 10 characters
 
 visited\_label
 
 string
 
-否
+No
 
-点击后文字，不传则保持不变
+Text after clicking; stays unchanged if not provided
 
 style
 
 integer
 
-否
+No
 
-0：灰色线框，1：蓝色线框 3: 白色背景+红色字体, 4:蓝色背景+白色字体
+0: gray outline, 1: blue outline, 3: white background + red text, 4: blue background + white text
 
 **Action**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 type
 
 integer
 
-否
+No
 
-0：跳转按钮：http 或 小程序 1：回调按钮：回调后台接口, data 传给后台， 2：指令按钮：自动在输入框插入 @bot data
+0: link button: http or mini program; 1: callback button: calls back the backend API, data is passed to the backend; 2: command button: automatically inserts @bot data into the input box
 
 permission
 
 [Permission](#schema-permission)
 
-否
+No
 
-操作权限
+Operation permission
 
 data
 
 string
 
-否
+No
 
-回调数据。type=1/2 时必填
+Callback data. Required when type=1/2
 
 click\_limit
 
 integer
 
-否
+No
 
-【已废弃】可点击次数限制。0=无限
+[Deprecated] Click limit. 0=unlimited
 
 unsupport\_tips
 
 string
 
-否
+No
 
-版本过低时提示文案
+Prompt text when the version is too low
 
 enter
 
 boolean
 
-否
+No
 
-指令按钮可用，点击按钮后直接自动发送 data，仅单聊可用，默认 false。支持版本 8983
+Available for command buttons. After clicking the button, data is automatically sent directly. Only available in direct chat. Defaults to false. Supported since version 8983
 
 reply
 
 boolean
 
-否
+No
 
-指令按钮可用，指令是否带引用回复本消息，默认 false。支持版本 8983
+Available for command buttons. Whether the command includes a quoted reply to this message. Defaults to false. Supported since version 8983
 
 anchor
 
 integer
 
-否
+No
 
-本字段仅在指令按钮下有效，设置后后会忽略 action.enter 配置。 设置为 1 时 ，点击按钮自动唤起启手Q选图器，其他值暂无效果。 （仅支持手机端版本 8983+ 的单聊场景，桌面端不支持）
+This field is only valid for command buttons. Once set, the action.enter configuration is ignored. When set to 1, clicking the button automatically opens the mobile QQ image picker; other values currently have no effect. (Only supported in direct chat on mobile version 8983+; not supported on desktop)
 
 modal
 
 [Modal](#schema-modal)
 
-否
+No
 
-用户点击二次确认操作
+Secondary confirmation action when the user clicks
 
 **Permission**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 type
 
 integer
 
-否
+No
 
-0=指定用户, 1=管理员, 2=所有人
+0=specified users, 1=administrators, 2=everyone
 
 specify\_user\_ids
 
 \[\]string
 
-否
+No
 
-有权限的用户 id 的列表
+List of user IDs with permission
 
 specify\_role\_ids
 
 \[\]string
 
-否
+No
 
-有权限的身份组 id 的列表（仅频道可用）
+List of identity group IDs with permission (channel only)
 
 **Modal**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 content
 
 string
 
-否
+No
 
-二次确认的提示文本,如果不为空则会进行二次确认. 注意:最多40个字符, 不能有URL
+Prompt text for secondary confirmation. If not empty, secondary confirmation is performed. Note: up to 40 characters, must not contain a URL
 
 confirm\_text
 
 string
 
-否
+No
 
-二次确认提示确认按钮中展示的文字,可以为空, 默认为"确认" 注意:最多4个字符
+Text displayed in the confirm button of the secondary confirmation prompt. Can be empty; defaults to "Confirm". Note: up to 4 characters
 
 cancel\_text
 
 string
 
-否
+No
 
-二次确认提示取消按钮中的文字,可以为空,默认为"取消" 注意:最多4个字符
+Text in the cancel button of the secondary confirmation prompt. Can be empty; defaults to "Cancel". Note: up to 4 characters
 
 **MediaInfo**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 file\_info
 
 string
 
-否
+No
 
-文件数据。来自文件上传接口返回值
+File data. From the return value of the file upload API
 
 **MessageReference**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 message\_id
 
 string
 
-否
+No
 
-被引用消息 ID，例如REFIDX\_xxxxxx  
-\- 非机器人发的消息，从消息事件的`MessageScene`的`ext`数组，`msg_idx`字段中获取  
-\- 机器人自己发的消息，从发消息请求响应`ext_info.ref_idx`获取
+Quoted message ID, e.g. REFIDX\_xxxxxx  
+\- For messages not sent by the bot, obtain from the `msg_idx` field of the `ext` array of `MessageScene` in the message event  
+\- For messages sent by the bot itself, obtain from `ext_info.ref_idx` in the message sending response
 
 **InputNotify**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 input\_type
 
 integer
 
-否
+No
 
-填1
+Set to 1
 
 input\_second
 
 integer
 
-否
+No
 
-状态持续时间，最长60s
+Status duration, up to 60s
 
-### 请求示例
+### Request Example
 
-**文本消息 (msg\_type=0)**
+**Text message (msg\_type=0)**
 
 ```
 POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/messages
 {
-  "content": "你好，欢迎使用机器人助手！",
+  "content": "Hello, welcome to the bot assistant!",
   "msg_type": 0,
   "msg_id": "ROBOT1.0_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "msg_seq": 1
 }
 ```
 
-**Markdown 消息 (msg\_type=2)**
+**Markdown message (msg\_type=2)**
 
 ```
 POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/messages
 {
   "msg_type": 2,
   "markdown": {
-    "content": "# 今日推荐\n\n**精选文章**\n> 知识就是力量，学习永无止境\n\n[点击查看详情](https://example.com)"
+    "content": "# Today's Picks\n\n**Featured Articles**\n> Knowledge is power, and learning never ends\n\n[Click to view details](https://example.com)"
   },
   "keyboard": {
     "id": "1070001"
@@ -4694,7 +4694,7 @@ POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/messages
 }
 ```
 
-**输入状态通知 (msg\_type=6)**
+**Input status notification (msg\_type=6)**
 
 ```
 POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/messages
@@ -4709,7 +4709,7 @@ POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/messages
 }
 ```
 
-**富媒体消息 (msg\_type=7)**
+**Rich media message (msg\_type=7)**
 
 ```
 POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/messages
@@ -4723,51 +4723,51 @@ POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/messages
 }
 ```
 
-## 响应
+## Response
 
-### 响应体
+### Response Body
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 id
 
 string
 
-消息 ID，可用于后续撤回
+Message ID, can be used for later recall
 
 timestamp
 
 string
 
-发送时间，RFC3339 东八区
+Send time, RFC3339 UTC+8
 
 ext\_info
 
 [MessageExtInfo](#schema-messageextinfo)
 
-扩展信息
+Extended information
 
 **MessageExtInfo**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 ref\_idx
 
 string
 
-引用消息索引。对应消息时间ext里的msg\_idx与ref\_msg\_idx
+Quoted message index. Corresponds to msg\_idx and ref\_msg\_idx in the message event ext
 
-## 响应示例
+## Response Example
 
-**消息发送成功**
+**Message sent successfully**
 
 ```
 {
@@ -4776,7 +4776,7 @@ string
 }
 ```
 
-**消息发送成功（含扩展信息）**
+**Message sent successfully (with extended information)**
 
 ```
 {
@@ -4788,263 +4788,263 @@ string
 }
 ```
 
-### 错误码
+### Error Codes
 
-错误码
+Error code
 
-描述
+Description
 
-排查建议
+Troubleshooting suggestion
 
 22006
 
-消息类型与内容不匹配
+Message type does not match content
 
-请检查msg\_type与content是否对应
+Check whether msg\_type corresponds to content
 
 50059
 
-输入类型错误
+Invalid input type
 
-请检查输入类型
+Check the input type
 
 304004
 
-无权限使用该ARK模板
+No permission to use this ARK template
 
-请先申请ARK模板权限
+Apply for ARK template permission first
 
 304061
 
-消息内容无效
+Invalid message content
 
-请检查消息格式是否符合要求
+Check whether the message format meets the requirements
 
 304062
 
-订阅按钮数量达到上限
+Subscription button count has reached the limit
 
-请减少按钮数量
+Reduce the number of buttons
 
 304064
 
-订阅消息未授权
+Subscription message not authorized
 
-请先引导用户授权订阅消息
+Guide the user to authorize subscription messages first
 
 304080
 
-文件信息无效
+Invalid file information
 
-请检查文件信息格式是否正确
+Check whether the file information format is correct
 
 304103
 
-消息ID已过期，不能回复
+Message ID has expired and cannot be replied to
 
-请在收到消息后尽快回复
+Reply as soon as possible after receiving the message
 
 340067
 
-获取机器人信息失败
+Failed to get bot information
 
-请检查机器人状态
+Check the bot status
 
 40034004
 
-富媒体信息转存失败
+Failed to store rich media information
 
-请重试
+Try again
 
 40034005
 
-回复消息msg\_id已过期
+The msg\_id for the reply message has expired
 
-请在收到消息后尽快回复
+Reply as soon as possible after receiving the message
 
 40034006
 
-消息内容违规
+Message content violates the rules
 
-请修改消息内容后重试
+Modify the message content and try again
 
 40034008
 
-markdown参数有空值
+markdown parameter has an empty value
 
-请确保所有Markdown参数都有值
+Ensure all Markdown parameters have values
 
 40034009
 
-markdown参数有换行符
+markdown parameter contains a newline
 
-请移除Markdown参数中的换行符
+Remove newlines from the Markdown parameters
 
 40034010
 
-模版参数中不能含有markdown语法
+Template parameters must not contain Markdown syntax
 
-请使用纯文本参数，不要包含Markdown语法
+Use plain text parameters without Markdown syntax
 
 40034011
 
-无效的markdown内容
+Invalid markdown content
 
-请检查Markdown语法是否正确
+Check whether the Markdown syntax is correct
 
 40034024
 
-请求参数msg\_id无效或越权
+Request parameter msg\_id is invalid or unauthorized
 
-请检查msg\_id是否正确
+Check whether msg\_id is correct
 
 40034025
 
-请求参数event\_id无效
+Request parameter event\_id is invalid
 
-请检查event\_id是否正确
+Check whether event\_id is correct
 
 40034026
 
-请求参数event\_id已过期
+Request parameter event\_id has expired
 
-请在收到事件后尽快回复
+Reply as soon as possible after receiving the event
 
 40034027
 
-该事件不支持回复消息
+This event does not support replying to messages
 
-请确认事件类型是否支持回复
+Confirm whether the event type supports replies
 
 40034029
 
-内联键盘行/列超限
+Inline keyboard rows/columns exceed the limit
 
-请减少键盘按钮数量
+Reduce the number of keyboard buttons
 
 40034100
 
-主动消息发送超过频控限制
+Proactive message sending exceeds the rate limit
 
-请降低发送频率或等待配额恢复
+Lower the sending frequency or wait for the quota to recover
 
 40034105
 
-主动消息发送失败，无权限
+Proactive message sending failed: no permission
 
-请检查机器人权限设置
+Check the bot permission settings
 
 40034106
 
-消息不支持该指令类型
+The message does not support this command type
 
-请检查消息指令类型
+Check the message command type
 
 40034108
 
-指令参数长度超限
+Command parameter length exceeds the limit
 
-请缩短指令参数
+Shorten the command parameters
 
 40034109
 
-指令参数解析失败
+Failed to parse command parameters
 
-请检查指令参数格式
+Check the command parameter format
 
 40034122
 
-召回消息已达区间上限
+Message recall has reached the interval limit
 
-召回消息已达上限，无法继续召回
+Message recall has reached the limit; cannot recall further
 
 40034123
 
-不支持召回消息
+Message recall not supported
 
-该消息不支持召回操作
+This message does not support recall
 
 40034124
 
-markdown消息参数错误
+markdown message parameter error
 
-请检查Markdown参数格式
+Check the Markdown parameter format
 
 40034127
 
-无markdown模板权限
+No markdown template permission
 
-请先申请Markdown模板权限
+Apply for Markdown template permission first
 
 40034128
 
-被动回复时间或次数超限
+Passive reply time or count exceeds the limit
 
-请在收到事件后尽快回复
+Reply as soon as possible after receiving the event
 
 40054004
 
-无好友关系
+No friend relationship
 
-请先添加好友后再发送私信
+Add the user as a friend before sending a direct message
 
 40054005
 
-消息被去重
+Message deduplicated
 
-请确保每次请求使用不同的msgseq值
+Ensure each request uses a different msgseq value
 
 40054006
 
-验证好友关系失败
+Failed to verify friend relationship
 
-请重试
+Try again
 
 40054007
 
-消息长度超限
+Message length exceeds the limit
 
-请缩短消息内容
+Shorten the message content
 
 40054013
 
-用户拒收消息
+User rejected the message
 
-用户已拒收消息，无法发送
+The user has rejected messages; cannot send
 
 40054016
 
-机器人已下线
+The bot is offline
 
-请检查机器人状态
+Check the bot status
 
 40054018
 
-消息过长或异常
+Message is too long or abnormal
 
-请缩短消息内容
+Shorten the message content
 
 50055002
 
-消息发送异常，请稍后重试
+Message sending error; try again later
 
-请稍后重试
+Try again later
 
-### 流式发送单聊消息
+### Send direct chat message in streaming mode
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_users_user_openid_stream_messages.post.html
 
-# 流式发送单聊消息
+# Send direct chat message in streaming mode
 
-流式分批发送单聊消息。每个分片使用相同 stream\_msg\_id， index 从0递增。支持 markdown 内容格式。
+Send a direct chat message in batches in streaming mode. Each chunk uses the same stream\_msg\_id, and index increases from 0. Supports the markdown content format.
 
-## 请求
+## Request
 
-### 基础信息
+### Basic Information
 
-字段
+Field
 
-值
+Value
 
 HTTP URL
 
@@ -5054,119 +5054,119 @@ HTTP Method
 
 POST
 
-接口频率限制
+API Rate Limit
 
 50 QPS
 
-## 路径参数
+## Path Parameters
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 user\_openid
 
 string
 
-是
+Yes
 
-## 请求体
+## Request Body
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 input\_mode
 
 string
 
-否
+No
 
-输入模式。 append（默认）：ContentRaw 拼接到 Pending。 replace：ContentRaw 为当前全量正文，须以上游已下发前缀 SentContent 开头；合并后 Pending 仅存未下发后缀。
+Input mode. append (default): ContentRaw is appended to Pending. replace: ContentRaw is the current full body and must start with the prefix SentContent already delivered upstream; after merging, Pending holds only the undelivered suffix.
 
 input\_state
 
 integer
 
-否
+No
 
-输入状态。1=生成中，10=生成结束
+Input status. 1=generating, 10=generation finished
 
 index
 
 integer
 
-否
+No
 
-分片序号，从0递增
+Chunk index, increasing from 0
 
 content\_type
 
 string
 
-否
+No
 
-内容格式类型 text: 文本消息 markdown：MarkDown消息
+Content format type. text: text message; markdown: Markdown message
 
 content\_raw
 
 string
 
-否
+No
 
-Markdown 格式的文本内容
+Text content in Markdown format
 
 event\_id
 
 string
 
-否
+No
 
-被动回复事件ID（与 msg\_id 二选一）
+Event ID for passive reply (choose either this or msg\_id)
 
 msg\_id
 
 string
 
-否
+No
 
-被动回复消息ID（与 event\_id 二选一）
+Message ID for passive reply (choose either this or event\_id)
 
 stream\_msg\_id
 
 string
 
-否
+No
 
-流式消息ID。第一条由服务端生成并返回，后续分片需携带上一分片返回的 id
+Streaming message ID. The first one is generated and returned by the server; subsequent chunks must carry the id returned by the previous chunk
 
 msg\_seq
 
 integer
 
-否
+No
 
-消息序号，用于去重
+Message sequence number, used for deduplication
 
 is\_wakeup
 
 boolean
 
-否
+No
 
-是否为召回消息。true 时不校验 msg\_id/event\_id 有效期
+Whether this is a recall message. When true, the validity period of msg\_id/event\_id is not verified
 
-### 请求示例
+### Request Example
 
-**首片消息 (input\_state=1, index=0)**
+**First chunk message (input\_state=1, index=0)**
 
 ```
 POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/stream_messages
@@ -5175,13 +5175,13 @@ POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/stream_messages
   "input_state": 1,
   "index": 0,
   "content_type": "markdown",
-  "content_raw": "正在生成回答，请稍候",
+  "content_raw": "Generating the answer, please wait",
   "msg_id": "ROBOT1.0_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "msg_seq": 1
 }
 ```
 
-**续片消息 (input\_state=1, index=1)**
+**Continuation chunk message (input\_state=1, index=1)**
 
 ```
 POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/stream_messages
@@ -5190,14 +5190,14 @@ POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/stream_messages
   "input_state": 1,
   "index": 1,
   "content_type": "markdown",
-  "content_raw": "正在生成回答，请稍候。目前已完成大部分内容",
+  "content_raw": "Generating the answer, please wait. Most of the content is now complete",
   "msg_id": "ROBOT1.0_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "stream_msg_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "msg_seq": 1
 }
 ```
 
-**结束片消息 (input\_state=10)**
+**Final chunk message (input\_state=10)**
 
 ```
 POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/stream_messages
@@ -5206,64 +5206,64 @@ POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/stream_messages
   "input_state": 10,
   "index": 2,
   "content_type": "markdown",
-  "content_raw": "正在生成回答，请稍候。目前已完成全部内容，以下是最终结果。",
+  "content_raw": "Generating the answer, please wait. All content is now complete; the final result follows.",
   "msg_id": "ROBOT1.0_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "stream_msg_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "msg_seq": 1
 }
 ```
 
-## 响应
+## Response
 
-### 响应体
+### Response Body
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 id
 
 string
 
-消息ID。首条返回 stream\_msg\_id，用于后续分片
+Message ID. The first response returns stream\_msg\_id for subsequent chunks
 
 timestamp
 
 string
 
-消息发送时间，RFC3339 格式
+Message send time, RFC3339 format
 
 ext\_info
 
 [MessageExtInfo](#schema-messageextinfo)
 
-扩展信息。ref\_idx: 引用消息索引 扩展信息
+Extended information. ref\_idx: quoted message index. Extended information
 
 remain\_msg\_len
 
 integer
 
-流式消息剩余长度（字符数）
+Remaining length of the streaming message (in characters)
 
 **MessageExtInfo**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 ref\_idx
 
 string
 
-引用消息索引。对应消息时间ext里的msg\_idx与ref\_msg\_idx
+Quoted message index. Corresponds to msg\_idx and ref\_msg\_idx in the message event ext
 
-## 响应示例
+## Response Example
 
-**首片响应（返回 stream\_msg\_id）**
+**First chunk response (returns stream\_msg\_id)**
 
 ```
 {
@@ -5275,7 +5275,7 @@ string
 }
 ```
 
-**续片/结束片响应**
+**Continuation/final chunk response**
 
 ```
 {
@@ -5287,49 +5287,49 @@ string
 }
 ```
 
-### 错误码
+### Error Codes
 
-错误码
+Error code
 
-描述
+Description
 
-排查建议
+Troubleshooting suggestion
 
 40007
 
-已下发内容前缀不可修改
+The prefix of delivered content cannot be modified
 
-请保持已下发内容前缀一致
+Keep the prefix of the delivered content consistent
 
 50001
 
-服务内部错误
+Internal server error
 
-请稍后重试
+Try again later
 
 50002
 
-频率限制
+Rate limited
 
-请降低调用频率
+Reduce the call frequency
 
-### 撤回单聊消息
+### Recall direct chat message
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_users_user_openid_messages_message_id.delete.html
 
-# 撤回单聊消息
+# Recall direct chat message
 
-撤回机器人发送给当前用户的消息。发送超过 2 分钟的消息不可撤回。 成功返回 HTTP 200，无响应体。
+Recall a message sent by the bot to the current user. Messages sent more than 2 minutes ago cannot be recalled. Returns HTTP 200 on success with no response body.
 
--   发送超出 **2 分钟**的消息不可撤回
+-   Messages sent more than **2 minutes** ago cannot be recalled
 
-## 请求
+## Request
 
-### 基础信息
+### Basic Information
 
-字段
+Field
 
-值
+Value
 
 HTTP URL
 
@@ -5339,108 +5339,108 @@ HTTP Method
 
 DELETE
 
-接口频率限制
+API Rate Limit
 
 10 QPS
 
-## 路径参数
+## Path Parameters
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 user\_openid
 
 string
 
-是
+Yes
 
-用户 OpenID
+User OpenID
 
 message\_id
 
 string
 
-是
+Yes
 
-消息 ID
+Message ID
 
-### 请求示例
+### Request Example
 
-**示例1**
+**Example 1**
 
 ```
 DELETE /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/messages/0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF
 ```
 
-## 响应
+## Response
 
-无
+None
 
-## 响应示例
+## Response Example
 
-**示例1**
+**Example 1**
 
 ```
 {}
 ```
 
-### 错误码
+### Error Codes
 
-错误码
+Error code
 
-描述
+Description
 
-排查建议
+Troubleshooting suggestion
 
 306009
 
-用户openid无效
+Invalid user openid
 
-请检查user\_openid是否正确
+Check whether user\_openid is correct
 
 40061001
 
-请求参数无效
+Invalid request parameter
 
-请检查请求参数格式
+Check the request parameter format
 
 40061002
 
-请求参数msgid无效
+Request parameter msgid is invalid
 
-请检查msgid格式是否正确
+Check whether the msgid format is correct
 
 40064004
 
-已超出消息撤回时限
+The message recall time limit has been exceeded
 
-消息发送超过2分钟后不可撤回
+Messages cannot be recalled more than 2 minutes after being sent
 
-### 发送群聊消息
+### Send group chat message
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages.post.html
 
-# 发送群聊消息
+# Send group chat message
 
-向指定群发送消息。支持文本/Markdown/富媒体等类型，可附带内嵌键盘。 注意: 群消息不支持流式参数
+Send a message to the specified group. Supports text/Markdown/rich media and other types, and can include an inline keyboard. Note: group messages do not support streaming parameters
 
--   被动消息有效时间 **5 分钟**，每个消息最多回复 **5 次**
--   主动消息频控规则
-    -   Bot 维度（发送方）：企业认证/个人身份证认证 **60/qpm**；未认证 **30/qpm**
-    -   单关系维度（接收方）：**20/qpm**，每个群 1 天最多接收 **1000** 条
+-   Passive messages are valid for **5 minutes**, and each message can be replied to at most **5 times**
+-   Proactive message rate limit rules
+    -   Bot dimension (sender): enterprise verification/personal ID verification **60/qpm**; unverified **30/qpm**
+    -   Per-relationship dimension (receiver): **20/qpm**; each group can receive at most **1000** messages per day
 
-## 请求
+## Request
 
-### 基础信息
+### Basic Information
 
-字段
+Field
 
-值
+Value
 
 HTTP URL
 
@@ -5450,500 +5450,500 @@ HTTP Method
 
 POST
 
-接口频率限制
+API Rate Limit
 
 100 QPS
 
-## 路径参数
+## Path Parameters
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 group\_openid
 
 string
 
-是
+Yes
 
-群 OpenID
+Group OpenID
 
-## 请求体
+## Request Body
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 msg\_type
 
 integer
 
-否
+No
 
-消息类型。决定哪个内容字段生效: 0=纯文本(content) 2=Markdown(markdown) 7=富媒体(media)
+Message type. Determines which content field takes effect: 0=plain text (content), 2=Markdown (markdown), 7=rich media (media)
 
 content
 
 string
 
-否
+No
 
-文本内容。msg\_type=0 时为全文 注意: 传了 markdown 后此字段必须为空
+Text content. Full text when msg\_type=0. Note: if markdown is provided, this field must be empty
 
 markdown
 
 [MessageMarkdown](#schema-messagemarkdown)
 
-否
+No
 
-Markdown 消息。msg\_type=2 时必填 注意: 填写此字段后 content/ark 必须全为空
+Markdown message. Required when msg\_type=2. Note: if this field is provided, content/ark must both be empty
 
 keyboard
 
 [Keyboard](#schema-keyboard)
 
-否
+No
 
-内嵌键盘。短形式只传 id，长形式传 content.rows
+Inline keyboard. The short form passes only id; the long form passes content.rows
 
 msg\_id
 
 string
 
-否
+No
 
-被动回复的消息 ID。从 GROUP\_AT\_MESSAGE\_CREATE 等事件的 d.id 获取，5 分钟内有效
+Message ID for passive reply. Obtained from d.id of events such as GROUP\_AT\_MESSAGE\_CREATE; valid for 5 minutes
 
 event\_id
 
 string
 
-否
+No
 
-被动回复的事件 ID。从事件最外层的id获取。与 msg\_id 二选一，支持事件："INTERACTION\_CREATE"、"GROUP\_ADD\_ROBOT"、"GROUP\_MSG\_RECEIVE"
+Event ID for passive reply. Obtained from the outermost id of the event. Choose either this or msg\_id. Supported events: "INTERACTION\_CREATE", "GROUP\_ADD\_ROBOT", "GROUP\_MSG\_RECEIVE"
 
 msg\_seq
 
 integer
 
-否
+No
 
-回复消息的序号，与 msg\_id 联合使用，避免相同消息 id 回复重复发送，不填默认是 1。相同的 msg\_id + msg\_seq 重复发送会失败。
+Sequence number of the reply message, used together with msg\_id to avoid sending duplicate replies for the same message ID. Defaults to 1 if omitted. Sending the same msg\_id + msg\_seq repeatedly will fail.
 
 media
 
 [MediaInfo](#schema-mediainfo)
 
-否
+No
 
-富媒体消息。msg\_type=7 时填写，file\_info 来自 /v2/groups/{group\_openid}/files
+Rich media message. Fill in when msg\_type=7; file\_info comes from /v2/groups/{group\_openid}/files
 
 message\_reference
 
 [MessageReference](#schema-messagereference)
 
-否
+No
 
-引用回复。填写后以引用形式展示，关联上下文
+Quoted reply. When provided, it is displayed as a quote and links the context
 
 **MessageMarkdown**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 template\_id
 
 integer
 
-否
+No
 
-【已废弃】平台 Markdown 模板 ID。使用模板时填写，非模板不传
+[Deprecated] Platform Markdown template ID. Fill in when using a template; omit when not using a template
 
 content
 
 string
 
-否
+No
 
-Markdown 内容。支持的格式参考文档：[Markdown (opens new window)](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/type/markdown.html)
+Markdown content. For supported formats, refer to the documentation: [Markdown (opens new window)](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/type/markdown.html)
 
 custom\_template\_id
 
 string
 
-否
+No
 
-【已废弃】自定义模板 ID，与 template\_id 二选一
+[Deprecated] Custom template ID. Choose either this or template\_id
 
 force\_verify\_image\_resource
 
 boolean
 
-否
+No
 
-是否校验图片转存结果，当为true时，如果出现图片转存失败，则会返回错误，消息不会发送。 默认为false
+Whether to verify the image storage result. When true, if image storage fails, an error is returned and the message is not sent. Defaults to false
 
 **Keyboard**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 id
 
 string
 
-否
+No
 
-内嵌键盘模板 ID。使用平台预设模板时填写此字段
+Inline keyboard template ID. Fill in this field when using a platform preset template
 
 content
 
 [KeyboardContent](#schema-keyboardcontent)
 
-否
+No
 
-自定义键盘布局。与 id 互斥，用于自定义按钮
+Custom keyboard layout. Mutually exclusive with id; used for custom buttons
 
 **KeyboardContent**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 rows
 
 \[\][Row](#schema-row)
 
-否
+No
 
-按钮行列表
+List of button rows
 
 **Row**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 buttons
 
 \[\][Button](#schema-button)
 
-否
+No
 
-行内按钮，从左到右排列
+Buttons in the row, arranged from left to right
 
 **Button**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 id
 
 string
 
-否
+No
 
-按钮 ID。同一键盘内唯一
+Button ID. Unique within the same keyboard
 
 render\_data
 
 [RenderData](#schema-renderdata)
 
-否
+No
 
-按钮渲染
+Button rendering
 
 action
 
 [Action](#schema-action)
 
-否
+No
 
-按钮点击行为
+Button click behavior
 
 group\_id
 
 string
 
-否
+No
 
-分组ID, 同一分组内有一个按钮操作后, 其它按钮则变灰不可点击 注意:只有当action.type = 1 时才有效
+Group ID. After a button in the same group is operated, the other buttons become gray and cannot be clicked. Note: only effective when action.type = 1
 
 **RenderData**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 label
 
 string
 
-否
+No
 
-按钮文字，最多 10 字符
+Button text, up to 10 characters
 
 visited\_label
 
 string
 
-否
+No
 
-点击后文字，不传则保持不变
+Text after clicking; stays unchanged if not provided
 
 style
 
 integer
 
-否
+No
 
-0：灰色线框，1：蓝色线框 3: 白色背景+红色字体, 4:蓝色背景+白色字体
+0: gray outline, 1: blue outline, 3: white background + red text, 4: blue background + white text
 
 **Action**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 type
 
 integer
 
-否
+No
 
-0：跳转按钮：http 或 小程序 1：回调按钮：回调后台接口, data 传给后台， 2：指令按钮：自动在输入框插入 @bot data
+0: link button: http or mini program; 1: callback button: calls back the backend API, data is passed to the backend; 2: command button: automatically inserts @bot data into the input box
 
 permission
 
 [Permission](#schema-permission)
 
-否
+No
 
-操作权限
+Operation permission
 
 data
 
 string
 
-否
+No
 
-回调数据。type=1/2 时必填
+Callback data. Required when type=1/2
 
 click\_limit
 
 integer
 
-否
+No
 
-【已废弃】可点击次数限制。0=无限
+[Deprecated] Click limit. 0=unlimited
 
 unsupport\_tips
 
 string
 
-否
+No
 
-版本过低时提示文案
+Prompt text when the version is too low
 
 enter
 
 boolean
 
-否
+No
 
-指令按钮可用，点击按钮后直接自动发送 data，仅单聊可用，默认 false。支持版本 8983
+Available for command buttons. After clicking the button, data is automatically sent directly. Only available in direct chat. Defaults to false. Supported since version 8983
 
 reply
 
 boolean
 
-否
+No
 
-指令按钮可用，指令是否带引用回复本消息，默认 false。支持版本 8983
+Available for command buttons. Whether the command includes a quoted reply to this message. Defaults to false. Supported since version 8983
 
 anchor
 
 integer
 
-否
+No
 
-本字段仅在指令按钮下有效，设置后后会忽略 action.enter 配置。 设置为 1 时 ，点击按钮自动唤起启手Q选图器，其他值暂无效果。 （仅支持手机端版本 8983+ 的单聊场景，桌面端不支持）
+This field is only valid for command buttons. Once set, the action.enter configuration is ignored. When set to 1, clicking the button automatically opens the mobile QQ image picker; other values currently have no effect. (Only supported in direct chat on mobile version 8983+; not supported on desktop)
 
 modal
 
 [Modal](#schema-modal)
 
-否
+No
 
-用户点击二次确认操作
+Secondary confirmation action when the user clicks
 
 **Permission**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 type
 
 integer
 
-否
+No
 
-0=指定用户, 1=管理员, 2=所有人
+0=specified users, 1=administrators, 2=everyone
 
 specify\_user\_ids
 
 \[\]string
 
-否
+No
 
-有权限的用户 id 的列表
+List of user IDs with permission
 
 specify\_role\_ids
 
 \[\]string
 
-否
+No
 
-有权限的身份组 id 的列表（仅频道可用）
+List of identity group IDs with permission (channel only)
 
 **Modal**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 content
 
 string
 
-否
+No
 
-二次确认的提示文本,如果不为空则会进行二次确认. 注意:最多40个字符, 不能有URL
+Prompt text for secondary confirmation. If not empty, secondary confirmation is performed. Note: up to 40 characters, must not contain a URL
 
 confirm\_text
 
 string
 
-否
+No
 
-二次确认提示确认按钮中展示的文字,可以为空, 默认为"确认" 注意:最多4个字符
+Text displayed in the confirm button of the secondary confirmation prompt. Can be empty; defaults to "Confirm". Note: up to 4 characters
 
 cancel\_text
 
 string
 
-否
+No
 
-二次确认提示取消按钮中的文字,可以为空,默认为"取消" 注意:最多4个字符
+Text in the cancel button of the secondary confirmation prompt. Can be empty; defaults to "Cancel". Note: up to 4 characters
 
 **MediaInfo**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 file\_info
 
 string
 
-否
+No
 
-文件数据。来自文件上传接口返回值
+File data. From the return value of the file upload API
 
 **MessageReference**
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 message\_id
 
 string
 
-否
+No
 
-被引用消息 ID，例如REFIDX\_xxxxxx  
-\- 非机器人发的消息，从消息事件的`MessageScene`的`ext`数组，`msg_idx`字段中获取  
-\- 机器人自己发的消息，从发消息请求响应`ext_info.ref_idx`获取
+Quoted message ID, e.g. REFIDX\_xxxxxx  
+\- For messages not sent by the bot, obtain from the `msg_idx` field of the `ext` array of `MessageScene` in the message event  
+\- For messages sent by the bot itself, obtain from `ext_info.ref_idx` in the message sending response
 
-### 请求示例
+### Request Example
 
-**文本消息 (msg\_type=0)**
+**Text message (msg\_type=0)**
 
 ```
 POST /v2/groups/B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5/messages
 {
   "msg_type": 0,
-  "content": "欢迎使用本群助手，有什么可以帮你的吗？",
+  "content": "Welcome to this group assistant. How can I help you?",
   "msg_id": "ROBOT1.0_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "msg_seq": 1
 }
 ```
 
-**Markdown + 键盘消息 (msg\_type=2)**
+**Markdown + keyboard message (msg\_type=2)**
 
 ```
 POST /v2/groups/B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5/messages
 {
   "msg_type": 2,
   "markdown": {
-    "content": "## 每日签到\n\n今日签到成功！获得 **50** 积分\n连续签到 **7** 天"
+    "content": "## Daily Check-in\n\nCheck-in successful today! You earned **50** points\n**7** consecutive check-in days"
   },
   "keyboard": {
     "content": {
@@ -5953,7 +5953,7 @@ POST /v2/groups/B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5/messages
             {
               "id": "btn_signin",
               "render_data": {
-                "label": "签到",
+                "label": "Check in",
                 "style": 1
               },
               "action": {
@@ -5961,7 +5961,7 @@ POST /v2/groups/B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5/messages
                 "permission": {
                   "type": 2
                 },
-                "data": "/签到",
+                "data": "/checkin",
                 "enter": true
               }
             }
@@ -5975,7 +5975,7 @@ POST /v2/groups/B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5/messages
 }
 ```
 
-**富媒体消息 (msg\_type=7)**
+**Rich media message (msg\_type=7)**
 
 ```
 POST /v2/groups/B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5/messages
@@ -5992,51 +5992,51 @@ POST /v2/groups/B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5/messages
 }
 ```
 
-## 响应
+## Response
 
-### 响应体
+### Response Body
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 id
 
 string
 
-消息 ID，可用于后续撤回
+Message ID, can be used for later recall
 
 timestamp
 
 string
 
-发送时间，RFC3339 东八区
+Send time, RFC3339 UTC+8
 
 ext\_info
 
 [MessageExtInfo](#schema-messageextinfo)
 
-扩展信息
+Extended information
 
 **MessageExtInfo**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 ref\_idx
 
 string
 
-引用消息索引。对应消息时间ext里的msg\_idx与ref\_msg\_idx
+Quoted message index. Corresponds to msg\_idx and ref\_msg\_idx in the message event ext
 
-## 响应示例
+## Response Example
 
-**发送成功**
+**Sent successfully**
 
 ```
 {
@@ -6048,261 +6048,261 @@ string
 }
 ```
 
-### 错误码
+### Error Codes
 
-错误码
+Error code
 
-描述
+Description
 
-排查建议
+Troubleshooting suggestion
 
 22006
 
-消息类型与内容不匹配
+Message type does not match content
 
-请检查msg\_type与content是否对应
+Check whether msg\_type corresponds to content
 
 304004
 
-无权限使用该ARK模板
+No permission to use this ARK template
 
-请先申请ARK模板权限
+Apply for ARK template permission first
 
 304036
 
-无Markdown模板权限
+No Markdown template permission
 
-请先申请Markdown模板权限
+Apply for Markdown template permission first
 
 304061
 
-消息内容无效
+Invalid message content
 
-请检查消息格式是否符合要求
+Check whether the message format meets the requirements
 
 304064
 
-订阅消息未授权
+Subscription message not authorized
 
-请先引导用户授权订阅消息
+Guide the user to authorize subscription messages first
 
 304080
 
-文件信息无效
+Invalid file information
 
-请检查文件信息格式是否正确
+Check whether the file information format is correct
 
 304103
 
-消息ID已过期，不能回复
+Message ID has expired and cannot be replied to
 
-请在收到消息后尽快回复
+Reply as soon as possible after receiving the message
 
 305007
 
-键盘样式参数错误
+Invalid keyboard style parameter
 
-请检查keyboard参数
+Check the keyboard parameter
 
 340069
 
-消息类型无效
+Invalid message type
 
-请检查msg\_type取值
+Check the msg\_type value
 
 40034004
 
-富媒体信息转存失败
+Failed to store rich media information
 
-请重试
+Try again
 
 40034005
 
-回复消息msg\_id已过期
+The msg\_id for the reply message has expired
 
-请在收到消息后尽快回复
+Reply as soon as possible after receiving the message
 
 40034006
 
-消息内容违规
+Message content violates the rules
 
-请修改消息内容后重试
+Modify the message content and try again
 
 40034008
 
-markdown参数有空值
+markdown parameter has an empty value
 
-请确保所有Markdown参数都有值
+Ensure all Markdown parameters have values
 
 40034009
 
-markdown参数有换行符
+markdown parameter contains a newline
 
-请移除Markdown参数中的换行符
+Remove newlines from the Markdown parameters
 
 40034010
 
-模版参数中不能含有markdown语法
+Template parameters must not contain Markdown syntax
 
-请使用纯文本参数，不要包含Markdown语法
+Use plain text parameters without Markdown syntax
 
 40034011
 
-无效的markdown内容
+Invalid markdown content
 
-请检查Markdown语法是否正确
+Check whether the Markdown syntax is correct
 
 40034024
 
-请求参数msg\_id无效或越权
+Request parameter msg\_id is invalid or unauthorized
 
-请检查msg\_id是否正确
+Check whether msg\_id is correct
 
 40034025
 
-请求参数event\_id无效
+Request parameter event\_id is invalid
 
-请检查event\_id是否正确
+Check whether event\_id is correct
 
 40034026
 
-请求参数event\_id已过期
+Request parameter event\_id has expired
 
-请在收到事件后尽快回复
+Reply as soon as possible after receiving the event
 
 40034027
 
-该事件不支持回复消息
+This event does not support replying to messages
 
-请确认事件类型是否支持回复
+Confirm whether the event type supports replies
 
 40034029
 
-内联键盘行/列超限
+Inline keyboard rows/columns exceed the limit
 
-请减少键盘按钮数量
+Reduce the number of keyboard buttons
 
 40034100
 
-主动消息发送超过频控限制
+Proactive message sending exceeds the rate limit
 
-请降低发送频率或等待配额恢复
+Lower the sending frequency or wait for the quota to recover
 
 40034101
 
-机器人非群成员
+The bot is not a group member
 
-请先将机器人加入群聊
+Add the bot to the group chat first
 
 40034105
 
-主动消息发送失败，无权限
+Proactive message sending failed: no permission
 
-请检查机器人权限设置
+Check the bot permission settings
 
 40034106
 
-消息不支持该指令类型
+The message does not support this command type
 
-请检查消息指令类型
+Check the message command type
 
 40034108
 
-指令参数长度超限
+Command parameter length exceeds the limit
 
-请缩短指令参数
+Shorten the command parameters
 
 40034109
 
-指令参数解析失败
+Failed to parse command parameters
 
-请检查指令参数格式
+Check the command parameter format
 
 40034124
 
-markdown消息参数错误
+markdown message parameter error
 
-请检查Markdown参数格式
+Check the Markdown parameter format
 
 40034127
 
-无markdown模板权限
+No markdown template permission
 
-请先申请Markdown模板权限
+Apply for Markdown template permission first
 
 40034128
 
-被动回复时间或次数超限
+Passive reply time or count exceeds the limit
 
-请在收到事件后尽快回复
+Reply as soon as possible after receiving the event
 
 40054002
 
-机器人被禁言
+The bot is muted
 
-请等待解禁后再发送
+Wait until the mute is lifted before sending
 
 40054003
 
-机器人不是群成员
+The bot is not a group member
 
-请先将机器人加入群聊
+Add the bot to the group chat first
 
 40054005
 
-消息被去重
+Message deduplicated
 
-请确保每次请求使用不同的msgseq值
+Ensure each request uses a different msgseq value
 
 40054007
 
-消息长度超限
+Message length exceeds the limit
 
-请缩短消息内容
+Shorten the message content
 
 40054010
 
-不允许发送URL
+Sending URLs is not allowed
 
-请移除消息中的URL
+Remove the URL from the message
 
 40054016
 
-机器人已下线
+The bot is offline
 
-请检查机器人状态
+Check the bot status
 
 50055001
 
-消息发送异常，请稍后重试
+Message sending error; try again later
 
-请稍后重试
+Try again later
 
 50055006
 
-ARK消息发送异常，请稍后重试
+ARK message sending error; try again later
 
-请稍后重试
+Try again later
 
-### 撤回群聊消息
+### Recall group chat message
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages_message_id.delete.html
 
-# 撤回群聊消息
+# Recall group chat message
 
-撤回群消息。发送超过 2 分钟的消息不可撤回。 成功返回 HTTP 200，无响应体。
+Recall a group message. Messages sent more than 2 minutes ago cannot be recalled. Returns HTTP 200 on success with no response body.
 
--   发送超出 **2 分钟**的消息不可撤回。
--   机器人如果是群管理员，可以撤回机器人自己的消息以及普通群成员的消息，群成员的消息ID从群消息事件`GROUP_AT_MESSAGE_CREATE`或`GROUP_MESSAGE_CREATE`里，`d.id`这个字段中获取。
--   机器人如果是普通成员，只能撤回机器人自己发送的消息，消息ID可以从消息发送接口响应里获取。
+-   Messages sent more than **2 minutes** ago cannot be recalled.
+-   If the bot is a group administrator, it can recall its own messages and those of ordinary group members. The message ID of a group member is obtained from the `d.id` field in the group message event `GROUP_AT_MESSAGE_CREATE` or `GROUP_MESSAGE_CREATE`.
+-   If the bot is an ordinary member, it can only recall messages sent by the bot itself. The message ID can be obtained from the response of the message sending API.
 
-## 请求
+## Request
 
-### 基础信息
+### Basic Information
 
-字段
+Field
 
-值
+Value
 
 HTTP URL
 
@@ -6312,105 +6312,105 @@ HTTP Method
 
 DELETE
 
-接口频率限制
+API Rate Limit
 
 10 QPS
 
-## 路径参数
+## Path Parameters
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 group\_openid
 
 string
 
-是
+Yes
 
-群 OpenID
+Group OpenID
 
 message\_id
 
 string
 
-是
+Yes
 
-消息 ID
+Message ID
 
-### 请求示例
+### Request Example
 
-**撤回群消息**
+**Recall group message**
 
 ```
 DELETE /v2/groups/B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5/messages/0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF
 ```
 
-## 响应
+## Response
 
-无
+None
 
-## 响应示例
+## Response Example
 
-**响应示例**
+**Response example**
 
 ```
 {}
 ```
 
-### 错误码
+### Error Codes
 
-错误码
+Error code
 
-描述
+Description
 
-排查建议
+Troubleshooting suggestion
 
 40061001
 
-请求参数无效
+Invalid request parameter
 
-请检查请求参数格式
+Check the request parameter format
 
 40062003
 
-无操作权限
+No operation permission
 
-请检查机器人是否有操作权限，机器人是否为群管理员或者发消息的用户是否为普通用户
+Check whether the bot has operation permission, whether the bot is a group administrator, or whether the user who sent the message is an ordinary user
 
 40064004
 
-已超出消息撤回时限
+The message recall time limit has been exceeded
 
-消息发送超过2分钟后不可撤回
+Messages cannot be recalled more than 2 minutes after being sent
 
 50065001
 
-消息撤回失败，请稍后重试
+Message recall failed; try again later
 
-请稍后重试
+Try again later
 
-### 生成分享链接
+### Generate share link
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_generate_url_link.post.html
 
-# 生成分享链接
+# Generate share link
 
-生成机器人分享链接，用于邀请用户添加机器人为好友。
+Generate a bot share link for inviting users to add the bot as a friend.
 
-生成带自定义参数的机器人分享链接，用于邀请用户添加机器人为好友。用户通过该链接添加机器人时，callback\_data 参数会透传给开发者。callback\_data 最长 32 字符。
+Generate a bot share link with custom parameters, used to invite users to add the bot as a friend. When a user adds the bot via this link, the callback\_data parameter is passed through to the developer. callback\_data is at most 32 characters.
 
-## 请求
+## Request
 
-### 基础信息
+### Basic Information
 
-字段
+Field
 
-值
+Value
 
 HTTP URL
 
@@ -6420,31 +6420,31 @@ HTTP Method
 
 POST
 
-接口频率限制
+API Rate Limit
 
 50 QPS
 
-## 请求体
+## Request Body
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 callback\_data
 
 string
 
-否
+No
 
-回传给机器人后台的数据
+Data passed back to the bot backend
 
-### 请求示例
+### Request Example
 
-**生成分享链接**
+**Generate share link**
 
 ```
 POST /v2/generate_url_link
@@ -6453,15 +6453,15 @@ POST /v2/generate_url_link
 }
 ```
 
-## 响应
+## Response
 
-### 响应体
+### Response Body
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 data
 
@@ -6469,21 +6469,21 @@ data
 
 **Data**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 url
 
 string
 
-生成的分享链接
+Generated share link
 
-## 响应示例
+## Response Example
 
-**生成分享链接成功**
+**Share link generated successfully**
 
 ```
 {
@@ -6493,61 +6493,61 @@ string
 }
 ```
 
-### 错误码
+### Error Codes
 
-错误码
+Error code
 
-描述
+Description
 
-排查建议
+Troubleshooting suggestion
 
 10001
 
-请求参数异常
+Invalid request parameters
 
-请检查请求参数是否正确
+Please check whether the request parameters are correct
 
 10002
 
-请求头异常
+Invalid request header
 
-请检查请求头是否正确
+Please check whether the request header is correct
 
 10003
 
-查询机器人信息异常
+Failed to query bot information
 
-请确认机器人是否存在
+Please confirm whether the bot exists
 
 10044
 
-从协议头获取uin失败
+Failed to get uin from protocol header
 
-请检查 Authorization Header 是否正确
+Please check whether the Authorization Header is correct
 
 11004
 
-生成分享ARK失败
+Failed to generate share ARK
 
-请稍后重试
+Try again later
 
-### 互动事件响应
+### Interaction event response
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/interactions_interaction_id.put.html
 
-# 互动事件响应
+# Interaction event response
 
-收到 INTERACTION\_CREATE 事件后需调用此接口回应，告知 QQ 后台事件已收到。 否则客户端会一直处于 loading 状态直到超时。
+After receiving an INTERACTION\_CREATE event, you must call this API to respond, notifying the QQ backend that the event has been received. Otherwise, the client remains in the loading state until it times out.
 
-仅 type=11（消息按钮）和 type=12（快捷菜单）的互动事件需要调用此接口回应，其他类型无需回应（调用也不会报错）。需在事件触发的有效时间内回应，超时后 interaction\_id 失效。同一 interaction\_id 只能回应一次。code=0 时，对于 type=14（清空会话），后台会下发会话已清空小灰条提示用户。
+Only interaction events with type=11 (message button) and type=12 (quick menu) need to be responded to via this API; other types do not require a response (calling it will not return an error). The response must be made within the validity period of the event trigger; after timeout, interaction\_id becomes invalid. The same interaction\_id can only be responded to once. When code=0, for type=14 (clear conversation), the backend sends a gray bar indicating that the conversation has been cleared to prompt the user.
 
-## 请求
+## Request
 
-### 基础信息
+### Basic Information
 
-字段
+Field
 
-值
+Value
 
 HTTP URL
 
@@ -6557,49 +6557,49 @@ HTTP Method
 
 PUT
 
-接口频率限制
+API Rate Limit
 
 50 QPS
 
-## 路径参数
+## Path Parameters
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 interaction\_id
 
 string
 
-是
+Yes
 
-互动事件 ID，从 INTERACTION\_CREATE 事件的 d.id 字段获取，注意该 ID 不带“INTERACTION\_CREATE:”前缀
+Interaction event ID, obtained from the d.id field of the INTERACTION\_CREATE event. Note that this ID does not include the "INTERACTION\_CREATE:" prefix
 
-## 请求体
+## Request Body
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 code
 
 integer
 
-否
+No
 
-回调结果。0=成功, 1=操作失败, 2=操作频繁, 3=重复操作, 4=没有权限, 5=仅管理员操作
+Callback result. 0=success, 1=operation failed, 2=operation too frequent, 3=duplicate operation, 4=no permission, 5=administrators only
 
-### 请求示例
+### Request Example
 
-**互动事件响应**
+**Interaction event response**
 
 ```
 PUT /interactions/a1b2c3d4-e5f6-7890-abcd-ef1234567890
@@ -6608,125 +6608,125 @@ PUT /interactions/a1b2c3d4-e5f6-7890-abcd-ef1234567890
 }
 ```
 
-## 响应
+## Response
 
-无
+None
 
-## 响应示例
+## Response Example
 
-**成功**
+**Success**
 
 ```
 {}
 ```
 
-### 错误码
+### Error Codes
 
-错误码
+Error code
 
-描述
+Description
 
-排查建议
+Troubleshooting suggestion
 
 630001
 
 param invalid
 
-请检查请求参数是否正确
+Please check whether the request parameters are correct
 
 630002
 
 get appid failed
 
-请检查 Authorization Header 是否正确
+Please check whether the Authorization Header is correct
 
 630003
 
 appid invalid
 
-AppID 与 interaction\_id 不匹配，请确认使用正确的 Bot Token
+AppID does not match interaction\_id. Please confirm that you are using the correct Bot Token
 
 630004
 
 set interaction data failed
 
-请稍后重试
+Try again later
 
 630005
 
 get interaction data failed
 
-请稍后重试
+Try again later
 
 630006
 
 get header appid failed
 
-请检查请求 Header
+Please check the request Header
 
 630007
 
 data too large
 
-请减小请求体大小
+Please reduce the request body size
 
 630008
 
 interaction preprocess failed
 
-请检查请求参数
+Please check the request parameters
 
-## 4. 富媒体
+## 4. Rich Media
 
-### 富媒体消息概述
+### Rich Media Message Overview
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/rich-media.html
 
-# 富媒体消息概述
+# Rich media message overview
 
-富媒体消息支持发送图片、视频、语音、文件等类型，需先将文件上传获取 `file_info`，再通过发消息接口（`msg_type=7`）携带 `media.file_info` 发送。
+Rich media messages support sending images, videos, voice, files, and other types. You must first upload the file to obtain `file_info`, then send it via the send message API (`msg_type=7`) with `media.file_info`.
 
-## 支持的消息类型
+## Supported message types
 
-图片
+Image
 
-语音
+Voice
 
-视频
+Video
 
-文件
+File
 
-![图片消息](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/image-send.35813305.jpg)
+![Image message](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/image-send.35813305.jpg)
 
-![语音消息](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/voice-send.21dce8bf.jpg)
+![Voice message](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/voice-send.21dce8bf.jpg)
 
-![视频消息](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/video-send.9416079c.jpg)
+![Video message](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/video-send.9416079c.jpg)
 
-![文件消息](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/large-file-transfer.f49ff1e2.jpg)
+![File message](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/large-file-transfer.f49ff1e2.jpg)
 
-支持 jpg/png/gif/webp/bmp 格式，发送后直接展示图片
+Supports jpg/png/gif/webp/bmp formats; the image is displayed directly after sending
 
-支持 silk/mp3/wav/ogg 格式，发送后展示语音条
+Supports silk/mp3/wav/ogg formats; a voice bar is displayed after sending
 
-支持 mp4 格式，发送后展示视频封面可播放
+Supports mp4 format; a playable video cover is displayed after sending
 
-支持任意格式，发送后展示文件卡片可下载
+Supports any format; a downloadable file card is displayed after sending
 
-## 文件类型与限制
+## File types and limits
 
 file\_type
 
-类型
+Type
 
-格式
+Format
 
-软限制
+Soft limit
 
-硬限制
+Hard limit
 
 1
 
-图片
+Image
 
 png / jpg
 
@@ -6736,7 +6736,7 @@ png / jpg
 
 2
 
-视频
+Video
 
 mp4
 
@@ -6746,7 +6746,7 @@ mp4
 
 3
 
-语音
+Voice
 
 silk
 
@@ -6756,7 +6756,7 @@ silk
 
 4
 
-文件
+File
 
 \-
 
@@ -6764,38 +6764,38 @@ silk
 
 200 MB
 
-超过软限制会降级为文件类型上传，超过硬限制会报错。
+Exceeding the soft limit downgrades the upload to the file type; exceeding the hard limit returns an error.
 
-## 上传方式
+## Upload methods
 
-整文件上传使用 [单聊上传](/wiki/develop/api-v2/autogen/api/v2_users_user_openid_files.post.html) / [群聊上传](/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_files.post.html) 接口，直接传入文件 URL；文件较大时使用分片上传，参考 [单聊预上传](/wiki/develop/api-v2/autogen/api/v2_users_user_id_upload_prepare.post.html) 开始分片流程。
+For whole-file upload, use the [direct chat upload](/wiki/develop/api-v2/autogen/api/v2_users_user_openid_files.post.html) / [group chat upload](/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_files.post.html) APIs and pass the file URL directly; for larger files, use multipart upload. See [direct chat pre-upload](/wiki/develop/api-v2/autogen/api/v2_users_user_id_upload_prepare.post.html) to start the multipart process.
 
-### 分片上传（推荐）
+### Multipart upload (recommended)
 
-适用于大文件或本地文件。分四步完成：
-
-```
-1. 预上传
-   调用 upload_prepare，传入文件信息和校验值
-   → 获取 upload_id + block_size + 各分片预签名 URL
-
-2. 分片 PUT
-   按 block_size 将文件分片，逐片 HTTP PUT 到对应的预签名 URL
-
-3. 确认分片
-   每片 PUT 成功后调用 upload_part_finish，通知服务端该分片完成
-
-4. 完成合并
-   全部分片完成后，携带 upload_id 调用上传接口
-   → 返回 file_info
-```
-
-流程图：
+Suitable for large or local files. Completed in four steps:
 
 ```
- upload_prepare         分片 PUT + part_finish        上传接口（合并）
+1. Pre-upload
+   Call upload_prepare, passing the file information and checksum
+   → Obtain upload_id + block_size + presigned URL for each part
+
+2. Part PUT
+   Split the file by block_size and HTTP PUT each part to its corresponding presigned URL
+
+3. Confirm parts
+   After each part is PUT successfully, call upload_part_finish to notify the server that the part is complete
+
+4. Complete merge
+   After all parts are complete, call the upload API with upload_id
+   → Return file_info
+```
+
+Flowchart:
+
+```
+ upload_prepare         part PUT + part_finish        upload API (merge)
 ┌──────────────┐    ┌─────────────────────────┐    ┌──────────────────┐
-│ 获取        │    │  for each chunk:        │    │ POST .../files   │
+│ Get         │    │  for each chunk:        │    │ POST .../files   │
 │ upload_id   │───▶│  PUT → presigned_url    │───▶│ { upload_id }   │
 │ block_size  │    │  POST → part_finish     │    │ → file_info      │
 │ presigned   │    └─────────────────────────┘    └──────────────────┘
@@ -6803,9 +6803,9 @@ silk
 └──────────────┘
 ```
 
-### URL 上传
+### URL upload
 
-适用于文件已在公网可访问的场景，直接传入文件 URL，平台自动下载转存。
+Suitable when the file is already publicly accessible; pass the file URL directly and the platform downloads and stores it automatically.
 
 ```
 POST /v2/users/{user_openid}/files
@@ -6815,109 +6815,109 @@ POST /v2/users/{user_openid}/files
 }
 ```
 
-返回 `file_info`，即可用于发消息。
+Returns `file_info`, which can then be used to send messages.
 
-## 使用 file\_info 发送
+## Send using file\_info
 
-获取 `file_info` 后，在发消息接口中设置 `msg_type=7`，将 `file_info` 填入 `media` 字段：
+After obtaining `file_info`, set `msg_type=7` in the send message API and put `file_info` in the `media` field:
 
 ```
 POST /v2/users/{user_openid}/messages
 {
   "msg_type": 7,
   "media": {
-    "file_info": "{上一步返回的 file_info}"
+    "file_info": "{file_info returned in the previous step}"
   }
 }
 ```
 
-> `srv_send_msg=true` 可在上传的同时直接发送，跳过单独调用发消息接口这一步，但会占用主动消息频次。
+> `srv_send_msg=true` allows sending directly during upload, skipping the separate call to the send message API, but it consumes proactive message quota.
 
-## 单聊与群聊隔离
+## Direct chat and group chat isolation
 
-单聊和群聊的文件上传接口相互独立，上传的文件不能跨场景使用：
+The file upload APIs for direct chat and group chat are independent, and uploaded files cannot be used across scenarios:
 
-场景
+Scenario
 
-上传接口
+Upload API
 
-单聊
+Direct Chat
 
 `/v2/users/{user_openid}/files`
 
-群聊
+Group Chat
 
 `/v2/groups/{group_openid}/files`
 
-对应的预上传和分片接口也需使用同场景的端点。
+The corresponding pre-upload and part APIs must also use endpoints for the same scenario.
 
-## 注意事项
+## Notes
 
--   `file_info` 有有效期（`ttl`），过期后需重新上传。
--   `md5_10m`（文件前 10002432 字节，约 9.54 MB 的 MD5）可用于秒传判断，避免重复上传。
--   分片大小默认 5MB，并发数、重试策略由服务端在 `upload_config` 中下发。
--   上传接口超时建议设为 ≥ 5 秒。
+-   `file_info` has a validity period (`ttl`); after it expires, you must re-upload.
+-   `md5_10m` (MD5 of the first 10002432 bytes of the file, about 9.54 MB) can be used for instant upload detection to avoid duplicate uploads.
+-   The default part size is 5MB; the concurrency and retry policy are issued by the server in `upload_config`.
+-   It is recommended to set the upload API timeout to ≥ 5 seconds.
 
-### 单聊富媒体上传
+### Direct Chat Rich Media Upload
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_users_user_openid_files.post.html
 
-# 单聊富媒体上传
+# Direct chat rich media upload
 
-上传图片/视频/语音到单聊，返回 file\_info 用于发送消息接口的 media 字段。 用单聊接口上传的文件仅能发送到单聊。 文件类型与大小限制:
+Upload images/videos/voice to a direct chat and return file\_info for the media field of the send message API. Files uploaded via the direct chat API can only be sent to direct chats. File type and size limits:
 
--   1=图片(png/jpg): 软限制 20MB, 硬限制 200MB
--   2=视频(mp4): 软限制 30MB, 硬限制 200MB
--   3=语音(silk): 软限制 20MB, 硬限制 200MB
--   4=文件: 软限制 200MB, 硬限制 200MB 超过软限制会降级为文件类型上传，超过硬限制会报错。
+-   1=Image (png/jpg): soft limit 20MB, hard limit 200MB
+-   2=Video (mp4): soft limit 30MB, hard limit 200MB
+-   3=Voice (silk): soft limit 20MB, hard limit 200MB
+-   4=File: soft limit 200MB, hard limit 200MB. Exceeding the soft limit downgrades the upload to the file type; exceeding the hard limit returns an error.
 
-支持三种上传方式，按实际文件大小和资源来源选择。
+Three upload methods are supported; choose based on the actual file size and resource source.
 
-## 一、支持的上传方式
+## I. Supported upload methods
 
-方式
+Method
 
-说明
+Description
 
-限制 / 注意
+Limits / Notes
 
-URL 上传
+URL upload
 
-传入 `url`，由平台下载并转存
+Pass `url`, and the platform downloads and stores it
 
-服务端下载资源可能因网络等原因失败
+The server may fail to download the resource due to network or other reasons
 
-分片上传合并
+Multipart upload merge
 
-先通过 `upload_prepare` + `upload_part_finish` 完成分片上传，再携带 `upload_id` 调用本接口完成合并
+First complete the multipart upload via `upload_prepare` + `upload_part_finish`, then call this API with `upload_id` to complete the merge
 
-**推荐使用**
+**Recommended**
 
-直接上传二进制数据
+Direct binary data upload
 
-直接传文件二进制内容
+Pass the file's binary content directly
 
-数据大小不能超过 5M，超过建议使用分片上传
+The data size must not exceed 5M; for larger data, multipart upload is recommended
 
-## 二、推荐流程：分片上传
+## II. Recommended flow: multipart upload
 
-1.  调用 `upload_prepare`，获取 `upload_id`、`block_size` 以及各分片的预签名 URL。
-2.  按 `block_size` 将文件切分为多个分片，逐片通过 HTTP `PUT` 上传到对应的预签名 URL。
-3.  每片 `PUT` 成功后，调用 `upload_part_finish` 通知服务端该分片上传完成。
-4.  全部分片上传完成后，携带 `upload_id` 调用本接口完成合并，返回 `file_info`。
+1.  Call `upload_prepare` to obtain `upload_id`, `block_size`, and the presigned URL for each part.
+2.  Split the file into multiple parts by `block_size`, and upload each part to its corresponding presigned URL via HTTP `PUT`.
+3.  After each part is `PUT` successfully, call `upload_part_finish` to notify the server that the part upload is complete.
+4.  After all parts are uploaded, call this API with `upload_id` to complete the merge and return `file_info`.
 
-## 三、注意事项
+## III. Notes
 
--   URL 上传存在服务端下载失败的可能，若遇到下载失败，可先将资源下载到本地，再通过**直接上传二进制数据**的方式上传。
--   二进制直传有 5M 大小上限，文件较大时请改用分片上传。
+-   URL upload may fail on the server side. If a download failure occurs, download the resource locally first, then upload it via **direct binary data upload**.
+-   Direct binary upload has a 5M size limit; for larger files, use multipart upload instead.
 
-## 请求
+## Request
 
-### 基础信息
+### Basic Information
 
-字段
+Field
 
-值
+Value
 
 HTTP URL
 
@@ -6927,89 +6927,89 @@ HTTP Method
 
 POST
 
-接口频率限制
+API Rate Limit
 
 50 QPS
 
-## 路径参数
+## Path Parameters
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 user\_openid
 
 string
 
-是
+Yes
 
-用户 OpenID
+User OpenID
 
-## 请求体
+## Request Body
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 file\_type
 
 integer
 
-否
+No
 
-媒体类型。1=图片, 2=视频, 3=语音, 4=文件 图片支持 png/jpg，视频支持 mp4，语音支持 silk
+Media type. 1=Image, 2=Video, 3=Voice, 4=File. Images support png/jpg, videos support mp4, voice supports silk
 
 url
 
 string
 
-否
+No
 
-媒体资源的 URL，需以 http 开头，平台会下载并转存 分片上传合并时可为空
+URL of the media resource, which must start with http; the platform downloads and stores it. Can be empty when merging a multipart upload
 
 srv\_send\_msg
 
 boolean
 
-否
+No
 
-true=直接发送消息并占用主动消息频次，返回中包含消息 ID false=仅返回 file\_info，用于后续发送消息接口的 media 字段
+true=send the message directly and consume proactive message quota; the response includes the message ID. false=only return file\_info for the media field of a later send message API call
 
 upload\_id
 
 string
 
-否
+No
 
-分片上传任务 ID。来自 UploadPrepare 响应的 upload\_id， 传入后走分片上传合并路径，url 可为空
+Multipart upload task ID. From the upload\_id in the UploadPrepare response. When passed, the multipart upload merge path is used and url can be empty
 
 file\_name
 
 string
 
-否
+No
 
-文件名 (分片上传或者二进制上传时必填）
+File name (required for multipart upload or binary upload)
 
 file\_data
 
 string
 
-否
+No
 
-直接上传二进制数据。 直接上传二进制有大小限制，需要在5M以内，如果超过则需要使用URL上传或者分片上传。
+Upload binary data directly. Direct binary upload has a size limit and must be within 5M; if it exceeds this, use URL upload or multipart upload.
 
-### 请求示例
+### Request Example
 
-**URL 上传图片**
+**URL image upload**
 
 ```
 POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/files
@@ -7020,7 +7020,7 @@ POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/files
 }
 ```
 
-**分片上传合并**
+**Multipart upload merge**
 
 ```
 POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/files
@@ -7032,7 +7032,7 @@ POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/files
 }
 ```
 
-**二进制上传**
+**Binary upload**
 
 ```
 POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/files
@@ -7040,53 +7040,53 @@ POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/files
 {
   "file_type": 1,
   "file_name": "111.png",
-  "file_data": "xxxx图片的二进制数据"
+  "file_data": "xxxx binary data of the image"
 }
 ```
 
-## 响应
+## Response
 
-### 响应体
+### Response Body
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 file\_uuid
 
 string
 
-文件唯一 ID
+Unique file ID
 
 file\_info
 
 string
 
-文件信息，用于发送消息接口的 media.file\_info 字段。 内部为序列化的二进制数据，开发者无需解析，直接透传即可
+File information, used for the media.file\_info field of the send message API. It is serialized binary data internally; developers do not need to parse it and can pass it through directly
 
 ttl
 
 integer
 
-file\_info 有效期（秒）。到期后需重新上传。 0 表示可长期使用
+file\_info validity period (seconds). Re-upload is required after expiry. 0 means it can be used long-term
 
 id
 
 string
 
-发送消息的唯一 ID。仅 srv\_send\_msg=true 时返回
+Unique ID of the sent message. Returned only when srv\_send\_msg=true
 
 raw\_url
 
 string
 
-文件下载链接（COS 预签名 GET URL），有效期与 ttl 一致 仅分片上传合并（upload\_id 路径）且 file\_type 为图片/视频/语音时返回； URL 直传和文件类型(file\_type=4)不返回此字段
+File download link (COS presigned GET URL), with the same validity period as ttl. Returned only for multipart upload merge (upload\_id path) when file\_type is image/video/voice; not returned for direct URL upload or the file type (file\_type=4)
 
-## 响应示例
+## Response Example
 
-**上传成功**
+**Upload successful**
 
 ```
 {
@@ -7096,79 +7096,79 @@ string
 }
 ```
 
-### 错误码
+### Error Codes
 
-错误码
+Error code
 
-描述
+Description
 
-排查建议
+Troubleshooting suggestion
 
 850018
 
-群被禁言或者机器人被禁言
+The group is muted or the bot is muted
 
-请检查机器人是否被禁言
+Please check whether the bot is muted
 
 850019
 
-不支持的文件格式
+Unsupported file format
 
-请检查 file\_type 是否正确
+Please check whether file\_type is correct
 
 850026
 
-下载原始文件失败
+Failed to download the original file
 
-请检查 URL 是否可访问或重试
+Please check whether the URL is accessible or try again
 
 850031
 
-上传文件超过大小限制
+The uploaded file exceeds the size limit
 
-请减小文件大小
+Please reduce the file size
 
 850027
 
-发送数据超时
+Timed out sending data
 
-请稍后重试
+Try again later
 
 10000
 
-不支持的操作
+Unsupported operation
 
-请检查请求参数
+Please check the request parameters
 
 40093001
 
-文件上传失败，请重试
+File upload failed, please try again
 
-大文件分片上传中 BDH 通道异常，请重试
+BDH channel exception during large file multipart upload, please try again
 
 40093002
 
-超过今天发送文件容量上限
+Exceeded today's file sending capacity limit
 
-请明天再试或减少文件大小
+Please try again tomorrow or reduce the file size
 
-### 单聊富媒体预上传
+### Direct Chat Rich Media Pre-upload
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_users_user_id_upload_prepare.post.html
 
-# 单聊富媒体预上传
+# Direct Chat Rich Media Pre-upload
 
-单聊大文件分片上传前的准备工作。返回 upload\_id、分片预签名 URL 和上传配置。 后续将文件按 block\_size 分片，逐片 PUT 到预签名 URL，每片完成后调用分片完成接口。
+Preparation before multipart upload of large files in a direct chat. Returns upload\_id, presigned URLs for the parts, and the upload configuration. Next, split the file by block\_size, PUT each part to its presigned URL, and after each part is complete, call the part completion API.
 
-大文件分片上传第一步。传入文件大小、MD5/SHA1 校验值，服务端返回 upload\_id 和各分片预签名 URL。
+The first step of large file multipart upload. Pass the file size and MD5/SHA1 checksums, and the server returns upload\_id and the presigned URL for each part.
 
-## 请求
+## Request
 
-### 基础信息
+### Basic Information
 
-字段
+Field
 
-值
+Value
 
 HTTP URL
 
@@ -7178,89 +7178,89 @@ HTTP Method
 
 POST
 
-接口频率限制
+API Rate Limit
 
 10 QPS
 
-## 路径参数
+## Path Parameters
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 user\_id
 
 string
 
-是
+Yes
 
-用户 OpenID
+User OpenID
 
-## 请求体
+## Request Body
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 file\_type
 
 integer
 
-是
+Yes
 
-业务类型。1=图片, 2=视频, 3=语音, 4=文件
+Business type. 1=Image, 2=Video, 3=Voice, 4=File
 
 file\_size
 
 string
 
-是
+Yes
 
-文件大小（字节）
+File size (bytes)
 
 file\_name
 
 string
 
-是
+Yes
 
-文件名
+File name
 
 md5
 
 string
 
-是
+Yes
 
-整个文件的 MD5
+MD5 of the entire file
 
 sha1
 
 string
 
-是
+Yes
 
-整个文件的 SHA1
+SHA1 of the entire file
 
 md5\_10m
 
 string
 
-是
+Yes
 
-文件前 10002432 字节（约 10MB）的 MD5 校验值
+MD5 checksum of the first 10002432 bytes (about 10MB) of the file
 
-### 请求示例
+### Request Example
 
-**预上传视频文件**
+**Pre-upload a video file**
 
 ```
 POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/upload_prepare
@@ -7274,95 +7274,95 @@ POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/upload_prepare
 }
 ```
 
-## 响应
+## Response
 
-### 响应体
+### Response Body
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 upload\_id
 
 string
 
-上传任务 ID，后续分片上传和完成合并时需携带
+Upload task ID, required for subsequent multipart upload and completion merge
 
 block\_size
 
 string
 
-分块大小（字节），默认 5MB。客户端按此大小对文件分片
+Block size (bytes), default 5MB. The client splits the file according to this size
 
 parts
 
 \[\][UploadPart](#schema-uploadpart)
 
-分片列表，每个分片包含一个预签名上传 URL
+Part list; each part contains a presigned upload URL
 
 upload\_config
 
 [UploadConfig](#schema-uploadconfig)
 
-上传配置，由后台下发控制客户端上传行为
+Upload configuration, issued by the backend to control client upload behavior
 
 **UploadPart**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 index
 
 integer
 
-分片序号，从 0 开始
+Part index, starting from 0
 
 presigned\_url
 
 string
 
-预签名上传 URL，客户端通过 HTTP PUT 将分片数据上传到此 URL
+Presigned upload URL; the client uploads part data to this URL via HTTP PUT
 
 block\_size
 
 string
 
-该分块的大小（字节）
+Size of this block (bytes)
 
 **UploadConfig**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 concurrency
 
 integer
 
-上传并发数，默认 1
+Upload concurrency, default 1
 
 retry\_timeout
 
 integer
 
-重试超时时间（秒），默认 300（5分钟）
+Retry timeout (seconds), default 300 (5 minutes)
 
 retry\_delay
 
 integer
 
-重试延迟（秒），默认 1
+Retry delay (seconds), default 1
 
-## 响应示例
+## Response Example
 
-**预上传成功（3 个分片）**
+**Pre-upload successful (3 parts)**
 
 ```
 {
@@ -7393,73 +7393,73 @@ integer
 }
 ```
 
-### 错误码
+### Error Codes
 
-错误码
+Error code
 
-描述
+Description
 
-排查建议
+Troubleshooting suggestion
 
 850018
 
-群被禁言或者机器人被禁言
+The group is muted or the bot is muted
 
-请检查机器人是否被禁言
+Please check whether the bot is muted
 
 850019
 
-不支持的文件格式
+Unsupported file format
 
-请检查 file\_type 是否正确
+Please check whether file\_type is correct
 
 850026
 
-下载原始文件失败
+Failed to download the original file
 
-请检查 URL 是否可访问或重试
+Please check whether the URL is accessible or try again
 
 850031
 
-上传文件超过大小限制
+The uploaded file exceeds the size limit
 
-请减小文件大小
+Please reduce the file size
 
 850027
 
-发送数据超时
+Timed out sending data
 
-请稍后重试
+Try again later
 
 10000
 
-不支持的操作
+Unsupported operation
 
-请检查请求参数
+Please check the request parameters
 
 40093001
 
-文件上传失败，请重试
+File upload failed, please try again
 
-申请上传失败，请重试
+Failed to request upload, please try again
 
-### 单聊分片上传完成
+### Direct Chat Multipart Upload Completion
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_users_user_id_upload_part_finish.post.html
 
-# 单聊分片上传完成
+# Direct chat multipart upload completion
 
-通知服务端某个分片已上传完成。全部分片完成后，用 upload\_id 作为 MediaUpload 的 upload\_id 字段调一次上传接口完成合并
+Notify the server that a part has been uploaded. After all parts are complete, use upload\_id as the upload\_id field of MediaUpload to call the upload API once to complete the merge
 
-分片上传第二步。每个分片 PUT 到预签名 URL 成功后调用，通知服务端该分片已上传完成。 全部分片完成后，携带 upload\_id 调用 /v2/users/{user\_openid}/files 完成合并。
+The second step of multipart upload. Called after each part is successfully PUT to its presigned URL to notify the server that the part upload is complete. After all parts are complete, call /v2/users/{user\_openid}/files with upload\_id to complete the merge.
 
-## 请求
+## Request
 
-### 基础信息
+### Basic Information
 
-字段
+Field
 
-值
+Value
 
 HTTP URL
 
@@ -7469,73 +7469,73 @@ HTTP Method
 
 POST
 
-接口频率限制
+API Rate Limit
 
 10 QPS
 
-## 路径参数
+## Path Parameters
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 user\_id
 
 string
 
-是
+Yes
 
-用户 OpenID
+User OpenID
 
-## 请求体
+## Request Body
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 upload\_id
 
 string
 
-否
+No
 
-上传任务 ID
+Upload task ID
 
 part\_index
 
 integer
 
-否
+No
 
-分片序号
+Part index
 
 block\_size
 
 string
 
-否
+No
 
-分块大小（字节）
+Block size (bytes)
 
 md5
 
 string
 
-否
+No
 
-分片 MD5
+Part MD5
 
-### 请求示例
+### Request Example
 
-**通知分片 0 上传完成**
+**Notify that part 0 upload is complete**
 
 ```
 POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/upload_part_finish
@@ -7547,134 +7547,134 @@ POST /v2/users/A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4/upload_part_finish
 }
 ```
 
-## 响应
+## Response
 
-无
+None
 
-## 响应示例
+## Response Example
 
-**分片完成确认**
+**Part completion confirmation**
 
 ```
 {}
 ```
 
-### 错误码
+### Error Codes
 
-错误码
+Error code
 
-描述
+Description
 
-排查建议
+Troubleshooting suggestion
 
 850018
 
-群被禁言或者机器人被禁言
+The group is muted or the bot is muted
 
-请检查机器人是否被禁言
+Please check whether the bot is muted
 
 850019
 
-不支持的文件格式
+Unsupported file format
 
-请检查 file\_type 是否正确
+Please check whether file\_type is correct
 
 850026
 
-下载原始文件失败
+Failed to download the original file
 
-请检查 URL 是否可访问或重试
+Please check whether the URL is accessible or try again
 
 850031
 
-上传文件超过大小限制
+The uploaded file exceeds the size limit
 
-请减小文件大小
+Please reduce the file size
 
 850027
 
-发送数据超时
+Timed out sending data
 
-请稍后重试
+Try again later
 
 10000
 
-不支持的操作
+Unsupported operation
 
-请检查请求参数
+Please check the request parameters
 
 40093001
 
-文件上传失败，请重试
+File upload failed, please try again
 
-分片转存 BDH 通道异常，请重试
+BDH channel exception while storing the part, please try again
 
 40093002
 
-超过今天发送文件容量上限
+Exceeded today's file sending capacity limit
 
-请明天再试或减少文件大小
+Please try again tomorrow or reduce the file size
 
-### 群聊富媒体上传
+### Group Chat Rich Media Upload
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_files.post.html
 
-# 群聊富媒体上传
+# Group chat rich media upload
 
-上传图片/视频/语音到群聊，返回 file\_info 用于发送消息接口的 media 字段。 srv\_send\_msg=true 时直接发送消息并占用主动消息频次；false 时仅返回 file\_info。 用群接口上传的文件仅能发送到群聊。 文件类型与大小限制:
+Upload images/videos/voice to a group chat and return file\_info for the media field of the send message API. When srv\_send\_msg=true, the message is sent directly and proactive message quota is consumed; when false, only file\_info is returned. Files uploaded via the group API can only be sent to group chats. File type and size limits:
 
--   1=图片(png/jpg): 软限制 20MB, 硬限制 200MB
--   2=视频(mp4): 软限制 30MB, 硬限制 200MB
--   3=语音(silk): 软限制 20MB, 硬限制 200MB
--   4=文件: 软限制 200MB, 硬限制 200MB 超过软限制会降级为文件类型上传，超过硬限制会报错。
+-   1=Image (png/jpg): soft limit 20MB, hard limit 200MB
+-   2=Video (mp4): soft limit 30MB, hard limit 200MB
+-   3=Voice (silk): soft limit 20MB, hard limit 200MB
+-   4=File: soft limit 200MB, hard limit 200MB. Exceeding the soft limit downgrades the upload to the file type; exceeding the hard limit returns an error.
 
-支持三种上传方式，按实际文件大小和资源来源选择。
+Three upload methods are supported; choose based on the actual file size and resource source.
 
-## 一、支持的上传方式
+## I. Supported upload methods
 
-方式
+Method
 
-说明
+Description
 
-限制 / 注意
+Limits / Notes
 
-URL 上传
+URL upload
 
-传入 `url`，由平台下载并转存
+Pass `url`, and the platform downloads and stores it
 
-服务端下载资源可能因网络等原因失败
+The server may fail to download the resource due to network or other reasons
 
-分片上传合并
+Multipart upload merge
 
-先通过 `upload_prepare` + `upload_part_finish` 完成分片上传，再携带 `upload_id` 调用本接口完成合并
+First complete the multipart upload via `upload_prepare` + `upload_part_finish`, then call this API with `upload_id` to complete the merge
 
-**推荐使用**
+**Recommended**
 
-直接上传二进制数据
+Direct binary data upload
 
-直接传文件二进制内容
+Pass the file's binary content directly
 
-数据大小不能超过 5M，超过建议使用分片上传
+The data size must not exceed 5M; for larger data, multipart upload is recommended
 
-## 二、推荐流程：分片上传
+## II. Recommended flow: multipart upload
 
-1.  调用 `upload_prepare`，获取 `upload_id`、`block_size` 以及各分片的预签名 URL。
-2.  按 `block_size` 将文件切分为多个分片，逐片通过 HTTP `PUT` 上传到对应的预签名 URL。
-3.  每片 `PUT` 成功后，调用 `upload_part_finish` 通知服务端该分片上传完成。
-4.  全部分片上传完成后，携带 `upload_id` 调用本接口完成合并，返回 `file_info`。
+1.  Call `upload_prepare` to obtain `upload_id`, `block_size`, and the presigned URL for each part.
+2.  Split the file into multiple parts by `block_size`, and upload each part to its corresponding presigned URL via HTTP `PUT`.
+3.  After each part is `PUT` successfully, call `upload_part_finish` to notify the server that the part upload is complete.
+4.  After all parts are uploaded, call this API with `upload_id` to complete the merge and return `file_info`.
 
-## 三、注意事项
+## III. Notes
 
--   URL 上传存在服务端下载失败的可能，若遇到下载失败，可先将资源下载到本地，再通过**直接上传二进制数据**的方式上传。
--   二进制直传有 5M 大小上限，文件较大时请改用分片上传。
+-   URL upload may fail on the server side. If a download failure occurs, download the resource locally first, then upload it via **direct binary data upload**.
+-   Direct binary upload has a 5M size limit; for larger files, use multipart upload instead.
 
-## 请求
+## Request
 
-### 基础信息
+### Basic Information
 
-字段
+Field
 
-值
+Value
 
 HTTP URL
 
@@ -7684,89 +7684,89 @@ HTTP Method
 
 POST
 
-接口频率限制
+API Rate Limit
 
 50 QPS
 
-## 路径参数
+## Path Parameters
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 group\_openid
 
 string
 
-是
+Yes
 
-群 OpenID
+Group OpenID
 
-## 请求体
+## Request Body
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 file\_type
 
 integer
 
-否
+No
 
-媒体类型。1=图片, 2=视频, 3=语音, 4=文件 图片支持 png/jpg，视频支持 mp4，语音支持 silk,mp3,wav
+Media type. 1=Image, 2=Video, 3=Voice, 4=File. Images support png/jpg, videos support mp4, voice supports silk,mp3,wav
 
 url
 
 string
 
-否
+No
 
-媒体资源的 URL，需以 http 开头，平台会下载并转存 分片上传合并时可为空
+URL of the media resource, which must start with http; the platform downloads and stores it. Can be empty when merging a multipart upload
 
 srv\_send\_msg
 
 boolean
 
-否
+No
 
-true=直接发送消息并占用主动消息频次，返回中包含消息 ID false=仅返回 file\_info，用于后续发送消息接口的 media 字段
+true=send the message directly and consume proactive message quota; the response includes the message ID. false=only return file\_info for the media field of a later send message API call
 
 upload\_id
 
 string
 
-否
+No
 
-分片上传任务 ID。来自 UploadPrepare 响应的 upload\_id， 传入后走分片上传合并路径，url 可为空
+Multipart upload task ID. From the upload\_id in the UploadPrepare response. When passed, the multipart upload merge path is used and url can be empty
 
 file\_name
 
 string
 
-否
+No
 
-文件名 (分片上传或者二进制上传时必填）
+File name (required for multipart upload or binary upload)
 
 file\_data
 
 string
 
-否
+No
 
-直接上传二进制数据。 直接上传二进制有大小限制，需要在5M以内，如果超过则需要使用URL上传或者分片上传。
+Upload binary data directly. Direct binary upload has a size limit and must be within 5M; if it exceeds this, use URL upload or multipart upload.
 
-### 请求示例
+### Request Example
 
-**URL 上传图片**
+**URL image upload**
 
 ```
 POST /v2/groups/B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5/files
@@ -7777,7 +7777,7 @@ POST /v2/groups/B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5/files
 }
 ```
 
-**分片上传合并**
+**Multipart upload merge**
 
 ```
 POST /v2/groups/B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5/files
@@ -7789,60 +7789,60 @@ POST /v2/groups/B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5/files
 }
 ```
 
-**二进制上传**
+**Binary upload**
 
 ```
 POST /v2/groups/B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5/files
 {
   "file_type": 1,
   "file_name": "video.mp4",
-  "file_data": "xxxx图片的二进制数据"
+  "file_data": "xxxx binary data of the image"
 }
 ```
 
-## 响应
+## Response
 
-### 响应体
+### Response Body
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 file\_uuid
 
 string
 
-文件唯一 ID
+Unique file ID
 
 file\_info
 
 string
 
-文件信息，用于发送消息接口的 media.file\_info 字段。 内部为序列化的二进制数据，开发者无需解析，直接透传即可
+File information, used for the media.file\_info field of the send message API. It is serialized binary data internally; developers do not need to parse it and can pass it through directly
 
 ttl
 
 integer
 
-file\_info 有效期（秒）。到期后需重新上传。 0 表示可长期使用
+file\_info validity period (seconds). Re-upload is required after expiry. 0 means it can be used long-term
 
 id
 
 string
 
-发送消息的唯一 ID。仅 srv\_send\_msg=true 时返回
+Unique ID of the sent message. Returned only when srv\_send\_msg=true
 
 raw\_url
 
 string
 
-文件下载链接（COS 预签名 GET URL），有效期与 ttl 一致 仅分片上传合并（upload\_id 路径）且 file\_type 为图片/视频/语音时返回； URL 直传和文件类型(file\_type=4)不返回此字段
+File download link (COS presigned GET URL), with the same validity period as ttl. Returned only for multipart upload merge (upload\_id path) when file\_type is image/video/voice; not returned for direct URL upload or the file type (file\_type=4)
 
-## 响应示例
+## Response Example
 
-**上传成功**
+**Upload successful**
 
 ```
 {
@@ -7852,79 +7852,79 @@ string
 }
 ```
 
-### 错误码
+### Error Codes
 
-错误码
+Error code
 
-描述
+Description
 
-排查建议
+Troubleshooting suggestion
 
 850018
 
-群被禁言或者机器人被禁言
+The group is muted or the bot is muted
 
-请检查机器人是否被禁言
+Please check whether the bot is muted
 
 850019
 
-不支持的文件格式
+Unsupported file format
 
-请检查 file\_type 是否正确
+Please check whether file\_type is correct
 
 850026
 
-下载原始文件失败
+Failed to download the original file
 
-请检查 URL 是否可访问或重试
+Please check whether the URL is accessible or try again
 
 850031
 
-上传文件超过大小限制
+The uploaded file exceeds the size limit
 
-请减小文件大小
+Please reduce the file size
 
 850027
 
-发送数据超时
+Timed out sending data
 
-请稍后重试
+Try again later
 
 10000
 
-不支持的操作
+Unsupported operation
 
-请检查请求参数
+Please check the request parameters
 
 40093001
 
-文件上传失败，请重试
+File upload failed, please try again
 
-大文件分片上传中 BDH 通道异常，请重试
+BDH channel exception during large file multipart upload, please try again
 
 40093002
 
-超过今天发送文件容量上限
+Exceeded today's file sending capacity limit
 
-请明天再试或减少文件大小
+Please try again tomorrow or reduce the file size
 
-### 群聊富媒体预上传
+### Group Chat Rich Media Pre-upload
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_id_upload_prepare.post.html
 
-# 群聊富媒体预上传
+# Group Chat Rich Media Pre-upload
 
-大文件分片上传前的准备工作。返回 upload\_id、分片预签名 URL 和上传配置。 后续将文件按 block\_size 分片，逐片 PUT 到预签名 URL，每片完成后调用分片完成接口。
+Preparation before multipart upload of large files. Returns upload\_id, presigned URLs for the parts, and the upload configuration. Next, split the file by block\_size, PUT each part to its presigned URL, and after each part is complete, call the part completion API.
 
-大文件分片上传第一步。传入文件大小、MD5/SHA1 校验值，服务端返回 upload\_id 和各分片预签名 URL。
+The first step of large file multipart upload. Pass the file size and MD5/SHA1 checksums, and the server returns upload\_id and the presigned URL for each part.
 
-## 请求
+## Request
 
-### 基础信息
+### Basic Information
 
-字段
+Field
 
-值
+Value
 
 HTTP URL
 
@@ -7934,89 +7934,89 @@ HTTP Method
 
 POST
 
-接口频率限制
+API Rate Limit
 
 10 QPS
 
-## 路径参数
+## Path Parameters
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 group\_id
 
 string
 
-是
+Yes
 
-群 OpenID
+Group OpenID
 
-## 请求体
+## Request Body
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 file\_type
 
 integer
 
-是
+Yes
 
-业务类型。1=图片, 2=视频, 3=语音, 4=文件 图片软限制 20MB, 视频软限制 30MB, 语音软限制 20MB, 文件软限制 200MB 超过软限制降级为文件类型，超过 200MB 硬限制报错
+Business type. 1=Image, 2=Video, 3=Voice, 4=File. Image soft limit 20MB, video soft limit 30MB, voice soft limit 20MB, file soft limit 200MB. Exceeding the soft limit downgrades to the file type; exceeding the 200MB hard limit returns an error
 
 file\_size
 
 string
 
-是
+Yes
 
-文件大小（字节）
+File size (bytes)
 
 file\_name
 
 string
 
-是
+Yes
 
-文件名
+File name
 
 md5
 
 string
 
-是
+Yes
 
-整个文件的 MD5 校验值
+MD5 checksum of the entire file
 
 sha1
 
 string
 
-是
+Yes
 
-整个文件的 SHA1 校验值
+SHA1 checksum of the entire file
 
 md5\_10m
 
 string
 
-是
+Yes
 
-文件前 10002432 字节（约 10MB）的 MD5 校验值
+MD5 checksum of the first 10002432 bytes (about 10MB) of the file
 
-### 请求示例
+### Request Example
 
-**预上传视频文件**
+**Pre-upload a video file**
 
 ```
 POST /v2/groups/B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5/upload_prepare
@@ -8030,95 +8030,95 @@ POST /v2/groups/B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5/upload_prepare
 }
 ```
 
-## 响应
+## Response
 
-### 响应体
+### Response Body
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 upload\_id
 
 string
 
-上传任务 ID，后续分片上传和完成合并时需携带
+Upload task ID, required for subsequent multipart upload and completion merge
 
 block\_size
 
 string
 
-分块大小（字节），默认 5MB。客户端按此大小对文件分片
+Block size (bytes), default 5MB. The client splits the file according to this size
 
 parts
 
 \[\][UploadPart](#schema-uploadpart)
 
-分片列表，每个分片包含一个预签名上传 URL
+Part list; each part contains a presigned upload URL
 
 upload\_config
 
 [UploadConfig](#schema-uploadconfig)
 
-上传配置，由后台下发控制客户端上传行为
+Upload configuration, issued by the backend to control client upload behavior
 
 **UploadPart**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 index
 
 integer
 
-分片序号，从 0 开始
+Part index, starting from 0
 
 presigned\_url
 
 string
 
-预签名上传 URL，客户端通过 HTTP PUT 将分片数据上传到此 URL
+Presigned upload URL; the client uploads part data to this URL via HTTP PUT
 
 block\_size
 
 string
 
-该分块的大小（字节）
+Size of this block (bytes)
 
 **UploadConfig**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 concurrency
 
 integer
 
-上传并发数，默认 1
+Upload concurrency, default 1
 
 retry\_timeout
 
 integer
 
-重试超时时间（秒），默认 300（5分钟）
+Retry timeout (seconds), default 300 (5 minutes)
 
 retry\_delay
 
 integer
 
-重试延迟（秒），默认 1
+Retry delay (seconds), default 1
 
-## 响应示例
+## Response Example
 
-**预上传成功（3 个分片）**
+**Pre-upload successful (3 parts)**
 
 ```
 {
@@ -8149,73 +8149,73 @@ integer
 }
 ```
 
-### 错误码
+### Error Codes
 
-错误码
+Error code
 
-描述
+Description
 
-排查建议
+Troubleshooting suggestion
 
 850018
 
-群被禁言或者机器人被禁言
+The group is muted or the bot is muted
 
-请检查机器人是否被禁言
+Please check whether the bot is muted
 
 850019
 
-不支持的文件格式
+Unsupported file format
 
-请检查 file\_type 是否正确
+Please check whether file\_type is correct
 
 850026
 
-下载原始文件失败
+Failed to download the original file
 
-请检查 URL 是否可访问或重试
+Please check whether the URL is accessible or try again
 
 850031
 
-上传文件超过大小限制
+The uploaded file exceeds the size limit
 
-请减小文件大小
+Please reduce the file size
 
 850027
 
-发送数据超时
+Timed out sending data
 
-请稍后重试
+Try again later
 
 10000
 
-不支持的操作
+Unsupported operation
 
-请检查请求参数
+Please check the request parameters
 
 40093001
 
-文件上传失败，请重试
+File upload failed, please try again
 
-申请上传失败，请重试
+Failed to request upload, please try again
 
-### 群聊分片上传完成
+### Group Chat Multipart Upload Completion
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_id_upload_part_finish.post.html
 
-# 群聊分片上传完成
+# Group chat multipart upload completion
 
-通知服务端某个分片已上传完成。需在每片 PUT 成功后调用。全部分片完成后，用 upload\_id 作为 MediaUpload 的 upload\_id 字段调一次上传接口完成合并
+Notify the server that a part has been uploaded. Must be called after each part is PUT successfully. After all parts are complete, use upload\_id as the upload\_id field of MediaUpload to call the upload API once to complete the merge
 
-分片上传第二步。每个分片 PUT 到预签名 URL 成功后调用，通知服务端该分片已上传完成。 全部分片完成后，携带 upload\_id 调用 /v2/groups/{group\_openid}/files 完成合并。
+The second step of multipart upload. Called after each part is successfully PUT to its presigned URL to notify the server that the part upload is complete. After all parts are complete, call /v2/groups/{group\_openid}/files with upload\_id to complete the merge.
 
-## 请求
+## Request
 
-### 基础信息
+### Basic Information
 
-字段
+Field
 
-值
+Value
 
 HTTP URL
 
@@ -8225,73 +8225,73 @@ HTTP Method
 
 POST
 
-接口频率限制
+API Rate Limit
 
 10 QPS
 
-## 路径参数
+## Path Parameters
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 group\_id
 
 string
 
-是
+Yes
 
-群 OpenID
+Group OpenID
 
-## 请求体
+## Request Body
 
-名称
+Name
 
-类型
+Type
 
-必填
+Required
 
-描述
+Description
 
 upload\_id
 
 string
 
-否
+No
 
-上传任务 ID，来自预上传响应
+Upload task ID, from the pre-upload response
 
 part\_index
 
 integer
 
-否
+No
 
-分片序号，对应 UploadPart.index
+Part index, corresponding to UploadPart.index
 
 block\_size
 
 string
 
-否
+No
 
-该分块的实际大小（字节）
+Actual size of this block (bytes)
 
 md5
 
 string
 
-否
+No
 
-该分片的 MD5 校验值
+MD5 checksum of this part
 
-### 请求示例
+### Request Example
 
-**通知分片 0 上传完成**
+**Notify that part 0 upload is complete**
 
 ```
 POST /v2/groups/B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5/upload_part_finish
@@ -8303,103 +8303,103 @@ POST /v2/groups/B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5/upload_part_finish
 }
 ```
 
-## 响应
+## Response
 
-无
+None
 
-## 响应示例
+## Response Example
 
-**分片完成确认**
+**Part completion confirmation**
 
 ```
 {}
 ```
 
-### 错误码
+### Error Codes
 
-错误码
+Error code
 
-描述
+Description
 
-排查建议
+Troubleshooting suggestion
 
 850018
 
-群被禁言或者机器人被禁言
+The group is muted or the bot is muted
 
-请检查机器人是否被禁言
+Please check whether the bot is muted
 
 850019
 
-不支持的文件格式
+Unsupported file format
 
-请检查 file\_type 是否正确
+Please check whether file\_type is correct
 
 850026
 
-下载原始文件失败
+Failed to download the original file
 
-请检查 URL 是否可访问或重试
+Please check whether the URL is accessible or try again
 
 850031
 
-上传文件超过大小限制
+The uploaded file exceeds the size limit
 
-请减小文件大小
+Please reduce the file size
 
 850027
 
-发送数据超时
+Timed out sending data
 
-请稍后重试
+Try again later
 
 10000
 
-不支持的操作
+Unsupported operation
 
-请检查请求参数
+Please check the request parameters
 
 40093001
 
-文件上传失败，请重试
+File upload failed, please try again
 
-分片转存 BDH 通道异常，请重试
+BDH channel exception while storing the part, please try again
 
 40093002
 
-超过今天发送文件容量上限
+Exceeded today's file sending capacity limit
 
-请明天再试或减少文件大小
+Please try again tomorrow or reduce the file size
 
-## 5. 消息类型
+## 5. Message types
 
-### 消息类型（overview）
+### Message types (overview)
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/type/overview.html
 
-# 消息类型
+# Message types
 
-通过 `msg_type` 指定消息格式，不同的类型对应不同的内容字段和收发能力。
+Specify the message format via `msg_type`; different types correspond to different content fields and send/receive capabilities.
 
-## 发送：msg\_type
+## Sending: msg\_type
 
-发送消息时通过 `msg_type` 指定格式：
+When sending a message, specify the format via `msg_type`:
 
 msg\_type
 
-类型
+Type
 
-内容字段
+Content Field
 
-说明
+Description
 
 0
 
-文本
+Text
 
 `content`
 
-纯文本消息
+Plain text message
 
 2
 
@@ -8407,111 +8407,111 @@ Markdown
 
 `markdown`
 
-支持 Markdown 语法，详见 [Markdown 消息](/wiki/develop/api-v2/server-inter/message/type/markdown.html)
+Supports Markdown syntax; see [Markdown message](/wiki/develop/api-v2/server-inter/message/type/markdown.html)
 
 7
 
-富媒体
+Rich Media
 
 `media`
 
-图片/视频/语音/文件，需先上传获取 `file_info`
+Image/video/voice/file; you must upload first to obtain `file_info`
 
-## 接收：message\_type
+## Receiving: message\_type
 
-收到用户消息时，事件体中的 `message_type` 表示消息内容类型：
+When a user message is received, the `message_type` in the event body indicates the message content type:
 
 message\_type
 
-含义
+Meaning
 
-说明
+Description
 
 0
 
-普通文本
+Plain text
 
-`content` 字段携带文本内容
+The `content` field carries the text content
 
 3
 
-结构化卡片
+Structured card
 
-`ark_data` 字段携带卡片数据
+The `ark_data` field carries the card data
 
 103
 
-引用消息
+Quoted message
 
-`msg_elements` 字段携带嵌套内容
+The `msg_elements` field carries nested content
 
-> 图片、视频、语音、文件等附加内容通过 `attachments` 字段携带（`content_type` 区分具体类型），不通过 `message_type` 单独表示。
+> Additional content such as images, videos, voice, and files is carried in the `attachments` field (`content_type` distinguishes the specific type), rather than being represented separately by `message_type`.
 
-## 各场景支持情况
+## Support by scenario
 
-类型
+Type
 
-单聊
+Direct Chat
 
-群聊
+Group Chat
 
-频道
+Channel
 
-**文本**
+**Text**
 
-收发 ✅
+Send/receive ✅
 
-收发 ✅
+Send/receive ✅
 
-收发 ✅
+Send/receive ✅
 
 **Markdown**
 
-发 ✅ / 收 ❌
+Send ✅ / Receive ❌
 
-收发 ✅
+Send/receive ✅
 
-发 ✅ / 收 ❌
+Send ✅ / Receive ❌
 
-**图片**
+**Image**
 
-收发 ✅
+Send/receive ✅
 
-收发 ✅
+Send/receive ✅
 
-收发 ✅
+Send/receive ✅
 
-**视频**
+**Video**
 
-收发 ✅
+Send/receive ✅
 
-收发 ✅
+Send/receive ✅
 
-收发 ✅
+Send/receive ✅
 
-**语音**
+**Voice**
 
-收发 ✅
+Send/receive ✅
 
-收发 ✅
+Send/receive ✅
 
-收发 ✅
+Send/receive ✅
 
-**文件**
+**File**
 
-收发 ✅
+Send/receive ✅
 
-收发 ✅
+Send/receive ✅
 
 ❌
 
-**结构化卡片**
+**Structured card**
 
-发 ❌ / 收 ✅
+Send ❌ / Receive ✅
 
-发 ❌ / 收 ✅
+Send ❌ / Receive ✅
 
-发 ❌ / 收 ❌
+Send ❌ / Receive ❌
 
 **Embed**
 
@@ -8519,150 +8519,150 @@ message\_type
 
 ❌
 
-发 ✅ / 收 ❌
+Send ✅ / Receive ❌
 
-**表情表态**
-
-❌
+**Emoji reaction**
 
 ❌
 
-收发 ✅
+❌
 
-**引用消息**
+Send/receive ✅
 
-收 ✅
+**Quoted message**
 
-收 ✅
+Receive ✅
 
-收 ✅
+Receive ✅
 
-> -   发送侧只有 msg\_type=0/2/3/7 四种（见上方表格）
-> -   富媒体上传流程见 [富媒体使用说明](/wiki/develop/api-v2/server-inter/message/rich-media.html)
-> -   表情表态仅频道支持，详见 [表情表态](/wiki/develop/api-v2/server-inter/message/trans/emoji.html)
+Receive ✅
 
-### Markdown 消息
+> -   The sending side supports only four types: msg\_type=0/2/3/7 (see the table above)
+> -   For the rich media upload process, see [Rich Media Usage Instructions](/wiki/develop/api-v2/server-inter/message/rich-media.html)
+> -   Emoji reactions are supported only in channels; see [Emoji Reactions](/wiki/develop/api-v2/server-inter/message/trans/emoji.html) for details
+
+### Markdown Message
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/type/markdown.html
 
-# Markdown 消息
+# Markdown Message
 
-2026/04/23 能力更新说明
+2026/04/23 Capability Update Notice
 
-单聊场景、群聊场景自定义 Markdown 消息能力已开放到所有机器人均可使用，无需单独申请 Markdown 模版，频道场景目前需要内邀开通。
+Custom Markdown message capability in direct chat and group chat scenarios is now available to all bots, with no separate Markdown template application required. The channel scenario currently requires an invitation for activation.
 
-## 支持格式
+## Supported Formats
 
-### 标题
-
-```
-# 一号标题
-## 二号标题
-正文
-```
-
-### 文字样式
+### Heading
 
 ```
-**加粗**
-__下划线加粗__
-_斜体_
-*星号斜体*
-***加粗斜体***
-~~删除线~~
+# Heading 1
+## Heading 2
+Body text
+```
+
+### Text Styles
+
+```
+**Bold**
+__Underline bold__
+_Italic_
+*Asterisk italic*
+***Bold italic***
+~~Strikethrough~~
 
 ```
 
-### 链接
+### Links
 
 ```
-欢迎来到：[🔗腾讯网](https://www.qq.com)  
-文档可以访问<https://doc.qq.com>
+Welcome to: [🔗Tencent](https://www.qq.com)  
+Documentation available at <https://doc.qq.com>
 ```
 
-### 图片
+### Images
 
-对于 markdown 消息内的图片资源，请使用可在公网访问的资源 url，开放平台会下载转存该资源。
+For image resources in Markdown messages, use a resource URL that is publicly accessible; the Open Platform will download and re-host the resource.
 
 ```
 ![text #208px #320px](https://resource5-1255303497.cos.ap-guangzhou.myqcloud.com/abcmouse_word_watch/markdown/building.png)
 ```
 
-### 有序列表
+### Ordered List
 
 ```
-# 有序列表
-1. 新人降落桃源岛的欢迎仪式
-2. 阳光准则助力建设有温度的频道
-3. 岛民分享吹水纳凉
+# Ordered List
+1. Welcome ceremony for newcomers landing on Peach Blossom Spring Island
+2. The Sunshine Guidelines help build a warmer channel
+3. Islanders share stories and chat while cooling off
 ```
 
-### 无序列表
+### Unordered List
 
 ```
-# 无序列表
-- 新人降落桃源岛的欢迎仪式
-- 阳光准则助力建设有温度的频道
-- 岛民分享吹水纳凉
+# Unordered List
+- Welcome ceremony for newcomers landing on Peach Blossom Spring Island
+- The Sunshine Guidelines help build a warmer channel
+- Islanders share stories and chat while cooling off
 ```
 
-### 列表嵌套
+### Nested Lists
 
 ```
-# 有序列表标题
-1. 嵌套一层
-    - 列表前是普通文本，则需要在列表前用空行隔开，否则无法识别
-    - 如果是段落标签比如标题，则无需用空行隔开
-2. 嵌套二层
-    1. 我是有序列表，二级列表前面需要空4个空格
-    2. 无序列表和有序列表可以相互嵌套，但是不建议无限制嵌套。
+# Ordered List Heading
+1. First nesting level
+    - If ordinary text precedes the list, you need to separate it with a blank line; otherwise it will not be recognized
+    - If it is a paragraph tag such as a heading, no blank line is needed
+2. Second nesting level
+    1. I am an ordered list; second-level lists need 4 leading spaces
+    2. Unordered and ordered lists can be nested within each other, but unlimited nesting is not recommended.
 ```
 
-### 块引用
+### Blockquote
 
 ```
-> 青青子衿，悠悠我心，但为君故，沉吟至今
-> 四月维夏，六月徂暑。先祖匪人，胡宁忍予
-> 秋日凄凄，百卉具腓。乱离瘼矣，爰其适归？
-诗经《小雅》
+> Green, green is your collar; deep, deep is my longing. It is all for you, my lord, that I ponder to this day
+> In the fourth month summer begins; in the sixth month the heat passes. Our forebears were not strangers—how could they bear to treat me so?
+> Autumn days are bleak and chill; all the plants have withered. Amid the misery of upheaval, where can I find refuge?
+The Book of Songs, "Minor Odes"
 ```
 
-### 水平分割线
+### Horizontal Rule
 
 ```
-这是段落1
+This is paragraph 1
 ***
-这是段落2
+This is paragraph 2
 ```
 
-### 换多行
+### Multiple Lines
 
 ```
-第一行
+First line
 
-第二行
+Second line
 
 \u200B
 \u200B
-第三行
+Third line
 ```
 
-## 发送方式
+## Sending Methods
 
-自定义 markdown 消息使用示例：
+Example of using a custom Markdown message:
 
 ```
 {
   "markdown": {
-    "content": "# 标题 \n## 简介很开心 \n内容[🔗腾讯](https://www.qq.com)"
+    "content": "# Title \n## Intro is very happy \nContent[🔗Tencent](https://www.qq.com)"
   }
 }
 ```
 
-markdown 模版消息的使用示例：
+Example of using a Markdown template message:
 
 ```
-// 模版例子
+// Template example
 
 #{{.title}}
 
@@ -8675,13 +8675,13 @@ markdown 模版消息的使用示例：
 
 {{.content}}[{{.link_introduction}}]({{.link}})
 
-// 发送case
+// Send case
 {
 	"markdown": {
 		"custom_template_id": "101993071_1658748972",
 		"params": [{
 				"key": "title",
-				"values": ["标题"]
+				"values": ["Title"]
 			},
 			{
 				"key": "image",
@@ -8691,23 +8691,23 @@ markdown 模版消息的使用示例：
 			},
 			{
 				"key": "para1",
-				"values": ["段落1"]
+				"values": ["Paragraph 1"]
 			},
 			{
 				"key": "para2",
-				"values": ["段落2"]
+				"values": ["Paragraph 2"]
 			},
 			{
 				"key": "desc",
-				"values": ["简介"]
+				"values": ["Introduction"]
 			},
 			{
 				"key": "content",
-				"values": ["在这个子频道非常开心"]
+				"values": ["I am very happy in this sub-channel"]
 			},
 			{
 				"key": "link_introduction",
-				"values": ["链接介绍"]
+				"values": ["Link description"]
 			},
 			{
 				"key": "link",
@@ -8718,85 +8718,85 @@ markdown 模版消息的使用示例：
 }
 ```
 
-## 数据结构与协议
+## Data Structures and Protocols
 
-消息发送 markdown 字段值是一个 json object，具体字段如下：
+The markdown field value in a message send is a JSON object; the fields are as follows:
 
-**属性**
+**Attribute**
 
-**类型**
+**Type**
 
-**必填**
+**Required**
 
-**说明**
+**Description**
 
 content
 
 string
 
-否
+No
 
-自定义 markdown 文本内容
+Custom Markdown text content
 
 custom\_template\_id
 
 string
 
-否
+No
 
-markdown 模版id，申请模版后获得
+Markdown template ID, obtained after applying for the template
 
 params
 
 Array
 
-否
+No
 
-{key: xxx, values: xxx}，模版内变量与填充值的kv映射
+{key: xxx, values: xxx}, a kv mapping of template variables to fill values
 
-### 结构化卡片消息
+### Structured Card Message
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/type/ark.html
 
-# 结构化卡片消息
+# Structured Card Message
 
-说明
+Description
 
-达到准入条件的开发者，向平台运营申请后获得权限。
+Developers who meet the eligibility requirements can obtain permission by applying to platform operations.
 
-## 发送方式
+## Sending Methods
 
-选择合适的 结构化卡片消息（ARK） 模板，将模板变量以 key-value 对填充后发送。每个模板定义了自己的变量（`#XXX#`），变量类型可以是字符串、数组、URL 等。
+Choose an appropriate Structured Card Message (ARK) template, fill in the template variables as key-value pairs, and send it. Each template defines its own variables (`#XXX#`), whose types can be strings, arrays, URLs, etc.
 
-### 数据结构
+### Data Structure
 
-消息发送接口中 `ark` 字段的结构：
+Structure of the `ark` field in the message sending API:
 
-属性
+Property
 
-类型
+Type
 
-必填
+Required
 
-说明
+Description
 
 template\_id
 
 int
 
-是
+Yes
 
-模板 ID，可选 23 / 24 / 37
+Template ID; can be 23 / 24 / 37
 
 kv
 
-kv 数组
+kv array
 
-是
+Yes
 
-`[{key: "#变量#", value: "填充值"}]`，模板变量与填充值的映射
+`[{key: "#variable#", value: "fill value"}]`, the mapping of template variables to fill values
 
-当变量类型为数组时，kv 元素使用 `obj` 嵌套数组结构：
+When the variable type is an array, kv elements use the `obj` nested array structure:
 
 ```
 {
@@ -8804,7 +8804,7 @@ kv 数组
   "obj": [
     {
       "obj_kv": [
-        { "key": "desc", "value": "文本" },
+        { "key": "desc", "value": "Text" },
         { "key": "link", "value": "https://..." }
       ]
     }
@@ -8812,16 +8812,16 @@ kv 数组
 }
 ```
 
-### 请求示例
+### Request Example
 
 ```
 {
   "ark": {
     "template_id": 23,
     "kv": [
-      { "key": "#DESC#", "value": "机器人订阅消息" },
-      { "key": "#PROMPT#", "value": "XX机器人" },
-      { "key": "#TITLE#", "value": "XX机器人消息" },
+      { "key": "#DESC#", "value": "Bot subscription message" },
+      { "key": "#PROMPT#", "value": "XX Bot" },
+      { "key": "#TITLE#", "value": "XX Bot message" },
       { "key": "#META_URL#", "value": "http://domain.com/" },
       {
         "key": "#META_LIST#",
@@ -8845,13 +8845,13 @@ kv 数组
 }
 ```
 
-## 模板 23 — 链接+文本列表
+## Template 23 — Link + Text List
 
 ![23](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/23.dcdba41f.png)
 
-模板 id = 23。
+Template ID = 23.
 
-### 模板格式
+### Template Format
 
 ```
 {
@@ -8859,7 +8859,7 @@ kv 数组
   "view": "albumAddPic",
   "ver": "0.0.0.1",
   "desc": "#DESC#",
-  "prompt": "[QQ小程序]#PROMPT#",
+  "prompt": "[QQ Mini Program]#PROMPT#",
   "meta": {
     "detail": {
       "list": "#LIST#"
@@ -8868,53 +8868,53 @@ kv 数组
 }
 ```
 
-### 字段说明
+### Field Description
 
-变量
+Variable
 
-类型
+Type
 
-描述
+Description
 
 #DESC#
 
 string
 
-描述
+Description
 
 #PROMPT#
 
 string
 
-提示消息
+Prompt message
 
 #LIST#
 
 array
 
-文本列表，每个元素为 `{desc, link}`
+Text list, where each element is `{desc, link}`
 
-**#LIST# 元素结构**：
+**#LIST# Element Structure**:
 
-字段
+Field
 
-类型
+Type
 
-描述
+Description
 
 desc
 
 string
 
-文本内容
+Text content
 
 link
 
 string
 
-跳转链接（需提前报备），不填则仅显示文本
+Redirect link (must be registered in advance); if omitted, only the text is displayed
 
-### 请求示例
+### Request Example
 
 ```
 {
@@ -8926,33 +8926,33 @@ string
       {
         "key": "#LIST#",
         "obj": [
-          { "obj_kv": [{ "key": "desc", "value": "需求标题：UI问题解决" }] },
-          { "obj_kv": [{ "key": "desc", "value": "当前状态\"体验中\"点击下列动作直接扭转状态到：" }] },
+          { "obj_kv": [{ "key": "desc", "value": "Requirement title: UI issue resolution" }] },
+          { "obj_kv": [{ "key": "desc", "value": "Current status \"In trial\" Click the action below to change the status directly to:" }] },
           {
             "obj_kv": [
-              { "key": "desc", "value": "已评审" },
+              { "key": "desc", "value": "Reviewed" },
               { "key": "link", "value": "https://qun.qq.com" }
             ]
           },
           {
             "obj_kv": [
-              { "key": "desc", "value": "已排期" },
+              { "key": "desc", "value": "Scheduled" },
               { "key": "link", "value": "https://qun.qq.com" }
             ]
           },
           {
             "obj_kv": [
-              { "key": "desc", "value": "开发中" },
+              { "key": "desc", "value": "In development" },
               { "key": "link", "value": "https://qun.qq.com" }
             ]
           },
           {
             "obj_kv": [
-              { "key": "desc", "value": "增量测试中" },
+              { "key": "desc", "value": "In incremental testing" },
               { "key": "link", "value": "https://qun.qq.com" }
             ]
           },
-          { "obj_kv": [{ "key": "desc", "value": "请关注" }] }
+          { "obj_kv": [{ "key": "desc", "value": "Please follow up" }] }
         ]
       }
     ]
@@ -8960,13 +8960,13 @@ string
 }
 ```
 
-## 模板 24 — 文本+缩略图
+## Template 24 — Text + Thumbnail
 
 ![24](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/24.4656049a.png)
 
-模板 id = 24。
+Template ID = 24.
 
-### 模板格式
+### Template Format
 
 ```
 {
@@ -8974,7 +8974,7 @@ string
   "view": "albumAddPic",
   "ver": "0.0.0.1",
   "desc": "#DESC#",
-  "prompt": "[QQ小程序]#PROMPT#",
+  "prompt": "[QQ Mini Program]#PROMPT#",
   "meta": {
     "detail": {
       "title": "#TITLE#",
@@ -8987,57 +8987,57 @@ string
 }
 ```
 
-### 字段说明
+### Field Description
 
-变量
+Variable
 
-类型
+Type
 
-描述
+Description
 
 #DESC#
 
 string
 
-描述
+Description
 
 #PROMPT#
 
 string
 
-提示文本
+Prompt text
 
 #TITLE#
 
 string
 
-标题
+Title
 
 #METADESC#
 
 string
 
-详情描述
+Detail description
 
 #IMG#
 
 string
 
-图片链接
+Image link
 
 #LINK#
 
 string
 
-跳转链接
+Redirect link
 
 #SUBTITLE#
 
 string
 
-来源
+Source
 
-### 请求示例
+### Request Example
 
 ```
 {
@@ -9045,24 +9045,24 @@ string
     "template_id": 24,
     "kv": [
       { "key": "#DESC#", "value": "..." },
-      { "key": "#PROMPT#", "value": "通知信息" },
-      { "key": "#TITLE#", "value": "标题" },
-      { "key": "#METADESC#", "value": "Meta描述" },
+      { "key": "#PROMPT#", "value": "Notification" },
+      { "key": "#TITLE#", "value": "Title" },
+      { "key": "#METADESC#", "value": "Meta description" },
       { "key": "#IMG#", "value": "https://pub.idqqimg.com/pc/misc/files/20190820/2f4e70ae3355ece23d161cf5334d4fc1jzjfmtep.png" },
       { "key": "#LINK#", "value": "https://qq.com" },
-      { "key": "#SUBTITLE#", "value": "子标题" }
+      { "key": "#SUBTITLE#", "value": "Subtitle" }
     ]
   }
 }
 ```
 
-## 模板 37 — 大图
+## Template 37 — Large Image
 
 ![37](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/37.2955062b.png)
 
-模板 id = 37。
+Template ID = 37.
 
-### 模板格式
+### Template Format
 
 ```
 {
@@ -9081,54 +9081,54 @@ string
 }
 ```
 
-### 字段说明
+### Field Description
 
-变量
+Variable
 
-类型
+Type
 
-描述
+Description
 
 #PROMPT#
 
 string
 
-提示消息
+Prompt message
 
 #METATITLE#
 
 string
 
-标题
+Title
 
 #METASUBTITLE#
 
 string
 
-子标题
+Subtitle
 
 #METACOVER#
 
 string
 
-大图，尺寸 975×540
+Large image, size 975×540
 
 #METAURL#
 
 string
 
-跳转链接
+Redirect link
 
-### 请求示例
+### Request Example
 
 ```
 {
   "ark": {
     "template_id": 37,
     "kv": [
-      { "key": "#PROMPT#", "value": "通知提醒" },
-      { "key": "#METATITLE#", "value": "标题" },
-      { "key": "#METASUBTITLE#", "value": "子标题" },
+      { "key": "#PROMPT#", "value": "Notification alert" },
+      { "key": "#METATITLE#", "value": "Title" },
+      { "key": "#METASUBTITLE#", "value": "Subtitle" },
       { "key": "#METACOVER#", "value": "https://vfiles.gtimg.cn/vupload/20211029/bf0ed01635493790634.jpg" },
       { "key": "#METAURL#", "value": "https://qq.com" }
     ]
@@ -9136,23 +9136,21 @@ string
 }
 ```
 
-### Embed 消息
+### Embed Message
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/type/embed.html
 
-# Embed 消息
+# Embed Message
 
-**单聊**
+**Direct Chat**
 
-**群聊**
+**Group Chat**
 
-**文字子频道**
+**Text Sub-channel**
 
-**频道私信**
+**Channel Direct Message**
 
-机器人接收
-
-\-
+Bot receives
 
 \-
 
@@ -9160,21 +9158,23 @@ string
 
 \-
 
-机器人发送
+\-
 
-不支持
+Bot sends
 
-不支持
+Not supported
 
-支持
+Not supported
 
-支持
+Supported
 
-## 样式
+Supported
+
+## Style
 
 ![embed](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/message-embed.18d8bc6d.jpg)
 
-## 数据结构与协议
+## Data Structures and Protocols
 
 ### Content-Type
 
@@ -9182,59 +9182,59 @@ string
 application/json
 ```
 
-### 参数
+### Parameters
 
-字段名
+Field Name
 
-类型
+Type
 
-描述
+Description
 
 embed
 
 [MessageEmbed](/wiki/develop/api-v2/server-inter/message/template/model.html#messageembed)
 
-embed 消息详情
+Embed message details
 
--   其中 embed.thumbnail 为选填，没有缩略图的可以不填。
--   embed.fields.name 为文本。
+-   embed.thumbnail is optional; leave it empty if there is no thumbnail.
+-   embed.fields.name is text.
 
-### 返回
+### Response
 
-返回[Message](/wiki/develop/api-v2/server-inter/message/template/model.html#message)对象。
+Returns a [Message](/wiki/develop/api-v2/server-inter/message/template/model.html#message) object.
 
-### 错误码
+### Error Codes
 
-详见[错误码](/wiki/develop/api-v2/openapi/error/error.html)。
+See [error codes](/wiki/develop/api-v2/openapi/error/error.html) for details.
 
-### 示例
+### Example
 
-请求数据包
+Request payload
 
 ```
 {
   "embed": {
-    "title": "标题",
-    "prompt": "消息通知",
+    "title": "Title",
+    "prompt": "Message notification",
     "thumbnail": {
       "url": "xxxxxx"
     },
     "fields": [
       {
-        "name": "当前等级：黄金"
+        "name": "Current level: Gold"
       },
       {
-        "name": "之前等级：白银"
+        "name": "Previous level: Silver"
       },
       {
-        "name": "😁继续努力"
+        "name": "😁Keep it up"
       }
     ]
   }
 }
 ```
 
-返回包
+Response payload
 
 ```
 {
@@ -9252,7 +9252,7 @@ embed 消息详情
   },
   "embeds": [
     {
-      "title": "标题",
+      "title": "Title",
       "prompt": "xxxx",
       "description": "",
       "thumbnail": {
@@ -9260,13 +9260,13 @@ embed 消息详情
       },
       "fields": [
         {
-          "name": "当前等级：黄金"
+          "name": "Current level: Gold"
         },
         {
-          "name": "之前等级：白银"
+          "name": "Previous level: Silver"
         },
         {
-          "name": "😁继续努力"
+          "name": "😁Keep it up"
         }
       ]
     }
@@ -9277,40 +9277,40 @@ embed 消息详情
 }
 ```
 
-### 消息交互概述
+### Message Interaction Overview
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/trans/overview.html
 
-# 消息交互概述
+# Message Interaction Overview
 
-说明
+Description
 
-在各种消息场景内，开发者可在消息体上实现自定义一些与用户的交互方式。
+In various message scenarios, developers can implement custom interaction methods with users on the message body.
 
-消息按钮
+Message button
 
-文字链
+Text link
 
-![消息按钮](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/message-btn.94002609.jpg)
+![Message button](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/message-btn.94002609.jpg)
 
-![文字链](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/text-chain.b2f9b0fb.jpg)
+![Text link](https://qq-ai.cdn-go.cn/web/bot-docs/-/v1.36.0/assets/img/text-chain.b2f9b0fb.jpg)
 
-## 消息按钮互动流程
+## Message Button Interaction Flow
 
-消息按钮互动的整体流程如下：
+The overall flow of message button interaction is as follows:
 
-1.  **发送带按钮的消息**：机器人下发包含 `keyboard` 字段的消息，用户端看到消息底部挂载的按钮
-2.  **用户点击按钮**：平台推送 [`INTERACTION_CREATE`](/wiki/develop/api-v2/autogen/event/interaction_create.html) 事件给机器人
-3.  **机器人响应互动**：机器人调用 [PUT /interactions/{interaction\_id}](/wiki/develop/api-v2/autogen/api/interactions_interaction_id.put.html) 回复用户
+1.  **Send a message with buttons**: The bot sends a message containing the `keyboard` field, and the user sees the buttons attached at the bottom of the message
+2.  **The user clicks a button**: The platform pushes the [`INTERACTION_CREATE`](/wiki/develop/api-v2/autogen/event/interaction_create.html) event to the bot
+3.  **The bot responds to the interaction**: The bot calls [PUT /interactions/{interaction\_id}](/wiki/develop/api-v2/autogen/api/interactions_interaction_id.put.html) to reply to the user
 
-### 发送消息时携带 keyboard
+### Carrying a Keyboard When Sending a Message
 
-在消息的 `keyboard` 字段中传入按钮配置，支持模板按钮和自定义按钮两种模式。
+Pass the button configuration in the message's `keyboard` field; both template buttons and custom buttons are supported.
 
--   发送单聊消息：[keyboard 字段参考](/wiki/develop/api-v2/autogen/api/v2_users_user_openid_messages.post.html#schema-keyboard)
--   发送群聊消息：[keyboard 字段参考](/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages.post.html#schema-keyboard)
+-   Sending a direct chat message: [keyboard field reference](/wiki/develop/api-v2/autogen/api/v2_users_user_openid_messages.post.html#schema-keyboard)
+-   Sending a group chat message: [keyboard field reference](/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages.post.html#schema-keyboard)
 
-**按钮数据示例**（一处配置缓存一批按钮，动态提取生成行为按钮）：
+**Button data example** (configure and cache a batch of buttons in one place, then dynamically extract them to generate action buttons):
 
 ```
 {
@@ -9323,8 +9323,8 @@ embed 消息详情
             {
               "id": "button_1",
               "render_data": {
-                "label": "确认",
-                "visited_label": "已确认",
+                "label": "Confirm",
+                "visited_label": "Confirmed",
                 "style": 1
               },
               "action": {
@@ -9349,106 +9349,106 @@ embed 消息详情
 }
 ```
 
-### 响应互动
+### Responding to Interactions
 
-收到 `INTERACTION_CREATE` 事件后，需要在规定时间内调用 [PUT /interactions/{interaction\_id}](/wiki/develop/api-v2/autogen/api/interactions_interaction_id.put.html) 响应，否则会超时。
+After receiving the `INTERACTION_CREATE` event, you must call [PUT /interactions/{interaction\_id}](/wiki/develop/api-v2/autogen/api/interactions_interaction_id.put.html) to respond within the specified time; otherwise it will time out.
 
-**响应超时时间**：指令回调类场景为 3 秒。建议收到事件后尽快响应，避免因超时导致用户侧无反馈。
+**Response timeout**: 3 seconds for command callback scenarios. Respond as soon as possible after receiving the event to avoid no feedback on the user side due to a timeout.
 
-### 文本交互
+### Text Interaction
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/trans/text-chain.html
 
-# 文本交互
+# Text Interaction
 
-说明
+Description
 
-QQBot 提供文本消息的交互能力，当开发者使用指定的格式发送消息，用户即可在消息体上进行点击交互操作，例如@某人，跳转链接等。
+QQBot provides interactive capabilities for text messages. When developers send messages in the specified format, users can perform click interactions on the message body, such as mentioning someone or following a link.
 
-## 使用 @ 能力
+## Using @ Mentions
 
-说明
+Description
 
-群聊&文字子频道，支持含有文本文字的消息类型，如：文本消息、图文消息、markdown 消息。
+Group chats & text sub-channels support message types that contain text, such as text messages, image-text messages, and Markdown messages.
 
-1.  @某人｜群聊、文字子频道可用
+1.  @Mention a user | Available in group chats and text sub-channels
 
-嵌入文本使用格式：`<qqbot-at-user id="" />` 协议：`<@userid>`即将弃用，请使用上述最新格式。
+Embedded text format: `<qqbot-at-user id="" />`. Protocol: `<@userid>` will be deprecated; please use the latest format above.
 
-客户端展示为： @用户 标签
+Displayed on the client as: @User label
 
-2.  @全部成员｜仅在文字子频道可用
+2.  @All members | Available only in text sub-channels
 
-嵌入文本使用格式：`<qqbot-at-everyone />` 协议：`@everyone`即将弃用，请使用上述最新格式。
+Embedded text format: `<qqbot-at-everyone />`. Protocol: `@everyone` will be deprecated; please use the latest format above.
 
-客户端展示为： @全部成员 标签，需要机器人拥有发送 @全部成员 消息的权限，
+Displayed on the client as: @All members label. The bot must have permission to send @All members messages,
 
-## 指令操作
+## Command Operations
 
-目前仅在 markdown 支持。
+Currently supported only in Markdown.
 
-**1\. 回车指令格式（点击后，文本直接发送）**
+**1\. Enter command format (text is sent directly after clicking)**
 
-嵌入文本使用格式：
+Embedded text format:
 
 `<qqbot-cmd-enter text="xxx" />`
 
-客户端展示为： /回车指令 用户可点击的标签，群聊和文字子频道不支持该能力。
+Displayed on the client as: /Enter command clickable label. Group chats and text sub-channels do not support this capability.
 
--   `text` 用户点击后直接发送的文本，参数必填，最大限制 100 字符，传值时需要 urlencode。
+-   `text` The text sent directly after the user clicks; required; maximum 100 characters; URL-encode the value when passing it.
 
-**2\. 参数指令格式（点击后，文本插入输入框，用户自行编辑发送）**
+**2\. Parameter command format (after clicking, the text is inserted into the input box for the user to edit and send)**
 
-嵌入文本使用格式：
+Embedded text format:
 
 `<qqbot-cmd-input text="xxx" show="xxx" reference="false" />`
 
-客户端展示为： /参数指令 用户可点击的标签
+Displayed on the client as: /Parameter command clickable label
 
--   `text` 用户点击后插入输入框的文本，参数必填，最大限制 100 字符，传值时需要 urlencode。
--   `show` 用户在消息内看到的文本，参数选填，默认取 text 值，最大限制 100 字符，传值时需要 urlencode。
--   `reference` 插入输入框时是否带消息原文回复引用，参数选填，默认为 `false`，填入 `true` 时则带引用回复到输入框中。
+-   `text` The text inserted into the input box after the user clicks; required; maximum 100 characters; URL-encode the value when passing it.
+-   `show` The text the user sees in the message; optional; defaults to the text value; maximum 100 characters; URL-encode the value when passing it.
+-   `reference` Whether to include a quote reply to the original message when inserting into the input box; optional; defaults to `false`; when set to `true`, the inserted text includes a quote reply.
 
-## 跳转子频道
+## Jumping to a Sub-channel
 
-仅频道可用。
+Available only in channels.
 
-嵌入文本使用格式：`<#channel_id>`
+Embedded text format: `<#channel_id>`
 
-客户端展示为： #XXX文字子频道 标签，点击可以跳转至子频道，仅支持当前频道内的子频道。
+Displayed on the client as: #XXX text sub-channel label; clicking it jumps to the sub-channel. Only sub-channels within the current channel are supported.
 
-## 表情
+## Emoji
 
-仅频道可用，解析为系统表情。 具体表情id参考 [Emoji 列表](/wiki/develop/api-v2/openapi/emoji/model.html#Emoji 列表)。
+Available only in channels; parsed as a system emoji. For specific emoji IDs, see [Emoji List](/wiki/develop/api-v2/openapi/emoji/model.html#Emoji List).
 
-嵌入文本使用格式：`<emoji:id>`
+Embedded text format: `<emoji:id>`
 
--   仅支持 `type = 1` 的系统表情。
--   `type = 2` 的 emoji 表情直接按字符串填写即可。
+-   Only system emojis with `type = 1` are supported.
+-   Emoji with `type = 2` can be filled in directly as a string.
 
-### 消息按钮
+### Message Button
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/trans/msg-btn.html
 
-# 消息按钮
+# Message Button
 
-说明
+Description
 
-在 markdown 消息的基础上，支持消息最底部挂载按钮。
+In addition to Markdown messages, buttons can be attached at the bottom of a message.
 
-## 发送方式
+## Sending Methods
 
-【申请使用】按钮模版，按钮模版暂时不支持使用变量填充。
+[Apply for use] Button template. Button templates do not currently support variable substitution.
 
 ```
 {
     "keyboard": {
-        "id": "123" // 申请模版后获得
+        "id": "123" // obtained after applying for the template
     }
 }
 ```
 
-【内邀开通】自定义按钮
+[Internal invitation activation] Custom button
 
 ```
 {
@@ -9460,149 +9460,149 @@ QQBot 提供文本消息的交互能力，当开发者使用指定的格式发�
                 {"buttons": [{button}, {button}, {button}, {button}, {button}]},
                 {"buttons": [{button}, {button}, {button}, {button}, {button}]},
                 {"buttons": [{button}, {button}, {button}, {button}, {button}]},
-            ] // 自定义按钮内容，最多可以发送5行按钮，每一行最多5个按钮。
+            ] // custom button content; up to 5 rows of buttons, with up to 5 buttons per row.
         }
     }
 }
 ```
 
-## 数据结构与协议
+## Data Structures and Protocols
 
-消息发送接口 keyboard 字段值是一个 Json Object {}，rows 数组的每个元素表示每一行按钮
+The value of the keyboard field in the message sending API is a JSON object {}. Each element in the rows array represents a row of buttons.
 
-每个 button 是一个 Json Object，具体字段如下：
+Each button is a JSON object with the following fields:
 
-**属性**
+**Attribute**
 
-**类型**
+**Type**
 
-**必填**
+**Required**
 
-**说明**
+**Description**
 
 id
 
 string
 
-否
+No
 
-按钮ID：在一个keyboard消息内设置唯一
+Button ID: must be unique within a keyboard message
 
 render\_data.label
 
 string
 
-是
+Yes
 
-按钮上的文字
+Text on the button
 
 render\_data.visited\_label
 
 string
 
-是
+Yes
 
-点击后按钮的上文字
+Text on the button after it is clicked
 
 render\_data.style
 
 int
 
-是
+Yes
 
-按钮样式：0 灰色线框，1 蓝色线框
+Button style: 0 gray outline, 1 blue outline
 
 action.type
 
 int
 
-是
+Yes
 
-设置 0 跳转按钮：http 或 小程序 客户端识别 scheme，设置 1 回调按钮：回调后台接口, data 传给后台，设置 2 指令按钮：自动在输入框插入 @bot data
+Set to 0 for a link button: http or mini program scheme recognized by the client; set to 1 for a callback button: calls the backend API and passes data to the backend; set to 2 for a command button: automatically inserts @bot data into the input box
 
 action.permission.type
 
 int
 
-是
+Yes
 
-0 指定用户可操作，1 仅管理者可操作，2 所有人可操作，3 指定身份组可操作（仅频道可用）
+0: only specified users can operate; 1: only administrators can operate; 2: everyone can operate; 3: specified identity groups can operate (channels only)
 
 action.permission.specify\_user\_ids
 
 array
 
-否
+No
 
-有权限的用户 id 的列表
+List of user IDs with permission
 
 action.permission.specify\_role\_ids
 
 array
 
-否
+No
 
-有权限的身份组 id 的列表（仅频道可用）
+List of identity group IDs with permission (channel only)
 
 action.data
 
 string
 
-是
+Yes
 
-操作相关的数据
+Operation-related data
 
 action.reply
 
 bool
 
-否
+No
 
-指令按钮可用，指令是否带引用回复本消息，默认 false。支持版本 8983
+Available for command buttons. Whether the command includes a quoted reply to this message. Defaults to false. Supported since version 8983
 
 action.enter
 
 bool
 
-否
+No
 
-指令按钮可用，点击按钮后直接自动发送 data，默认 false。支持版本 8983
+Available for command buttons; clicking the button automatically sends data directly. Defaults to false. Supported since version 8983.
 
 action.anchor
 
 int
 
-否
+No
 
-本字段仅在指令按钮下有效，设置后后会忽略 action.enter 配置。  
-设置为 1 时 ，点击按钮自动唤起启手Q选图器，其他值暂无效果。  
-（仅支持手机端版本 8983+ 的单聊场景，桌面端不支持）
+This field is valid only for command buttons. Once set, the action.enter configuration is ignored.  
+When set to 1, clicking the button automatically opens the Mobile QQ image picker; other values currently have no effect.  
+(Supported only in the direct chat scenario on mobile version 8983+; not supported on desktop)
 
 action.click\_limit
 
 int
 
-否
+No
 
-【已弃用】可操作点击的次数，默认不限
+[Deprecated] Number of times the button can be clicked. Unlimited by default.
 
 action.at\_bot\_show\_channel\_list
 
 bool
 
-否
+No
 
-【已弃用】指令按钮可用，弹出子频道选择器，默认 false
+[Deprecated] Available for command buttons; opens the sub-channel selector. Defaults to false.
 
 action.unsupport\_tips
 
 string
 
-是
+Yes
 
-客户端不支持本action的时候，弹出的toast文案
+Toast text displayed when the client does not support this action
 
-示例
+Example
 
 ```
 {
@@ -9612,8 +9612,8 @@ string
         {
           "id": "1",
           "render_data": {
-            "label": "⬅️上一页",
-            "visited_label": "⬅️上一页"
+            "label": "⬅️Previous Page",
+            "visited_label": "⬅️Previous Page"
           },
           "action": {
             "type": 1,
@@ -9626,7 +9626,7 @@ string
               ]
             },
             "click_limit": 10,
-            "unsupport_tips": "兼容文本",
+            "unsupport_tips": "Compatibility text",
             "data": "data",
             "at_bot_show_channel_list": true
           }
@@ -9634,8 +9634,8 @@ string
         {
           "id": "2",
           "render_data": {
-            "label": "➡️下一页",
-            "visited_label": "➡️下一页"
+            "label": "➡️Next Page",
+            "visited_label": "➡️Next Page"
           },
           "action": {
             "type": 1,
@@ -9648,7 +9648,7 @@ string
               ]
             },
             "click_limit": 10,
-            "unsupport_tips": "兼容文本",
+            "unsupport_tips": "Compatibility text",
             "data": "data",
             "at_bot_show_channel_list": true
           }
@@ -9660,8 +9660,8 @@ string
         {
           "id": "3",
           "render_data": {
-            "label": "📅 打卡（5）",
-            "visited_label": "📅 打卡（5）"
+            "label": "📅 Check-in (5)",
+            "visited_label": "📅 Check-in (5)"
           },
           "action": {
             "type": 1,
@@ -9674,7 +9674,7 @@ string
               ]
             },
             "click_limit": 10,
-            "unsupport_tips": "兼容文本",
+            "unsupport_tips": "Compatibility text",
             "data": "data",
             "at_bot_show_channel_list": true
           }
@@ -9685,32 +9685,32 @@ string
 }
 ```
 
-## 相关事件与接口
+## Related Events and APIs
 
-用户点击回调按钮会触发 `INTERACTION_CREATE` 事件，机器人收到事件后需调用 `PUT /interactions/{interaction_id}` 进行回应，否则客户端会一直处于 loading 状态直到超时。
+When a user clicks a callback button, an `INTERACTION_CREATE` event is triggered. After receiving the event, the bot must call `PUT /interactions/{interaction_id}` to respond; otherwise, the client remains in a loading state until it times out.
 
--   事件详情：[INTERACTION\_CREATE](/wiki/develop/api-v2/autogen/event/interaction_create.html)
--   回应接口：[PUT /interactions/{interaction\_id}](/wiki/develop/api-v2/autogen/api/interactions_interaction_id.put.html)
+-   Event details: [INTERACTION\_CREATE](/wiki/develop/api-v2/autogen/event/interaction_create.html)
+-   Response API: [PUT /interactions/{interaction\_id}](/wiki/develop/api-v2/autogen/api/interactions_interaction_id.put.html)
 
-## 6. 事件
+## 6. Events
 
-### 单聊消息事件（C2C_MESSAGE_CREATE）
+### Direct Chat Message Event (C2C_MESSAGE_CREATE)
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/c2c_message_create.html
 
-# 单聊消息事件
+# Direct Chat Message Event
 
-用户给机器人发送单聊消息时触发。 为确保消息可达，相同 msg\_id 可能重复推送，开发者需结合 msg\_seq 做去重。
+Triggered when a user sends a direct chat message to the bot. To ensure message delivery, the same msg\_id may be pushed repeatedly; developers must deduplicate using msg\_seq.
 
-为确保消息可达，相同 msg\_id 可能重复推送，需结合 message\_scene.ext 中的 msg\_idx 做去重。message\_type 决定消息结构：0=纯文本，3=ARK卡片（ark\_data 有值），103=引用消息（msg\_elements 有值，message\_scene.ext 含 ref\_msg\_idx）。
+To ensure message delivery, the same msg\_id may be pushed repeatedly; deduplicate using msg\_idx in message\_scene.ext. message\_type determines the message structure: 0=plain text, 3=ARK card (ark\_data has a value), 103=quoted message (msg\_elements has a value; message\_scene.ext contains ref\_msg\_idx).
 
-## 事件
+## Event
 
-字段
+Field
 
-值
+Value
 
-事件名
+Event name
 
 C2C\_MESSAGE\_CREATE
 
@@ -9718,285 +9718,285 @@ Intent
 
 GROUP\_AND\_C2C\_EVENT (1<<25)
 
-### 事件体
+### Event Body
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 id
 
 string
 
-消息 ID，可用于被动回复和撤回
+Message ID, which can be used for passive replies and recall
 
 author
 
 [User](#schema-user)
 
-发送者（user\_openid 有值）
+Sender (user\_openid has a value)
 
 content
 
 string
 
-消息文本内容
+Message text content
 
 timestamp
 
 string
 
-消息发送时间，RFC3339 格式
+Message send time, RFC3339 format
 
 message\_type
 
 integer
 
-消息内容类型: 0=普通文本, 3=结构化卡片, 101=并行消息, 102=聊天记录, 103=引用消息
+Message content type: 0=plain text, 3=structured card, 101=parallel message, 102=chat history, 103=quoted message
 
 message\_scene
 
 [MessageScene](#schema-messagescene)
 
-消息场景上下文（含消息索引、鉴权令牌等）
+Message scene context (including message index, authentication token, etc.)
 
 attachments
 
 \[\][MessageAttachment](#schema-messageattachment)
 
-消息附件（图片、文件、语音等）
+Message attachments (images, files, voice, etc.)
 
 ark\_data
 
 [ARKData](#schema-arkdata)
 
-结构化卡片消息数据（message\_type=3 时有值）
+Structured card message data (has a value when message\_type=3)
 
 msg\_elements
 
 \[\][MsgElement](#schema-msgelement)
 
-消息元素列表（message\_type=103 引用消息时包含被引用内容）
+List of message elements (contains the quoted content when message\_type=103 is a quoted message)
 
 **User**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 id
 
 string
 
-用户唯一标识（OpenID 格式）
+Unique user identifier (OpenID format)
 
 username
 
 string
 
-用户昵称
+User nickname
 
 bot
 
 boolean
 
-是否为机器人
+Whether it is a bot
 
 union\_openid
 
 string
 
-跨应用统一用户 OpenID（可能为空）
+Cross-application unified user OpenID (may be empty)
 
 union\_user\_account
 
 string
 
-跨应用统一用户账号（可能为空）
+Cross-application unified user account (may be empty)
 
 user\_openid
 
 string
 
-用户 OpenID（单聊场景使用）
+User OpenID (used in direct chat scenarios)
 
 member\_openid
 
 string
 
-群成员 OpenID（群聊场景使用）
+Group member OpenID (used in group chat scenarios)
 
 member\_role
 
 string
 
-群内角色。member=普通成员, admin=管理员, owner=群主
+Role in the group. member=regular member, admin=administrator, owner=group owner
 
 **MessageScene**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 source
 
 string
 
-场景来源。default=默认聊天窗口
+Scene source. default=default chat window
 
 ext
 
 \[\]string
 
-扩展数据列表，key=value 格式: msg\_idx=消息索引, 用于引用场景 ref\_msg\_idx=引用的消息索引 auth\_token=鉴权令牌
+List of extended data in key=value format: msg\_idx=message index, used in quoted scenarios; ref\_msg\_idx=index of the quoted message; auth\_token=authentication token
 
 **MessageAttachment**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 url
 
 string
 
-附件下载 URL
+Attachment download URL
 
 filename
 
 string
 
-文件名
+File name
 
 width
 
 integer
 
-图片宽度（像素），非图片附件无此字段
+Image width (pixels); this field is absent for non-image attachments
 
 height
 
 integer
 
-图片高度（像素），非图片附件无此字段
+Image height (pixels); this field is absent for non-image attachments
 
 size
 
 integer
 
-文件大小（字节）
+File size (bytes)
 
 content\_type
 
 string
 
-附件内容类型（MIME 类型）: voice=语音消息 image/jpeg=JPEG 图片 image/png=PNG 图片 image/gif=GIF 图片 video/mp4=MP4 视频 file=群文件
+Attachment content type (MIME type): voice=voice message, image/jpeg=JPEG image, image/png=PNG image, image/gif=GIF image, video/mp4=MP4 video, file=group file
 
 voice\_wav\_url
 
 string
 
-语音消息 SILK 等转换后的 WAV 文件 URL
+URL of the WAV file converted from SILK and other formats for voice messages
 
 asr\_refer\_text
 
 string
 
-语音消息 ASR 参考结果
+ASR reference result for voice messages
 
 **ARKData**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 prompt
 
 string
 
-卡片消息中的用户操作提示文本
+User action prompt text in card messages
 
 ark\_type
 
 string
 
-卡片消息类型标识: tuwen = 图文 H5（如快手分享链接） feed = 图文卡片（群相册、频道帖子、分享卡片） miniapp = 小程序（微信小程序、QQ 小程序、哔哩哔哩等） map = 位置卡片 contact\_card = 好友名片 video\_share = 视频分享 music\_together = 一起听歌 picture = 图片
+Card message type identifier: tuwen = image-text H5 (e.g., Kuaishou share link) feed = image-text card (group album, channel post, share card) miniapp = mini program (WeChat mini program, QQ mini program, Bilibili, etc.) map = location card contact\_card = friend contact card video\_share = video share music\_together = listen to music together picture = image
 
 ark\_name
 
 string
 
-卡片消息类型的中文名称，如"图文 H5"、"小程序"、"图文卡片"
+Localized name of the card message type, such as "Image-Text H5", "Mini Program", and "Image-Text Card"
 
 fields
 
 object
 
-卡片消息字段，常见键名: tag/tags=来源标签, title=标题, desc=描述, jump\_url=跳转链接, preview=预览图, source=来源名称, source\_logo=来源图标, tag\_icon=标签图标, nickname=昵称, avatar=头像, address=地址
+Card message fields; common keys: tag/tags=source tag, title=title, desc=description, jump\_url=jump link, preview=preview image, source=source name, source\_logo=source icon, tag\_icon=tag icon, nickname=nickname, avatar=avatar, address=address
 
 **MsgElement**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 msg\_idx
 
 string
 
-消息元素在列表中的引用消息索引
+Reference message index of the message element in the list
 
 author
 
 [User](#schema-user)
 
-该元素对应的消息发送者
+Message sender corresponding to this element
 
 message\_type
 
 integer
 
-消息内容类型: 0=普通文本, 3=结构化卡片, 101=并行消息, 102=聊天记录, 103=引用消息
+Message content type: 0=plain text, 3=structured card, 101=parallel message, 102=chat history, 103=quoted message
 
 content
 
 string
 
-消息正文内容
+Message body content
 
 attachments
 
 \[\][MessageAttachment](#schema-messageattachment)
 
-该元素携带的附件
+Attachments carried by this element
 
 ark\_data
 
 [ARKData](#schema-arkdata)
 
-结构化卡片消息数据（message\_type=3 时有值）
+Structured card message data (has a value when message\_type=3)
 
 msg\_elements
 
 \[\][MsgElement](#schema-msgelement)
 
-嵌套消息元素列表（递归结构）
+Nested message element list (recursive structure)
 
-### 事件示例
+### Event Example
 
-**示例1**
+**Example 1**
 
 ```
 {
@@ -10008,7 +10008,7 @@ msg\_elements
     "username": "",
     "bot": false
   },
-  "content": "你好，今天有什么推荐的活动吗？",
+  "content": "Hello, any recommended activities today?",
   "message_type": 0,
   "message_scene": {
     "source": "default",
@@ -10020,7 +10020,7 @@ msg\_elements
 }
 ```
 
-**示例2**
+**Example 2**
 
 ```
 {
@@ -10032,16 +10032,16 @@ msg\_elements
     "username": "",
     "bot": false
   },
-  "content": "[卡片消息] 小程序\n摘要: [每日打卡]快来完成今日学习打卡",
+  "content": "[Card message] Mini program\nSummary: [Daily check-in] Complete today's study check-in now",
   "message_type": 3,
   "ark_data": {
     "ark_type": "miniapp",
-    "ark_name": "小程序",
-    "prompt": "[每日打卡]快来完成今日学习打卡",
+    "ark_name": "Mini Program",
+    "prompt": "[Daily check-in] Complete today's study check-in now",
     "fields": {
-      "title": "快来完成今日学习打卡",
-      "source": "学习助手",
-      "tag": "微信小程序",
+      "title": "Complete today's study check-in now",
+      "source": "Study Assistant",
+      "tag": "WeChat Mini Program",
       "preview": "https://pubminishare-30161.picsz.qpic.cn/preview_a1b2c3d4",
       "source_logo": "https://miniapp.gtimg.cn/generated-icon/app_a1b2c3d4.png",
       "tag_icon": "https://miniapp.gtimg.cn/public/miniwx.png"
@@ -10057,7 +10057,7 @@ msg\_elements
 }
 ```
 
-**示例3**
+**Example 3**
 
 ```
 {
@@ -10069,13 +10069,13 @@ msg\_elements
     "username": "",
     "bot": false
   },
-  "content": "这个建议很有帮助，谢谢你！",
+  "content": "That suggestion is very helpful, thank you!",
   "message_type": 103,
   "msg_elements": [
     {
       "msg_idx": "REFIDX_aaaaaaaaaaaaaaa==",
       "message_type": 103,
-      "content": "每天坚持阅读半小时，一个月后你会发现自己的变化"
+      "content": "Keep reading for half an hour every day, and you'll notice a change in yourself after a month"
     }
   ],
   "message_scene": {
@@ -10089,21 +10089,21 @@ msg\_elements
 }
 ```
 
-### 群@机器人消息（GROUP_AT_MESSAGE_CREATE）
+### Group @Bot Message (GROUP_AT_MESSAGE_CREATE)
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/group_at_message_create.html
 
-# 群@机器人消息
+# Group @Bot Message
 
-用户在群里@机器人发送消息时触发。这是机器人最常接收的事件。 content 字段已自动去除@机器人的前缀。 为确保消息可达，相同 msg\_id 可能重复推送，开发者需结合 msg\_seq 做去重。
+Triggered when a user sends a message mentioning the bot in a group. This is the event most commonly received by bots. The @bot prefix is automatically removed from the content field. To ensure message delivery, the same msg\_id may be pushed repeatedly; developers must deduplicate using msg\_seq.
 
-## 事件
+## Event
 
-字段
+Field
 
-值
+Value
 
-事件名
+Event name
 
 GROUP\_AT\_MESSAGE\_CREATE
 
@@ -10111,297 +10111,297 @@ Intent
 
 GROUP\_AND\_C2C\_EVENT (1<<25)
 
-### 事件体
+### Event Body
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 id
 
 string
 
-消息 ID，可用于被动回复和撤回
+Message ID, which can be used for passive replies and recall
 
 author
 
 [User](#schema-user)
 
-发送者（member\_openid 有值）
+Sender (member\_openid has a value)
 
 content
 
 string
 
-消息文本内容（已去除@机器人的前缀）
+Message text content (the @bot prefix has been removed)
 
 group\_openid
 
 string
 
-群 OpenID
+Group OpenID
 
 timestamp
 
 string
 
-消息发送时间，RFC3339 格式
+Message send time, RFC3339 format
 
 message\_type
 
 integer
 
-消息内容类型（同 C2C\_MESSAGE\_CREATE）
+Message content type (same as C2C\_MESSAGE\_CREATE)
 
 message\_scene
 
 [MessageScene](#schema-messagescene)
 
-消息场景上下文
+Message scene context
 
 attachments
 
 \[\][MessageAttachment](#schema-messageattachment)
 
-消息附件
+Message attachments
 
 mentions
 
 \[\][User](#schema-user)
 
-消息中@的用户列表（不含@机器人自身）
+List of users mentioned in the message (excluding the bot itself)
 
 ark\_data
 
 [ARKData](#schema-arkdata)
 
-结构化卡片消息数据
+Structured card message data
 
 msg\_elements
 
 \[\][MsgElement](#schema-msgelement)
 
-消息元素列表
+Message element list
 
 **User**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 id
 
 string
 
-用户唯一标识（OpenID 格式）
+Unique user identifier (OpenID format)
 
 username
 
 string
 
-用户昵称
+User nickname
 
 bot
 
 boolean
 
-是否为机器人
+Whether it is a bot
 
 union\_openid
 
 string
 
-跨应用统一用户 OpenID（可能为空）
+Cross-application unified user OpenID (may be empty)
 
 union\_user\_account
 
 string
 
-跨应用统一用户账号（可能为空）
+Cross-application unified user account (may be empty)
 
 user\_openid
 
 string
 
-用户 OpenID（单聊场景使用）
+User OpenID (used in direct chat scenarios)
 
 member\_openid
 
 string
 
-群成员 OpenID（群聊场景使用）
+Group member OpenID (used in group chat scenarios)
 
 member\_role
 
 string
 
-群内角色。member=普通成员, admin=管理员, owner=群主
+Role in the group. member=regular member, admin=administrator, owner=group owner
 
 **MessageScene**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 source
 
 string
 
-场景来源。default=默认聊天窗口
+Scene source. default=default chat window
 
 ext
 
 \[\]string
 
-扩展数据列表，key=value 格式: msg\_idx=消息索引, 用于引用场景 ref\_msg\_idx=引用的消息索引 auth\_token=鉴权令牌
+List of extended data in key=value format: msg\_idx=message index, used in quoted scenarios; ref\_msg\_idx=index of the quoted message; auth\_token=authentication token
 
 **MessageAttachment**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 url
 
 string
 
-附件下载 URL
+Attachment download URL
 
 filename
 
 string
 
-文件名
+File name
 
 width
 
 integer
 
-图片宽度（像素），非图片附件无此字段
+Image width (pixels); this field is absent for non-image attachments
 
 height
 
 integer
 
-图片高度（像素），非图片附件无此字段
+Image height (pixels); this field is absent for non-image attachments
 
 size
 
 integer
 
-文件大小（字节）
+File size (bytes)
 
 content\_type
 
 string
 
-附件内容类型（MIME 类型）: voice=语音消息 image/jpeg=JPEG 图片 image/png=PNG 图片 image/gif=GIF 图片 video/mp4=MP4 视频 file=群文件
+Attachment content type (MIME type): voice=voice message, image/jpeg=JPEG image, image/png=PNG image, image/gif=GIF image, video/mp4=MP4 video, file=group file
 
 voice\_wav\_url
 
 string
 
-语音消息 SILK 等转换后的 WAV 文件 URL
+URL of the WAV file converted from SILK and other formats for voice messages
 
 asr\_refer\_text
 
 string
 
-语音消息 ASR 参考结果
+ASR reference result for voice messages
 
 **ARKData**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 prompt
 
 string
 
-卡片消息中的用户操作提示文本
+User action prompt text in card messages
 
 ark\_type
 
 string
 
-卡片消息类型标识: tuwen = 图文 H5（如快手分享链接） feed = 图文卡片（群相册、频道帖子、分享卡片） miniapp = 小程序（微信小程序、QQ 小程序、哔哩哔哩等） map = 位置卡片 contact\_card = 好友名片 video\_share = 视频分享 music\_together = 一起听歌 picture = 图片
+Card message type identifier: tuwen = image-text H5 (e.g., Kuaishou share link) feed = image-text card (group album, channel post, share card) miniapp = mini program (WeChat mini program, QQ mini program, Bilibili, etc.) map = location card contact\_card = friend contact card video\_share = video share music\_together = listen to music together picture = image
 
 ark\_name
 
 string
 
-卡片消息类型的中文名称，如"图文 H5"、"小程序"、"图文卡片"
+Localized name of the card message type, such as "Image-Text H5", "Mini Program", and "Image-Text Card"
 
 fields
 
 object
 
-卡片消息字段，常见键名: tag/tags=来源标签, title=标题, desc=描述, jump\_url=跳转链接, preview=预览图, source=来源名称, source\_logo=来源图标, tag\_icon=标签图标, nickname=昵称, avatar=头像, address=地址
+Card message fields; common keys: tag/tags=source tag, title=title, desc=description, jump\_url=jump link, preview=preview image, source=source name, source\_logo=source icon, tag\_icon=tag icon, nickname=nickname, avatar=avatar, address=address
 
 **MsgElement**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 msg\_idx
 
 string
 
-消息元素在列表中的引用消息索引
+Reference message index of the message element in the list
 
 author
 
 [User](#schema-user)
 
-该元素对应的消息发送者
+Message sender corresponding to this element
 
 message\_type
 
 integer
 
-消息内容类型: 0=普通文本, 3=结构化卡片, 101=并行消息, 102=聊天记录, 103=引用消息
+Message content type: 0=plain text, 3=structured card, 101=parallel message, 102=chat history, 103=quoted message
 
 content
 
 string
 
-消息正文内容
+Message body content
 
 attachments
 
 \[\][MessageAttachment](#schema-messageattachment)
 
-该元素携带的附件
+Attachments carried by this element
 
 ark\_data
 
 [ARKData](#schema-arkdata)
 
-结构化卡片消息数据（message\_type=3 时有值）
+Structured card message data (has a value when message\_type=3)
 
 msg\_elements
 
 \[\][MsgElement](#schema-msgelement)
 
-嵌套消息元素列表（递归结构）
+Nested message element list (recursive structure)
 
-### 事件示例
+### Event Example
 
-**示例1**
+**Example 1**
 
 ```
 {
@@ -10410,10 +10410,10 @@ msg\_elements
     "id": "A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4",
     "member_openid": "A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4",
     "member_role": "member",
-    "username": "小明",
+    "username": "Xiaoming",
     "bot": false
   },
-  "content": " /今日天气 ",
+  "content": " /today's weather ",
   "group_openid": "B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5",
   "message_type": 0,
   "timestamp": "2026-07-21T10:00:00+08:00",
@@ -10427,7 +10427,7 @@ msg\_elements
 }
 ```
 
-**示例2**
+**Example 2**
 
 ```
 {
@@ -10436,10 +10436,10 @@ msg\_elements
     "id": "C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6",
     "member_openid": "C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6",
     "member_role": "member",
-    "username": "小红",
+    "username": "Xiaohong",
     "bot": false
   },
-  "content": " 看看这张风景照 ",
+  "content": " Look at this landscape photo ",
   "group_openid": "B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5",
   "message_type": 0,
   "timestamp": "2026-07-21T10:05:00+08:00",
@@ -10463,7 +10463,7 @@ msg\_elements
 }
 ```
 
-**示例3**
+**Example 3**
 
 ```
 {
@@ -10472,7 +10472,7 @@ msg\_elements
     "id": "D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1",
     "member_openid": "D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1",
     "member_role": "owner",
-    "username": "小华",
+    "username": "Xiaohua",
     "bot": false
   },
   "content": " ",
@@ -10481,7 +10481,7 @@ msg\_elements
   "timestamp": "2026-07-21T10:10:00+08:00",
   "msg_elements": [
     {
-      "content": "=== 消息 1 ===\n[消息内容] 今天的学习计划已完成\n\n=== 消息 2 ===\n[消息内容] 很棒！继续保持，明天继续加油\n\n=== 消息 3 ===\n[消息内容] 好的，一起进步！"
+      "content": "=== Message 1 ===\n[Message content] Today's study plan has been completed\n\n=== Message 2 ===\n[Message content] Great! Keep it up, and keep going tomorrow\n\n=== Message 3 ===\n[Message content] Okay, let's make progress together!"
     }
   ],
   "message_scene": {
@@ -10495,21 +10495,21 @@ msg\_elements
 }
 ```
 
-### 群消息（全量模式）（GROUP_MESSAGE_CREATE）
+### Group Message (Full Mode) (GROUP_MESSAGE_CREATE)
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/group_message_create.html
 
-# 群消息（全量模式）
+# Group Message (Full Mode)
 
-当机器人开启了"接收所有消息"功能后，群里的每一条消息（不限于@机器人）都会推送此事件。 各字段含义与 GROUP\_AT\_MESSAGE\_CREATE 完全一致。
+After the bot enables the "receive all messages" feature, every message in the group (not limited to those mentioning the bot) triggers this event. The meaning of each field is exactly the same as in GROUP\_AT\_MESSAGE\_CREATE.
 
-## 事件
+## Event
 
-字段
+Field
 
-值
+Value
 
-事件名
+Event name
 
 GROUP\_MESSAGE\_CREATE
 
@@ -10517,297 +10517,297 @@ Intent
 
 GROUP\_AND\_C2C\_EVENT (1<<25)
 
-### 事件体
+### Event Body
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 id
 
 string
 
-消息 ID，可用于被动回复和撤回
+Message ID, which can be used for passive replies and recall
 
 author
 
 [User](#schema-user)
 
-发送者
+Sender
 
 content
 
 string
 
-消息文本内容（已去除@机器人的前缀）
+Message text content (the @bot prefix has been removed)
 
 group\_openid
 
 string
 
-群 OpenID
+Group OpenID
 
 timestamp
 
 string
 
-消息发送时间，RFC3339 格式
+Message send time, RFC3339 format
 
 message\_type
 
 integer
 
-消息内容类型
+Message content type
 
 message\_scene
 
 [MessageScene](#schema-messagescene)
 
-消息场景上下文
+Message scene context
 
 attachments
 
 \[\][MessageAttachment](#schema-messageattachment)
 
-消息附件
+Message attachments
 
 mentions
 
 \[\][User](#schema-user)
 
-消息中@的用户列表
+List of users mentioned in the message
 
 ark\_data
 
 [ARKData](#schema-arkdata)
 
-结构化卡片消息数据
+Structured card message data
 
 msg\_elements
 
 \[\][MsgElement](#schema-msgelement)
 
-消息元素列表
+Message element list
 
 **User**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 id
 
 string
 
-用户唯一标识（OpenID 格式）
+Unique user identifier (OpenID format)
 
 username
 
 string
 
-用户昵称
+User nickname
 
 bot
 
 boolean
 
-是否为机器人
+Whether it is a bot
 
 union\_openid
 
 string
 
-跨应用统一用户 OpenID（可能为空）
+Cross-application unified user OpenID (may be empty)
 
 union\_user\_account
 
 string
 
-跨应用统一用户账号（可能为空）
+Cross-application unified user account (may be empty)
 
 user\_openid
 
 string
 
-用户 OpenID（单聊场景使用）
+User OpenID (used in direct chat scenarios)
 
 member\_openid
 
 string
 
-群成员 OpenID（群聊场景使用）
+Group member OpenID (used in group chat scenarios)
 
 member\_role
 
 string
 
-群内角色。member=普通成员, admin=管理员, owner=群主
+Role in the group. member=regular member, admin=administrator, owner=group owner
 
 **MessageScene**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 source
 
 string
 
-场景来源。default=默认聊天窗口
+Scene source. default=default chat window
 
 ext
 
 \[\]string
 
-扩展数据列表，key=value 格式: msg\_idx=消息索引, 用于引用场景 ref\_msg\_idx=引用的消息索引 auth\_token=鉴权令牌
+List of extended data in key=value format: msg\_idx=message index, used in quoted scenarios; ref\_msg\_idx=index of the quoted message; auth\_token=authentication token
 
 **MessageAttachment**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 url
 
 string
 
-附件下载 URL
+Attachment download URL
 
 filename
 
 string
 
-文件名
+File name
 
 width
 
 integer
 
-图片宽度（像素），非图片附件无此字段
+Image width (pixels); this field is absent for non-image attachments
 
 height
 
 integer
 
-图片高度（像素），非图片附件无此字段
+Image height (pixels); this field is absent for non-image attachments
 
 size
 
 integer
 
-文件大小（字节）
+File size (bytes)
 
 content\_type
 
 string
 
-附件内容类型（MIME 类型）: voice=语音消息 image/jpeg=JPEG 图片 image/png=PNG 图片 image/gif=GIF 图片 video/mp4=MP4 视频 file=群文件
+Attachment content type (MIME type): voice=voice message, image/jpeg=JPEG image, image/png=PNG image, image/gif=GIF image, video/mp4=MP4 video, file=group file
 
 voice\_wav\_url
 
 string
 
-语音消息 SILK 等转换后的 WAV 文件 URL
+URL of the WAV file converted from SILK and other formats for voice messages
 
 asr\_refer\_text
 
 string
 
-语音消息 ASR 参考结果
+ASR reference result for voice messages
 
 **ARKData**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 prompt
 
 string
 
-卡片消息中的用户操作提示文本
+User action prompt text in card messages
 
 ark\_type
 
 string
 
-卡片消息类型标识: tuwen = 图文 H5（如快手分享链接） feed = 图文卡片（群相册、频道帖子、分享卡片） miniapp = 小程序（微信小程序、QQ 小程序、哔哩哔哩等） map = 位置卡片 contact\_card = 好友名片 video\_share = 视频分享 music\_together = 一起听歌 picture = 图片
+Card message type identifier: tuwen = image-text H5 (e.g., Kuaishou share link) feed = image-text card (group album, channel post, share card) miniapp = mini program (WeChat mini program, QQ mini program, Bilibili, etc.) map = location card contact\_card = friend contact card video\_share = video share music\_together = listen to music together picture = image
 
 ark\_name
 
 string
 
-卡片消息类型的中文名称，如"图文 H5"、"小程序"、"图文卡片"
+Localized name of the card message type, such as "Image-Text H5", "Mini Program", and "Image-Text Card"
 
 fields
 
 object
 
-卡片消息字段，常见键名: tag/tags=来源标签, title=标题, desc=描述, jump\_url=跳转链接, preview=预览图, source=来源名称, source\_logo=来源图标, tag\_icon=标签图标, nickname=昵称, avatar=头像, address=地址
+Card message fields; common keys: tag/tags=source tag, title=title, desc=description, jump\_url=jump link, preview=preview image, source=source name, source\_logo=source icon, tag\_icon=tag icon, nickname=nickname, avatar=avatar, address=address
 
 **MsgElement**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 msg\_idx
 
 string
 
-消息元素在列表中的引用消息索引
+Reference message index of the message element in the list
 
 author
 
 [User](#schema-user)
 
-该元素对应的消息发送者
+Message sender corresponding to this element
 
 message\_type
 
 integer
 
-消息内容类型: 0=普通文本, 3=结构化卡片, 101=并行消息, 102=聊天记录, 103=引用消息
+Message content type: 0=plain text, 3=structured card, 101=parallel message, 102=chat history, 103=quoted message
 
 content
 
 string
 
-消息正文内容
+Message body content
 
 attachments
 
 \[\][MessageAttachment](#schema-messageattachment)
 
-该元素携带的附件
+Attachments carried by this element
 
 ark\_data
 
 [ARKData](#schema-arkdata)
 
-结构化卡片消息数据（message\_type=3 时有值）
+Structured card message data (has a value when message\_type=3)
 
 msg\_elements
 
 \[\][MsgElement](#schema-msgelement)
 
-嵌套消息元素列表（递归结构）
+Nested message element list (recursive structure)
 
-### 事件示例
+### Event Example
 
-**示例1**
+**Example 1**
 
 ```
 {
@@ -10816,10 +10816,10 @@ msg\_elements
     "id": "A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4",
     "member_openid": "A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4",
     "member_role": "member",
-    "username": "小明",
+    "username": "Xiaoming",
     "bot": false
   },
-  "content": "大家早上好呀",
+  "content": "Good morning, everyone!",
   "group_openid": "B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5",
   "message_type": 0,
   "timestamp": "2026-07-21T08:00:00+08:00",
@@ -10833,7 +10833,7 @@ msg\_elements
 }
 ```
 
-**示例2**
+**Example 2**
 
 ```
 {
@@ -10842,10 +10842,10 @@ msg\_elements
     "id": "C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6",
     "member_openid": "C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6",
     "member_role": "owner",
-    "username": "小红",
+    "username": "Xiaohong",
     "bot": false
   },
-  "content": "分享一张今天的风景照",
+  "content": "Sharing a landscape photo from today",
   "group_openid": "B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5",
   "message_type": 0,
   "timestamp": "2026-07-21T09:30:00+08:00",
@@ -10869,7 +10869,7 @@ msg\_elements
 }
 ```
 
-**示例3**
+**Example 3**
 
 ```
 {
@@ -10878,7 +10878,7 @@ msg\_elements
     "id": "D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1",
     "member_openid": "D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1",
     "member_role": "admin",
-    "username": "小华",
+    "username": "Xiaohua",
     "bot": false
   },
   "content": " ",
@@ -10887,7 +10887,7 @@ msg\_elements
   "timestamp": "2026-07-21T10:10:00+08:00",
   "msg_elements": [
     {
-      "content": "=== 消息 1 ===\n[消息内容] 今天的学习计划已完成\n\n=== 消息 2 ===\n[消息内容] 很棒！继续保持，明天继续加油\n\n=== 消息 3 ===\n[消息内容] 好的，一起进步！"
+      "content": "=== Message 1 ===\n[Message content] Today's study plan has been completed\n\n=== Message 2 ===\n[Message content] Great! Keep it up, and keep going tomorrow\n\n=== Message 3 ===\n[Message content] Okay, let's make progress together!"
     }
   ],
   "message_scene": {
@@ -10901,23 +10901,23 @@ msg\_elements
 }
 ```
 
-### 互动事件（INTERACTION_CREATE）
+### Interaction Event (INTERACTION_CREATE)
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/interaction_create.html
 
-# 互动事件
+# Interaction Event
 
-用户与机器人的互动操作触发此事件，包括消息按钮点击、快捷菜单回调、消息反馈、清空会话、进出故事集、切换模型、用户/群授权等。 收到事件后需调用 PUT /interactions/{interaction\_id} 接口回应，否则客户端会一直 loading 直到超时。
+This event is triggered by user interactions with the bot, including message button clicks, quick menu callbacks, message feedback, clearing conversations, entering/leaving story collections, switching models, and user/group authorization. After receiving the event, call the PUT /interactions/{interaction\_id} API to respond; otherwise, the client remains loading until it times out.
 
-仅 type=11（消息按钮）和 type=12（快捷菜单）需要调用 PUT /interactions/{interaction\_id} 回应；其他类型（消息反馈、清空会话、进出故事集、切换模型、授权等）无需回应。同一 interaction\_id 只能回应一次，超时后失效。
+Only type=11 (message button) and type=12 (quick menu) require calling PUT /interactions/{interaction\_id} to respond; other types (message feedback, clearing conversations, entering/leaving story collections, switching models, authorization, etc.) do not require a response. The same interaction\_id can be responded to only once and becomes invalid after timeout.
 
-## 事件
+## Event
 
-字段
+Field
 
-值
+Value
 
-事件名
+Event name
 
 INTERACTION\_CREATE
 
@@ -10925,217 +10925,217 @@ Intent
 
 INTERACTION (1<<26)
 
-### 事件体
+### Event Body
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 id
 
 string
 
-事件 ID，用于被动消息发送和互动回调
+Event ID, used for passive message sending and interaction callbacks
 
 type
 
 integer
 
-互动类型 11 - 消息按钮回调（INLINE\_KEYBOARD）：用户点击消息中的内联键盘按钮 12 - 单聊快捷菜单回调（CALLBACK\_COMMAND）：用户点击单聊场景下的自定义菜单 13 - 消息反馈（MESSAGE\_FEEDBACK）：用户对智能体消息进行点赞/点踩反馈 14 - 清空会话（CLEAR\_SESSION）：用户清空智能体会话历史 15 - 进出故事集（IN\_OUT\_STORY）：用户进入或退出故事集 16 - 切换模型（SWITCH\_MODEL）：用户切换智能体模型 18 - 用户授权（USER\_AUTHORIZE）：用户授权事件 19 - 群授权（GROUP\_AUTHORIZE）：群授权事件 20 - 群授权状态变更（GROUP\_AUTHORIZE\_STATUS）
+Interaction type 11 - message button callback (INLINE\_KEYBOARD): the user clicks an inline keyboard button in a message 12 - direct chat quick menu callback (CALLBACK\_COMMAND): the user clicks a custom menu in the direct chat scenario 13 - message feedback (MESSAGE\_FEEDBACK): the user likes/dislikes a bot message 14 - clear conversation (CLEAR\_SESSION): the user clears the bot conversation history 15 - enter/leave story collection (IN\_OUT\_STORY): the user enters or exits a story collection 16 - switch model (SWITCH\_MODEL): the user switches the bot model 18 - user authorization (USER\_AUTHORIZE): user authorization event 19 - group authorization (GROUP\_AUTHORIZE): group authorization event 20 - group authorization status change (GROUP\_AUTHORIZE\_STATUS)
 
 scene
 
 string
 
-事件发生场景。c2c=单聊, group=群聊, guild=频道
+Event scene. c2c=direct chat, group=group chat, guild=channel
 
 chat\_type
 
 integer
 
-聊天场景。0=频道, 1=群聊, 2=单聊
+Chat scenario. 0=channel, 1=group chat, 2=direct chat
 
 timestamp
 
 string
 
-触发时间，RFC3339 格式
+Trigger time, in RFC3339 format
 
 guild\_id
 
 string
 
-频道 OpenID（仅频道场景有值）
+Channel OpenID (has a value only in channel scenarios)
 
 channel\_id
 
 string
 
-子频道 OpenID（仅频道场景有值）
+Sub-channel OpenID (has a value only in channel scenarios)
 
 user\_openid
 
 string
 
-用户 OpenID（仅单聊场景有值）
+User OpenID (has a value only in direct chat scenarios)
 
 group\_openid
 
 string
 
-群 OpenID（仅群聊场景有值）
+Group OpenID (has a value only in group chat scenarios)
 
 group\_member\_openid
 
 string
 
-群成员 OpenID（仅群聊场景有值）
+Group member OpenID (has a value only in group chat scenarios)
 
 data
 
 [InteractionData](#schema-interactiondata)
 
-互动数据
+Interaction data
 
 version
 
 integer
 
-版本号，默认 1
+Version number, defaults to 1
 
 application\_id
 
 string
 
-机器人 AppID
+Bot AppID
 
 **InteractionData**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 type
 
 integer
 
-互动数据类型，与外层 type 含义一致。11=消息按钮点击, 12=快捷菜单点击, 13=消息反馈点击, 14=清空会话点击, 15=故事集点击, 16=切换模型点击
+Interaction data type, with the same meaning as the outer type. 11=message button click, 12=quick menu click, 13=message feedback click, 14=clear conversation click, 15=story collection click, 16=switch model click
 
 resolved
 
 [InteractionResolved](#schema-interactionresolved)
 
-解析后的互动数据
+Resolved interaction data
 
 **InteractionResolved**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 button\_data
 
 string
 
-按钮的 data 字段值（发送消息按钮时设置）；消息反馈场景下为回调数据
+The value of the button's data field (set when sending a message button); in the message feedback scenario, this is the callback data
 
 button\_id
 
 string
 
-按钮的 id 字段值（发送消息按钮时设置）
+The value of the button's id field (set when sending a message button)
 
 user\_id
 
 string
 
-操作用户 ID（仅频道场景有值）
+Operating user ID (has a value only in channel scenarios)
 
 feature\_id
 
 string
 
-功能 ID（仅快捷菜单有值，管理端设置）
+Feature ID (has a value only for the quick menu; set on the admin side)
 
 message\_id
 
 string
 
-操作的消息 ID（频道场景为消息 OpenID；消息反馈场景为机器人消息 ID）
+ID of the operated message (in channel scenarios, the message OpenID; in message feedback scenarios, the bot message ID)
 
 feedback\_opt
 
 string
 
-反馈选项（仅 type=13 消息反馈）。LIKE=点赞, UNLIKE=点踩
+Feedback option (only for type=13 message feedback). LIKE=like, UNLIKE=dislike
 
 checked
 
 integer
 
-反馈选项是否选中（仅 type=13 消息反馈）
+Whether the feedback option is selected (only for type=13 message feedback)
 
 action
 
 string
 
-操作类型（type=15 故事集：ENTER\_STORY=进入, QUIT\_STORY=退出；type=16 切换模型：对应操作动作）
+Operation type (type=15 story collection: ENTER\_STORY=enter, QUIT\_STORY=exit; type=16 switch model: the corresponding operation action)
 
 message\_scene
 
 [InteractionMessageScene](#schema-interactionmessagescene)
 
-消息场景信息（仅 type=13 消息反馈）
+Message scene information (only for type=13 message feedback)
 
 authorize\_data
 
 [AuthorizeData](#schema-authorizedata)
 
-授权数据（仅 type=18/19 用户/群授权事件）
+Authorization data (only for type=18/19 user/group authorization events)
 
 **InteractionMessageScene**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 ext
 
 \[\]string
 
-扩展信息键值对列表，如 "disable\_net\_search=1" 表示关闭联网搜索
+List of extended information key-value pairs, e.g. "disable\_net\_search=1" means disable web search
 
 **AuthorizeData**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 opt\_scene
 
 string
 
-授权操作场景。setting=资料页设置, dialog=弹窗授权
+Authorization operation scenario. setting=profile page setting, dialog=popup authorization
 
 scope
 
 string
 
-授权范围。c2c\_push=C2C 主动消息推送, group\_push=群主动消息推送
+Authorization scope. c2c\_push=C2C proactive message push, group\_push=group proactive message push
 
-### 事件示例
+### Event Example
 
-**示例1**
+**Example 1**
 
 ```
 {
@@ -11157,7 +11157,7 @@ string
 }
 ```
 
-**示例2**
+**Example 2**
 
 ```
 {
@@ -11179,7 +11179,7 @@ string
 }
 ```
 
-**示例3**
+**Example 3**
 
 ```
 {
@@ -11201,21 +11201,21 @@ string
 }
 ```
 
-### 用户添加好友（FRIEND_ADD）
+### User Adds Friend (FRIEND_ADD)
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/friend_add.html
 
-# 用户添加好友
+# User Adds Friend
 
-通过传 scene\_param 中的 callback\_data 可区分不同来源的添加好友场景。
+Different friend-add sources can be distinguished by passing callback\_data in scene\_param.
 
-## 事件
+## Event
 
-字段
+Field
 
-值
+Value
 
-事件名
+Event name
 
 FRIEND\_ADD
 
@@ -11223,67 +11223,67 @@ Intent
 
 GROUP\_AND\_C2C\_EVENT (1<<25)
 
-### 事件体
+### Event Body
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 timestamp
 
 integer
 
-添加时间戳（Unix 秒）
+Add timestamp (Unix seconds)
 
 openid
 
 string
 
-用户 OpenID
+User OpenID
 
 scene
 
 integer
 
-加好友场景值。1000=缺省默认, 1001=网络搜索（全部tab）, 1002=网络搜索（机器人tab）, 1003=群场景, 1004=空间场景, 2001=站内分享资料页, 2002=站外分享资料页, 2003=开发者生成的分享链接（站内）, 2004=开发者生成的分享链接（站外）
+Friend-add scene value. 1000=default, 1001=web search (all tab), 1002=web search (bot tab), 1003=group scenario, 1004=space scenario, 2001=on-platform profile page sharing, 2002=off-platform profile page sharing, 2003=developer-generated share link (on-platform), 2004=developer-generated share link (off-platform)
 
 scene\_param
 
 string
 
-开发者自定义的回调数据（callback\_data），用于区分不同来源
+Developer-defined callback data (callback\_data), used to distinguish different sources
 
 author
 
 [FriendAuthor](#schema-friendauthor)
 
-用户信息
+User information
 
 short\_code
 
 string
 
-机器人分享链接的短链code
+Short link code of the bot share link
 
 **FriendAuthor**
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 union\_openid
 
 string
 
-用户统一 OpenID（跨应用标识）
+Unified user OpenID (cross-application identifier)
 
-### 事件示例
+### Event Example
 
-**用户添加好友（网络搜索场景）**
+**User Adds Friend (Web Search Scenario)**
 
 ```
 {
@@ -11297,7 +11297,7 @@ string
 }
 ```
 
-**用户添加好友（开发者分享链接）**
+**User Adds Friend (Developer Share Link)**
 
 ```
 {
@@ -11311,21 +11311,21 @@ string
 }
 ```
 
-### 机器人加入群聊（GROUP_ADD_ROBOT）
+### Bot Joins Group Chat (GROUP_ADD_ROBOT)
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/group_add_robot.html
 
-# 机器人加入群聊
+# Bot Joins Group Chat
 
-机器人被添加到群聊时触发。
+Triggered when the bot is added to a group chat.
 
-## 事件
+## Event
 
-字段
+Field
 
-值
+Value
 
-事件名
+Event name
 
 GROUP\_ADD\_ROBOT
 
@@ -11333,35 +11333,35 @@ Intent
 
 GROUP\_AND\_C2C\_EVENT (1<<25)
 
-### 事件体
+### Event Body
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 timestamp
 
 integer
 
-加入时间戳（Unix 秒）
+Join timestamp (Unix seconds)
 
 group\_openid
 
 string
 
-群 OpenID
+Group OpenID
 
 op\_member\_openid
 
 string
 
-操作添加机器人进群的群成员 OpenID
+OpenID of the group member who added the bot to the group
 
-### 事件示例
+### Event Example
 
-**机器人加入群聊**
+**Bot Joins Group Chat**
 
 ```
 {
@@ -11371,23 +11371,23 @@ string
 }
 ```
 
-### 单聊消息接收开启（C2C_MSG_RECEIVE）
+### Direct Chat Message Receiving Enabled (C2C_MSG_RECEIVE)
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/c2c_msg_receive.html
 
-# 单聊消息接收开启
+# Direct Chat Message Receiving Enabled
 
-用户在机器人资料卡手动开启"主动消息"推送开关时触发。
+Triggered when the user manually enables the "proactive message" push switch on the bot profile card.
 
-用户在机器人资料卡手动开启主动消息推送开关时触发。开启后机器人可向该用户发送主动消息。
+Triggered when the user manually enables the proactive message push switch on the bot profile card. Once enabled, the bot can send proactive messages to this user.
 
-## 事件
+## Event
 
-字段
+Field
 
-值
+Value
 
-事件名
+Event name
 
 C2C\_MSG\_RECEIVE
 
@@ -11395,29 +11395,29 @@ Intent
 
 GROUP\_AND\_C2C\_EVENT (1<<25)
 
-### 事件体
+### Event Body
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 timestamp
 
 integer
 
-操作时间戳（Unix 秒）
+Operation timestamp (Unix seconds)
 
 openid
 
 string
 
-用户 OpenID
+User OpenID
 
-### 事件示例
+### Event Example
 
-**C2C消息接收开启**
+**C2C Message Receiving Enabled**
 
 ```
 {
@@ -11426,21 +11426,21 @@ string
 }
 ```
 
-### 群聊消息接收开启（GROUP_MSG_RECEIVE）
+### Group Chat Message Receiving Enabled (GROUP_MSG_RECEIVE)
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/group_msg_receive.html
 
-# 群聊消息接收开启
+# Group Chat Message Receiving Enabled
 
-群管理员在机器人资料页操作开启通知时触发。
+Triggered when a group administrator enables notifications on the bot profile page.
 
-## 事件
+## Event
 
-字段
+Field
 
-值
+Value
 
-事件名
+Event name
 
 GROUP\_MSG\_RECEIVE
 
@@ -11448,35 +11448,35 @@ Intent
 
 GROUP\_AND\_C2C\_EVENT (1<<25)
 
-### 事件体
+### Event Body
 
-名称
+Name
 
-类型
+Type
 
-描述
+Description
 
 timestamp
 
 integer
 
-操作时间戳（Unix 秒）
+Operation timestamp (Unix seconds)
 
 group\_openid
 
 string
 
-群 OpenID
+Group OpenID
 
 op\_member\_openid
 
 string
 
-操作群成员 OpenID
+Operating group member OpenID
 
-### 事件示例
+### Event Example
 
-**群消息接收开启**
+**Group Message Receiving Enabled**
 
 ```
 {
@@ -11486,64 +11486,64 @@ string
 }
 ```
 
-## 7. 变更记录
+## 7. Changelog
 
-### 变更记录
+### Changelog
 
 > Source: https://bot.q.qq.com/wiki/develop/api-v2/changelog.html
 
-# 变更记录
+# Changelog
 
 ## 20260916
 
-### 优化
+### Improvements
 
--   **生成分享链接（`/v2/generate_url_link`）** 修正请求和响应字段说明。
--   **消息事件（群 @ 消息、群消息、单聊消息）**：`ark_type` 枚举新增 `picture`（图片）取值说明。
+-   **Generate Share Link (`/v2/generate_url_link`)**: fixed the descriptions of the request and response fields.
+-   **Message events (group @ message, group message, direct chat message)**: added documentation for the new `picture` (image) value in the `ark_type` enum.
 
 ## 20260903
 
-### 新增
+### New
 
--   **群管理接口**
-    -   新增**群成员管理**相关接口：
-        -   获取群成员列表
-        -   获取群成员信息
-        -   群成员批量移除
-        -   群黑名单查询
-        -   群黑名单操作
+-   **Group management APIs**
+    -   Added APIs related to **group member management**:
+        -   Get group member list
+        -   Get group member information
+        -   Bulk remove group members
+        -   Query group blacklist
+        -   Group blacklist operations
 
-### 优化
+### Improvements
 
--   修改了部分接口描述。
+-   Modified some API descriptions.
 
 ## 20260812
 
-### 新增
+### New
 
--   **自定义菜单**
-    -   新增查询、修改全局自定义菜单接口。
--   **指令面板**
-    -   新增指令面板管理接口，支持查询列表、创建、查询详情、修改、删除及修改关联对象。
+-   **Custom menu**
+    -   Added APIs to query and modify the global custom menu.
+-   **Command panel**
+    -   Added command panel management APIs, supporting listing, creating, retrieving details, modifying, deleting, and modifying associated objects.
 
 ## 20260810
 
-### 优化
+### Improvements
 
--   **接口调用域名统一**：所有接口调用域名统一为 `api.bot.qq.com`。
+-   **Unified API call domain**: all API call domains are unified as `api.bot.qq.com`.
 
-### 新增
+### New
 
--   **群消息 / C2C 消息**
-    -   发送 Markdown 消息：新增可选参数 `force_verify_image_resource`。开启后，当图片资源转存失败时，将中断消息发送并返回失败（默认关闭，保持原有行为）。
--   **群管理接口**
-    -   新增**群禁言管理**相关接口：
-        -   查询用户禁言状态
-        -   设置用户禁言
-    -   新增**入群申请审批**相关接口：
-        -   拉取入群申请列表
-        -   审批入群请求
-    -   新增**入群自动审批策略**相关接口。
--   **事件**
-    -   新增用户入群申请事件。
+-   **Group messages / C2C messages**
+    -   Sending Markdown messages: added the optional parameter `force_verify_image_resource`. When enabled, if image resource saving fails, message sending is aborted and a failure is returned (disabled by default, preserving existing behavior).
+-   **Group management APIs**
+    -   Added APIs related to **group mute management**:
+        -   Query user mute status
+        -   Set user mute
+    -   Added APIs related to **group join request approval**:
+        -   Fetch group join request list
+        -   Approve group join requests
+    -   Added APIs related to **automatic group join approval policies**.
+-   **Events**
+    -   Added the user group join request event.
 

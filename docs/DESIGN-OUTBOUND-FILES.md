@@ -195,7 +195,7 @@ def outbound_allowed(path: str, rules: list[tuple[bool, re.Pattern]]) -> bool:
 - **User notice — only for the explicit `/send`**: the user asked for *that* file, so a refusal must be
   visible:
   ```
-  ⚠️ Not sent: `国风皮肤抽奖需求梳理.md` — outside the allowed send paths
+  ⚠️ Not sent: `design-brief.md` — outside the allowed send paths
   ```
   - only the **file name** (basename) is shown, never the full path (a group reply is public; the
     full path stays in the log);

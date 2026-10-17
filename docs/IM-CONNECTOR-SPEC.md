@@ -1,192 +1,198 @@
-# IM 接入特性规范与能力矩阵
+# IM Connector Feature Specification and Capability Matrix
 
-## 0. 目的
+## 0. Purpose
 
-本文定义一份**统一的 IM 接入特性规范**，它同时承担两个作用：
+This document defines a **single feature specification for IM connectors**. It serves two purposes:
 
-- **接入标准**：一个 IM 连接器"接入到什么程度"才算完整——每条特性标明 **必须 / 应 / 可选**，并给出对应的机器可读字段与连接器原语，便于验收与评审。
-- **能力评估**：把每个平台的实现按**同一套特性**逐项打分，得到可横向比较的能力矩阵。
+- **Acceptance standard**: what "complete" means for an IM connector. Every feature is marked
+  **MUST / SHOULD / MAY** and mapped to a machine-readable `Capabilities` field or connector primitive,
+  so it can be reviewed and accepted.
+- **Capability evaluation**: score each platform against the same feature set to produce a
+  horizontally comparable capability matrix.
 
-> 机器可读形式就是 `Capabilities`（`src/tether/capabilities.py`）；本文件是它的人类可读、可评审的**母版**。连接器契约见 `DESIGN-IM-BRIDGE.md` §3.1，消息模型见 §3.2，每项的真机确认见 §13.1 / `VERIFY-CAPABILITIES.md`。新增平台的接入清单见 §5.5。
+> The machine-readable form is `Capabilities` (`src/tether/capabilities.py`); this file is its
+> human-readable, reviewable source of truth. The connector contract is in `DESIGN-IM-BRIDGE.md`
+> §3.1, the message model in §3.2, and per-platform device verification in §13.1 /
+> `VERIFY-CAPABILITIES.md`. The checklist for adding a platform is in §5.5.
 
-**级别定义**
-- **必须（MUST）**：任何集成都要处理，或**显式声明不支持并优雅降级**。
-- **应（SHOULD）**：平台支持就应实现。
-- **可选（MAY）**：平台特有或按需。
-
----
-
-## 1. 特性清单（规范）
-
-### A. 传输与生命周期
-
-| # | 特性 | 说明 | 取值 / 等级 | 字段 / 原语 | 级别 |
-|---|---|---|---|---|---|
-| A1 | 连接方式 | 长连接 / Webhook / 轮询 | WS / webhook / poll | 连接器实现 | 事实 |
-| A2 | 断线自愈 | 断线后自动重连（指数退避、可无限重试） | 有 / 无 | 连接器实现 | 必须 |
-| A3 | 心跳保活 | WS 心跳与 ACK | 有 / 无 | 连接器实现 | 应 |
-| A4 | 单实例约束 | 同一机器人只能有一条连接（否则丢事件） | 有 / 无 | 文档 + 运行约束 | 必须（声明） |
-| A5 | 健康上报 | 暴露传输是否在线 | `bool` / `None` | `IMConnector.connected` | 必须 |
-| A6 | 多账号 | 同一平台并行运行多个机器人账号（当前仅微信个人号） | 支持 / 单账号 | 每账号一个连接器实例；`Conversation.account` + `IMConnector.instance_id` | 可选 |
-
-### B. 会话形态
-
-| # | 特性 | 说明 | 取值 / 等级 | 字段 / 原语 | 级别 |
-|---|---|---|---|---|---|
-| B1 | 单聊 | 与用户一对一 | 支持 / 不支持 | `Conversation.kind="direct"` | 必须 |
-| B2 | 群聊 | 多人群 | 支持 / 不支持 | `kind="group"` | 应 |
-| B3 | 群触发模型 | 群里何时投递给机器人 | `mention_only` / `always` / `on_session` | `group_delivery` | 必须（声明） |
-| B4 | 直接触发模型 | 单聊是否总投递 | `always` / `on_session` | `direct_delivery` | 必须（声明） |
-| B5 | 频道 / 子频道 | guild/频道场景 | 支持 / 不支持 | `kind="channel"` | 可选 |
-| B6 | 线程 / 话题 | 话题串 | 支持 / 不支持 | `Conversation.thread` | 可选 |
-
-### C. 入站
-
-| # | 特性 | 说明 | 取值 / 等级 | 字段 / 原语 | 级别 |
-|---|---|---|---|---|---|
-| C1 | 文本 | 文本消息 | 支持 | `InboundMessage.text` | 必须 |
-| C2 | @提及 | 解析被 @ 的人 | 支持 / 不支持 | `InboundMessage.mentions`、`mention` | 应 |
-| C3 | 引用 / 转发 | 引用消息 / 合并转发 | 支持 / 不支持 | `InboundMessage.quoted` | 可选 |
-| C4 | 入站媒体 | 图片 / 语音 / 视频 / 文件 | 类型集合 | `media_in`、`Attachment` | 应 |
-| C5 | 语音原生转写 | 平台直接给文字（非自建 ASR） | 原生 / 需调 ASR / 无 | 入站文本填充 | 可选 |
-| C6 | 交互回调 | 按钮 / 表单点击回来 | 支持 / 不支持 | `IncomingInteraction` | 应（有按钮时） |
-| C7 | 撤回事件 | 平台通知撤回 | 支持 / 无 | `ConnectorEvent(kind="recall")` | 可选 |
-| C8 | 会话 / 成员事件 | 进会话、加群、成员变更 | 支持 / 无 | `ConnectorEvent` | 可选 |
-| C9 | 去重语义 | 按 id / seq 去重 | 已声明 | 连接器实现 + `dedup` | 必须 |
-
-### D. 出站渲染
-
-| # | 特性 | 说明 | 取值 / 等级 | 字段 / 原语 | 级别 |
-|---|---|---|---|---|---|
-| D1 | Markdown 等级 | 文本的 Markdown 支持 | NONE / BASIC / STANDARD / RICH | `markdown` | 应 |
-| D2 | 富元素 | 代码块 / 表格 / 标题 / 内联图 | 各自 支持 / 不支持 | `code_block`/`tables`/`headings`/`images_inline` | 可选 |
-| D3 | 长文本分片 | 超长按上限切分 | 上限字符数 | `max_text_chars` + `_chunk` | 必须 |
-| D4 | 卡片渲染 | 结构卡片（HITL 承载体） | 支持 / 不支持 | `_send_card` / `Card` | 应（有 HITL 时） |
-
-### E. 流式与编辑
-
-| # | 特性 | 说明 | 取值 / 等级 | 字段 / 原语 | 级别 |
-|---|---|---|---|---|---|
-| E1 | 原生流式 | 平台支持同消息多帧刷新 | 支持 / 不支持 | `native_stream` | 可选 |
-| E2 | 编辑消息 | 可编辑已发消息 | 支持 / 不支持 | `edit_message` / `_update_text` | 可选 |
-| E3 | 降级：占位 + 最终 | 不支持刷新时的兜底 | 必须实现 | `supports_streaming` | 必须 |
-| E4 | 进度占位 | 回合开始时是否先发一条文本占位（`🤔 Thinking…`）| 有 / 无 | `progress_placeholder` | 可选 |
-
-### F. 交互 / HITL
-
-| # | 特性 | 说明 | 取值 / 等级 | 字段 / 原语 | 级别 |
-|---|---|---|---|---|---|
-| F1 | 按钮 | 可点击按钮 | 支持 / 不支持 | `buttons` / `Button` | 应 |
-| F2 | 表单 / 多问题 | 多问 / 多选卡片 | 支持 / 编号回退 | `question_form` / `CardQuestion` | 可选 |
-| F3 | 回调身份 | 回调携带操作者身份 | 支持 / 无 | `callback_actor_identity` | 应 |
-| F4 | 群角色 | owner/admin 可用于门控 | 支持 / 无 | `member_roles` | 可选 |
-| F5 | 回执 / 卡片更新 | 处理后就地更新卡片 | 支持 / 不支持 | `acknowledge` | 应 |
-| F6 | 点击去重 | 重复点击幂等 | 已声明 | `rid` / 连接器实现 | 必须 |
-
-### G. 出站媒体
-
-| # | 特性 | 说明 | 取值 / 等级 | 字段 / 原语 | 级别 |
-|---|---|---|---|---|---|
-| G1 | 媒体类型 | 图片 / 语音 / 视频 / 文件 | 类型集合 | `media_out` / `RichMedia` | 应 |
-| G2 | 上传方式 | 分块 / URL 转存 | 见平台 | `upload` / `MediaHandle` | 事实 |
-| G3 | 超限处理 | 压缩 / 转码 / 链接兜底 | 已声明 | 连接器实现 | 应 |
-
-### H. 身份
-
-| # | 特性 | 说明 | 取值 / 等级 | 字段 / 原语 | 级别 |
-|---|---|---|---|---|---|
-| H1 | 名称 / 描述来源 | 平台暴露 or 必须配置 | 平台 / 配置 / 两者 | `identity` + 启动校验 | 必须 |
-| H2 | 头像 | 平台暴露头像 URL | 有 / 无 | `BotIdentity.avatar_url` | 可选 |
-
-### I. 主动推送
-
-| # | 特性 | 说明 | 取值 / 等级 | 字段 / 原语 | 级别 |
-|---|---|---|---|---|---|
-| I1 | 主动消息 | 无入站也能推送 + 配额 | 能力 + 限额 | `proactive` + 连接器实现 | 应 |
-
-### J. 限流
-
-| # | 特性 | 说明 | 取值 / 等级 | 字段 / 原语 | 级别 |
-|---|---|---|---|---|---|
-| J1 | 本地限速 | 每会话出站上限。**离散发送**的通道用令牌桶；**流式**通道由 streaming controller（节流/聚合）限速 | 次/分 或 — | `rate_limit_per_min` + `TokenBucket` | 应 |
-
-### K. 体验细节
-
-| # | 特性 | 说明 | 取值 / 等级 | 字段 / 原语 | 级别 |
-|---|---|---|---|---|---|
-| K1 | 输入中状态 | typing 指示 | 支持 / 不支持 | `typing` / `_typing` | 可选 |
-| K2 | 表情回应 | reaction | 支持 / 不支持 | `reactions` / `_react` | 可选 |
-| K3 | 撤回自己消息 | 机器人撤回已发 | 支持 / 不支持 | 连接器实现 | 可选 |
-
-### L. 鉴权与配置
-
-| # | 特性 | 说明 | 取值 / 等级 | 字段 / 原语 | 级别 |
-|---|---|---|---|---|---|
-| L1 | 凭据 / 令牌刷新 / 权限 | 认证、令牌续期、scope/intents | 已实现 | 连接器实现 | 必须 |
-| L2 | 启动校验 | 启用前校验必填项 | 已实现 | `validate_startup` | 必须 |
-
-### M. 验证
-
-| # | 特性 | 说明 | 取值 / 等级 | 字段 / 原语 | 级别 |
-|---|---|---|---|---|---|
-| M1 | 真机回填 | 逐项真机确认并回填 | 已确认 / 待测 | §13.1 / `VERIFY-CAPABILITIES.md` | 必须 |
+**Levels**
+- **MUST**: every integration must handle it, or **explicitly declare it unsupported and degrade gracefully**.
+- **SHOULD**: implement it when the platform supports it.
+- **MAY**: platform-specific or optional.
 
 ---
 
-## 2. 平台能力矩阵
+## 1. Feature checklist (normative)
 
-取值：✔ 支持 · △ 部分/受限 · ✖ 不支持 · ? 待真机确认（§13.1）。本节是 §3.3 能力的展开视图。
+### A. Transport and lifecycle
 
-| 特性 | WeCom | Feishu | QQ (api-v2) | 微信个人号 |
+| # | Feature | Description | Values / level | Field / primitive | Level |
+|---|---|---|---|---|---|
+| A1 | Connection model | Long connection / webhook / polling | WS / webhook / poll | Connector implementation | Fact |
+| A2 | Reconnect | Automatic reconnect with exponential backoff and unlimited retries | Yes / no | Connector implementation | MUST |
+| A3 | Heartbeat | WS heartbeat and ACK | Yes / no | Connector implementation | SHOULD |
+| A4 | Single-instance constraint | One bot may have only one connection, otherwise events are split | Yes / no | Documentation + runtime constraint | MUST (declare) |
+| A5 | Health reporting | Expose whether the transport is online | `bool` / `None` | `IMConnector.connected` | MUST |
+| A6 | Multiple accounts | Run multiple bot accounts for one platform in parallel (currently personal WeChat only) | Supported / single account | One connector instance per account; `Conversation.account` + `IMConnector.instance_id` | MAY |
+
+### B. Conversation shapes
+
+| # | Feature | Description | Values / level | Field / primitive | Level |
+|---|---|---|---|---|---|
+| B1 | Direct chat | One-to-one with a user | Supported / unsupported | `Conversation.kind="direct"` | MUST |
+| B2 | Group chat | Multiple users | Supported / unsupported | `kind="group"` | SHOULD |
+| B3 | Group delivery model | When the platform delivers group messages to the bot | `mention_only` / `always` / `on_session` | `group_delivery` | MUST (declare) |
+| B4 | Direct delivery model | Whether direct messages are always delivered | `always` / `on_session` | `direct_delivery` | MUST (declare) |
+| B5 | Channel / sub-channel | Guild/channel scenarios | Supported / unsupported | `kind="channel"` | MAY |
+| B6 | Thread / topic | Threaded conversations | Supported / unsupported | `Conversation.thread` | MAY |
+
+### C. Inbound
+
+| # | Feature | Description | Values / level | Field / primitive | Level |
+|---|---|---|---|---|---|
+| C1 | Text | Text messages | Supported | `InboundMessage.text` | MUST |
+| C2 | Mentions | Parse mentioned users | Supported / unsupported | `InboundMessage.mentions`, `mention` | SHOULD |
+| C3 | Quote / forward | Quoted messages / merged forwards | Supported / unsupported | `InboundMessage.quoted` | MAY |
+| C4 | Inbound media | Image / voice / video / file | Set of types | `media_in`, `Attachment` | SHOULD |
+| C5 | Native voice transcript | The platform supplies text (no bridge-side ASR) | Native / ASR required / none | Populate inbound text | MAY |
+| C6 | Interaction callback | Button / form click returns to the bridge | Supported / unsupported | `IncomingInteraction` | SHOULD (when buttons exist) |
+| C7 | Recall event | The platform notifies the bot of a recall | Supported / none | `ConnectorEvent(kind="recall")` | MAY |
+| C8 | Conversation / member events | Enter chat, join group, member changes | Supported / none | `ConnectorEvent` | MAY |
+| C9 | Deduplication semantics | Deduplicate by id / sequence | Declared | Connector implementation + `dedup` | MUST |
+
+### D. Outbound rendering
+
+| # | Feature | Description | Values / level | Field / primitive | Level |
+|---|---|---|---|---|---|
+| D1 | Markdown level | Markdown support for text | NONE / BASIC / STANDARD / RICH | `markdown` | SHOULD |
+| D2 | Rich elements | Code blocks / tables / headings / inline images | Supported / unsupported each | `code_block` / `tables` / `headings` / `images_inline` | MAY |
+| D3 | Long-text splitting | Split over the platform limit | Max characters | `max_text_chars` + `_chunk` | MUST |
+| D4 | Card rendering | Structured card (the HITL carrier) | Supported / unsupported | `_send_card` / `Card` | SHOULD (when HITL exists) |
+
+### E. Streaming and editing
+
+| # | Feature | Description | Values / level | Field / primitive | Level |
+|---|---|---|---|---|---|
+| E1 | Native streaming | The platform can refresh the same message | Supported / unsupported | `native_stream` | MAY |
+| E2 | Message editing | Edit an already-sent message | Supported / unsupported | `edit_message` / `_update_text` | MAY |
+| E3 | Degradation: placeholder + final | Fallback when refresh is unavailable | Must implement | `supports_streaming` | MUST |
+| E4 | Progress placeholder | Send a text placeholder (`🤔 Thinking…`) when a turn starts | Yes / no | `progress_placeholder` | MAY |
+
+### F. Interaction / HITL
+
+| # | Feature | Description | Values / level | Field / primitive | Level |
+|---|---|---|---|---|---|
+| F1 | Buttons | Clickable buttons | Supported / unsupported | `buttons` / `Button` | SHOULD |
+| F2 | Forms / multiple questions | Multiple questions / multi-choice cards | Supported / numbered fallback | `question_form` / `CardQuestion` | MAY |
+| F3 | Callback identity | The callback carries the actor's identity | Supported / none | `callback_actor_identity` | SHOULD |
+| F4 | Group roles | Owner/admin roles usable for authorization | Supported / none | `member_roles` | MAY |
+| F5 | Acknowledgement / card update | Update the card in place after handling | Supported / unsupported | `acknowledge` | SHOULD |
+| F6 | Click deduplication | Repeated clicks are idempotent | Declared | `rid` / connector implementation | MUST |
+
+### G. Outbound media
+
+| # | Feature | Description | Values / level | Field / primitive | Level |
+|---|---|---|---|---|---|
+| G1 | Media types | Image / voice / video / file | Set of types | `media_out` / `RichMedia` | SHOULD |
+| G2 | Upload model | Chunked / URL handoff | Platform-specific | `upload` / `MediaHandle` | Fact |
+| G3 | Oversize handling | Compress / transcode / link fallback | Declared | Connector implementation | SHOULD |
+
+### H. Identity
+
+| # | Feature | Description | Values / level | Field / primitive | Level |
+|---|---|---|---|---|---|
+| H1 | Name / description source | Exposed by the platform or configured | Platform / config / both | `identity` + startup validation | MUST |
+| H2 | Avatar | The platform exposes an avatar URL | Yes / no | `BotIdentity.avatar_url` | MAY |
+
+### I. Proactive push
+
+| # | Feature | Description | Values / level | Field / primitive | Level |
+|---|---|---|---|---|---|
+| I1 | Proactive messages | Push without an inbound message + quota | Capability + limits | `proactive` + connector implementation | SHOULD |
+
+### J. Rate limiting
+
+| # | Feature | Description | Values / level | Field / primitive | Level |
+|---|---|---|---|---|---|
+| J1 | Local rate limit | Per-conversation outbound ceiling. **Discrete-send** channels use a token bucket; **streaming** channels are limited by the streaming controller (throttle/aggregate) | Per minute or — | `rate_limit_per_min` + `TokenBucket` | SHOULD |
+
+### K. Experience details
+
+| # | Feature | Description | Values / level | Field / primitive | Level |
+|---|---|---|---|---|---|
+| K1 | Typing indicator | Typing status | Supported / unsupported | `typing` / `_typing` | MAY |
+| K2 | Reactions | Emoji reactions | Supported / unsupported | `reactions` / `_react` | MAY |
+| K3 | Recall own message | The bot recalls a sent message | Supported / unsupported | Connector implementation | MAY |
+
+### L. Authentication and configuration
+
+| # | Feature | Description | Values / level | Field / primitive | Level |
+|---|---|---|---|---|---|
+| L1 | Credentials / token refresh / scopes | Authentication, token renewal, scopes/intents | Implemented | Connector implementation | MUST |
+| L2 | Startup validation | Validate required fields before enabling | Implemented | `validate_startup` | MUST |
+
+### M. Verification
+
+| # | Feature | Description | Values / level | Field / primitive | Level |
+|---|---|---|---|---|---|
+| M1 | Device backfill | Confirm each item on a real device and backfill | Confirmed / pending | §13.1 / `VERIFY-CAPABILITIES.md` | MUST |
+
+---
+
+## 2. Platform capability matrix
+
+Legend: ✔ supported · △ partial / limited · ✖ unsupported · ? pending device confirmation (§13.1). This section expands the `Capabilities` described in §3.3.
+
+| Feature | WeCom | Feishu | QQ (api-v2) | Personal WeChat |
 |---|---|---|---|---|
-| A1 连接 | WS 长连 | WS 长连 | WS 网关 + REST | HTTP 长轮询（iLink Bot，thin client） |
-| A2 自愈 | ✔ 重试无限 | ✔ 重连无限 + 线程监督 | ✔（退避 + resume） | ✔ 每账号指数退避（`-14` 除外） |
-| A3 心跳 | ✔（SDK） | ✔（SDK） | ✔ op1/op11 | ✖（长轮询超时即返回） |
-| A4 单实例 | ✔ | ✔（投递其一） | ✔ | ✔（同一 `ilink_bot_id` 只允许一个槽位） |
-| A5 健康 | ✔ | ✔ | ✔ | ✔（按账号实例） |
-| A6 多账号 | ✖ 单账号 | ✖ 单账号 | ✖ 单账号 | ✔（每账号独立连接器/凭据/长轮询） |
-| B1 单聊 | ✔ always | ✔ | ✔ always | ✔ always |
-| B2 群聊 | ✔ mention_only | ✔ mention_only | ✔ mention_only | ✖（direct-only，写死） |
-| B5 频道 | ✖ | ✖ | ✔（guild 频道） | ✖ |
-| B6 线程 | ✖ | ✔ | ? | ✖ |
-| C1 文本 | ✔ | ✔ | ✔ | ✔ |
-| C2 @提及 | ✔ | ✔ | ✔ | ✖ |
-| C3 引用 | ✔ | △ | ✔（msg_elements） | ✔（`ref_msg`） |
-| C4 入站媒体 | ✔（部分仅单聊） | ✔ | ✔ | ✔ |
-| C5 语音转写 | ✔ 原生 | ✖（客户端转写/气泡无） | ✔ 原生（`asr_refer_text`） | ✔ 原生（`voice_item.text`） |
-| C6 交互回调 | ✔ | ✔ | ✔ | ✖ |
-| C7 撤回事件 | ✖ | ✔ | ? | ✖（有 `delete_time_ms`，无处理） |
-| C8 会话事件 | ✔ enter_chat/feedback | ✔ | ✔ 加群/好友 | ✖ |
-| C9 去重 | ✔ | ✔ | ✔（msg_id+msg_seq） | ? |
-| D1 Markdown | RICH | STANDARD | STANDARD（msg_type=2） | NONE |
-| D2 富元素 | 代码块/表格/标题 | 代码块 | 代码块 | ✖ |
-| D3 分片 | ✔ 4096 | ✔ 8000 | ✔ | ✔ |
-| D4 卡片 | ✔ 模板卡 | ✔ 交互卡 | ✔ keyboard | ✖ |
-| E1 原生流式 | ✔ reply_stream | ✖（编辑代偿） | ✖（客户端不渲染 `stream_messages`） | ✖ |
-| E2 编辑 | ✖（伪流式） | ✔ patch card | ✖ | ✖ |
-| E3 占位+最终 | ✔ | ✔ | ✔ | ✔ |
-| E4 进度占位 | ✔ | ✔ | ✖（首段正文开流） | ✔ |
-| F1 按钮 | ✔ | ✔ | ✔ keyboard | ✖ |
-| F2 表单 | ✔ | ✔ | ✖（编号回退） | ✖ |
-| F3 回调身份 | ✔ | ✔ | ✔ | ✖ |
-| F4 群角色 | ✖ | ? | △ 平台暴露 `member_role`（未接入门控） | ✖ |
-| F5 回执/更新卡 | ✔ | ✔ | △ acknowledge | ✖ |
-| F6 点击去重 | ✔ | ✔ | ✔ | ✖ |
-| G1 出站媒体 | image/file/voice/video | image/file/audio/video | image/file/voice/video | image/video/file（无语音） |
-| G2 上传 | 分块 | API | URL / 分片 | CDN（AES-128-ECB） |
-| G3 超限/兜底 | ✔ 链接兜底 | ✔ 链接兜底 | ✔（软限降级为文件） | ? |
-| H1 身份来源 | 必须配置 | 平台 `bot/v3/info` | 平台 `READY d.user.username` | 不暴露（备注名/昵称是客户端本地数据；需配置 `identity.display_name`） |
-| I1 主动推送 | ✔ | ✔ | ✔（配额/开关） | △（缺 `context_token` 仍发，未证） |
-| J1 本地限速 | 流式节流 | 流式节流 | ✔ 令牌桶 30/min | ? |
-| K1 输入中 | ✖ | ✖ | △ 平台有 `msg_type=6`（单聊；未接入，走占位） | ✔ |
-| K2 表情回应 | ✖ | ✖ | ✖ | ✖ |
-| K3 撤回自己 | ? | ? | ✔ ≤2min | ✖ |
+| A1 Connection | WS long connection | WS long connection | WS gateway + REST | HTTP long-poll (iLink Bot, thin client) |
+| A2 Reconnect | ✔ unlimited retries | ✔ unlimited reconnect + thread supervision | ✔ backoff + resume | ✔ per-account exponential backoff (except `-14`) |
+| A3 Heartbeat | ✔ SDK | ✔ SDK | ✔ op1/op11 | ✖ (the long poll returns on timeout) |
+| A4 Single instance | ✔ | ✔ (one delivery target) | ✔ | ✔ (one slot per `ilink_bot_id`) |
+| A5 Health | ✔ | ✔ | ✔ | ✔ (per account instance) |
+| A6 Multiple accounts | ✖ single account | ✖ single account | ✖ single account | ✔ (independent connector/credentials/long-poll per account) |
+| B1 Direct chat | ✔ always | ✔ | ✔ always | ✔ always |
+| B2 Group chat | ✔ mention_only | ✔ mention_only | ✔ mention_only | ✖ (direct-only, hard-coded) |
+| B5 Channel | ✖ | ✖ | ✔ (guild channel) | ✖ |
+| B6 Thread | ✖ | ✔ | ? | ✖ |
+| C1 Text | ✔ | ✔ | ✔ | ✔ |
+| C2 Mentions | ✔ | ✔ | ✔ | ✖ |
+| C3 Quote | ✔ | △ | ✔ (`msg_elements`) | ✔ (`ref_msg`) |
+| C4 Inbound media | ✔ (some direct-only) | ✔ | ✔ | ✔ |
+| C5 Voice transcript | ✔ native | ✖ (client-side only; no voice-bubble transcript) | ✔ native (`asr_refer_text`) | ✔ native (`voice_item.text`) |
+| C6 Interaction callback | ✔ | ✔ | ✔ | ✖ |
+| C7 Recall event | ✖ | ✔ | ? | ✖ (`delete_time_ms` exists, unhandled) |
+| C8 Conversation events | ✔ enter_chat/feedback | ✔ | ✔ group/friend added | ✖ |
+| C9 Deduplication | ✔ | ✔ | ✔ (`msg_id` + `msg_seq`) | ? |
+| D1 Markdown | RICH | STANDARD | STANDARD (`msg_type=2`) | NONE |
+| D2 Rich elements | code blocks/tables/headings | code blocks | code blocks | ✖ |
+| D3 Splitting | ✔ 4096 | ✔ 8000 | ✔ | ✔ |
+| D4 Cards | ✔ template card | ✔ interactive card | ✔ keyboard | ✖ |
+| E1 Native streaming | ✔ `reply_stream` | ✖ (editing instead) | ✖ (the client does not render `stream_messages`) | ✖ |
+| E2 Editing | ✖ (pseudo-streaming) | ✔ patch card | ✖ | ✖ |
+| E3 Placeholder + final | ✔ | ✔ | ✔ | ✔ |
+| E4 Progress placeholder | ✔ | ✔ | ✖ (the first body frame opens the stream) | ✔ |
+| F1 Buttons | ✔ | ✔ | ✔ keyboard | ✖ |
+| F2 Forms | ✔ | ✔ | ✖ (numbered fallback) | ✖ |
+| F3 Callback identity | ✔ | ✔ | ✔ | ✖ |
+| F4 Group roles | ✖ | ? | △ the platform exposes `member_role` (not used for gating yet) | ✖ |
+| F5 Acknowledgement / card update | ✔ | ✔ | △ acknowledge | ✖ |
+| F6 Click deduplication | ✔ | ✔ | ✔ | ✖ |
+| G1 Outbound media | image/file/voice/video | image/file/audio/video | image/file/voice/video | image/video/file (no voice) |
+| G2 Upload | chunked | API | URL / multipart | CDN (AES-128-ECB) |
+| G3 Oversize / fallback | ✔ link fallback | ✔ link fallback | ✔ (soft limit degrades to file) | ? |
+| H1 Identity source | must be configured | platform `bot/v3/info` | platform `READY d.user.username` | not exposed (remark/nickname are client-local; configure `identity.display_name`) |
+| I1 Proactive push | ✔ | ✔ | ✔ (quota/switch) | △ (sends without `context_token`; unverified) |
+| J1 Local rate limit | streaming throttle | streaming throttle | ✔ token bucket 30/min | ? |
+| K1 Typing | ✖ | ✖ | △ the platform has `msg_type=6` (direct; not wired, placeholder is used) | ✔ |
+| K2 Reactions | ✖ | ✖ | ✖ | ✖ |
+| K3 Recall own message | ? | ? | ✔ ≤2 min | ✖ |
 
 ---
 
-## 3. 用法
+## 3. Usage
 
-- **新连接器验收**：必须先覆盖全部 **必须** 项；平台支持的 **应** 项都应实现；**可选** 项按需。每一项都要有单测（对 fake SDK），并在真机上按 §13.1 确认后回填 §2 与 §3.3。
-- **覆盖率**：`已实现且适用 / 适用总数`（不适用项——如平台无此能力——计入"不适用"，不计入分母）。
-- **能力评估**：直接读 §2 矩阵；机器可读版由每个连接器的 `Capabilities` 提供。
-- **维护**：平台的 `Capabilities` 字段新增/变更时，同步更新 §1 与 §2。
+- **New-connector acceptance**: cover every **MUST** item first; implement every **SHOULD** item the platform supports; **MAY** items are optional. Every item needs a unit test (against a fake SDK) and a device check per §13.1, then backfill §2 and §3.3.
+- **Coverage**: `implemented and applicable / applicable total` (items the platform cannot support count as "not applicable" and are excluded from the denominator).
+- **Capability evaluation**: read the §2 matrix directly; the machine-readable form is each connector's `Capabilities`.
+- **Maintenance**: when a platform's `Capabilities` fields change, update §1 and §2 together.
