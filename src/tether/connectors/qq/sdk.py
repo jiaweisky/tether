@@ -54,8 +54,11 @@ INTENT_INTERACTION = 1 << 26
 DEFAULT_INTENTS = INTENT_GROUP_AND_C2C | INTENT_INTERACTION
 
 # WebSocket close codes and the reconnect they call for.
-_CLOSE_RESUME = frozenset({4009})
-_CLOSE_FATAL = frozenset({4914, 4915})
+# No retry makes sense for these (bad opcode/payload, shard/version, intents,
+# sandbox/banned) — a reconnect would fail the same way.
+_CLOSE_FATAL = frozenset({4001, 4002, 4010, 4011, 4012, 4013, 4014, 4914, 4915})
+# These require a fresh Identify (invalid session / seq / too fast / internal).
+_CLOSE_IDENTIFY = frozenset({4006, 4007, 4008}) | frozenset(range(4900, 4914))
 
 # The URL/file endpoint also accepts a direct base64 payload, capped at 5 MiB;
 # larger media needs the multipart flow (not implemented).
@@ -64,6 +67,10 @@ _TOKEN_REFRESH_MARGIN_S = 60.0
 _BACKOFF_MIN_S = 1.0
 _BACKOFF_MAX_S = 30.0
 _HELLO_TIMEOUT_S = 10.0
+# A connection must live this long before its success resets the backoff.
+_STABLE_CONNECTION_S = 30.0
+# Reconnect after this many heartbeat intervals with no frame from the gateway.
+_MAX_MISSED_ACKS = 2
 
 
 class QQError(Exception):
@@ -146,6 +153,7 @@ class QQClient:
         self._stopped = threading.Event()
         self._ready = threading.Event()
         self._heartbeat_task: asyncio.Task[None] | None = None
+        self._missed_acks = 0
 
     # -- access token ------------------------------------------------------
     def _access_token(self) -> str:
@@ -290,10 +298,17 @@ class QQClient:
         backoff = _BACKOFF_MIN_S
         first = True
         while not self._stopped.is_set():
-            action = "identify"
+            # A raised transport error (e.g. DNS) leaves an existing session
+            # intact, so keep it and resume on the next attempt; only a fresh
+            # start needs an Identify.
+            action = "resume" if self._session_id is not None else "identify"
+            started = time.monotonic()
             try:
                 action = await self._connect(on_event)
-                backoff = _BACKOFF_MIN_S
+                # Only a connection that lived a while proves the endpoint is
+                # healthy; a connect-then-drop loop keeps backing off.
+                if time.monotonic() - started >= _STABLE_CONNECTION_S:
+                    backoff = _BACKOFF_MIN_S
             except _FatalGatewayError as exc:
                 log.error("qq_gateway_gave_up", code=getattr(exc, "args", ("",))[0])
                 break
@@ -334,9 +349,12 @@ class QQClient:
     def _close_action(self, code: int | None) -> str:
         if code in _CLOSE_FATAL:
             raise _FatalGatewayError(code)
-        # 4009 asks for a resume; every other code (including 4006/4007) means a
-        # fresh identify, which also drops the stale session.
-        return "resume" if code in _CLOSE_RESUME else "identify"
+        if code in _CLOSE_IDENTIFY:
+            return "identify"
+        # 4009 ("connection expired") and any normal/abnormal drop (no code,
+        # 1000/1006, …): resume when a session exists so the gateway replays
+        # missed events, else identify.
+        return "resume" if self._session_id is not None else "identify"
 
     async def _handshake(
         self, ws: Any, on_event: Callable[[str, dict[str, Any]], None]
@@ -346,6 +364,7 @@ class QQClient:
             await self._resume(ws)
         else:
             await self._identify(ws)
+        self._missed_acks = 0
         self._connected = True
         self._ready.set()
         self._heartbeat_task = asyncio.ensure_future(
@@ -401,6 +420,13 @@ class QQClient:
             while True:
                 await asyncio.sleep(interval_s)
                 await ws.send(json.dumps({"op": OP_HEARTBEAT, "d": self._seq}))
+                # Any frame from the gateway clears this (see _dispatch); a
+                # gateway that stops answering is dead even if the TCP is up.
+                self._missed_acks += 1
+                if self._missed_acks > _MAX_MISSED_ACKS:
+                    log.warning("qq_heartbeat_unanswered", missed=self._missed_acks)
+                    await self._close()
+                    return
         except (asyncio.CancelledError, websockets.ConnectionClosed):
             return
 
@@ -408,6 +434,8 @@ class QQClient:
         self, raw: Any, on_event: Callable[[str, dict[str, Any]], None]
     ) -> None:
         payload = _decode(raw)
+        # Any frame proves the gateway is alive; clear the heartbeat-miss count.
+        self._missed_acks = 0
         seq = payload.get("s")
         if isinstance(seq, int):
             self._seq = seq
@@ -420,7 +448,9 @@ class QQClient:
                 self._session_id = str(record.get("session_id") or "") or None
             _notify(on_event, event, record)
         elif op == OP_INVALID_SESSION:
+            # The session is gone: drop it and reconnect with a fresh Identify.
             self._reset_session()
+            await self._close()
         elif op == OP_RECONNECT:
             await self._close()
 
