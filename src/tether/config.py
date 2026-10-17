@@ -517,6 +517,19 @@ def _expand_str(text: str) -> str:
     return _ENV_REF.sub(replace, text)
 
 
+def default_db_path(config_path: str | Path) -> Path:
+    """Per-config state DB path, next to the config file.
+
+    The config file identifies the bridge instance; deriving the path from its
+    resolved location keeps two configs (or two checkouts) from sharing routes
+    and WeChat tokens. The final component is always ``state.sqlite3`` so it is
+    not mistaken for a config database.
+    """
+    config = Path(config_path).expanduser().resolve()
+    instance = re.sub(r"[^A-Za-z0-9._-]+", "_", config.stem).strip("._-") or "instance"
+    return config.parent / ".tether" / instance / "state.sqlite3"
+
+
 def load_config(path: str | Path | None) -> Config:
     if path is None:
         return Config()

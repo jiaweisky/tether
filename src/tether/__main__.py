@@ -10,7 +10,8 @@ import signal
 from dotenv import load_dotenv
 
 from .app import TetherApp
-from .config import load_config
+from .config import default_db_path, load_config
+from .store.sqlite import DatabaseInUseError
 from .util.logging import configure_logging, get_logger
 
 # How long a graceful shutdown may take before the process is force-exited.
@@ -27,17 +28,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--db",
-        default="~/.tether/tether.sqlite3",
-        help="route store SQLite path, holds sessions/routes and WeChat tokens "
-        "(default: %(default)s; must be 0600 in a private directory)",
+        default=None,
+        help="state SQLite path (routes + WeChat tokens); default: "
+        "<config dir>/.tether/<config name>/state.sqlite3",
     )
     return parser.parse_args(argv)
 
 
-async def _run(config_path: str, db_path: str) -> None:
+async def _run(config_path: str, db_path: str | None) -> None:
     # Load secrets from .env (does not override already-set environment).
     load_dotenv()
     config = load_config(config_path)
+    if db_path is None:
+        db_path = str(default_db_path(config_path))
     configure_logging(config.logging.level, config.logging.json_logs)
     log = get_logger("tether")
     app = TetherApp(config, db_path=db_path, config_path=config_path)
@@ -61,10 +64,10 @@ async def _run(config_path: str, db_path: str) -> None:
         except NotImplementedError:  # pragma: no cover - Windows
             pass
 
-    log.info("starting", config=config_path)
+    log.info("starting", config=config_path, db=db_path)
     try:
         await app.start()
-    except ValueError as exc:  # invalid configuration: report cleanly, not a traceback
+    except (ValueError, DatabaseInUseError) as exc:  # report cleanly, not a traceback
         log.error("startup_failed", error=str(exc))
         return
     try:

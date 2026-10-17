@@ -8,10 +8,12 @@ survive a bridge restart.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import time
 from pathlib import Path
+from typing import IO
 
 import aiosqlite
 
@@ -54,6 +56,43 @@ CREATE TABLE IF NOT EXISTS wechat_context_tokens (
     PRIMARY KEY (slot, peer_id)
 );
 """
+
+
+class DatabaseInUseError(RuntimeError):
+    """Another bridge process holds the state DB's exclusive lock."""
+
+
+class _DbLock:
+    """A process-lifetime exclusive lock next to the SQLite file."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._fh: IO[str] | None = None
+
+    def acquire(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fh = self.path.open("a+")
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            fh.close()
+            raise DatabaseInUseError(
+                f"state database is already in use by another tether process: {self.path}"
+            ) from exc
+        try:
+            os.chmod(self.path, _DB_FILE_MODE)
+        except OSError:
+            pass
+        self._fh = fh
+
+    def release(self) -> None:
+        if self._fh is None:
+            return
+        fh, self._fh = self._fh, None
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        finally:
+            fh.close()
 
 
 class WeChatBindingConflict(Exception):
@@ -145,11 +184,17 @@ class RouteStore:
     def __init__(self, path: str | Path) -> None:
         self.path = str(Path(path).expanduser())
         self._db: aiosqlite.Connection | None = None
+        self._lock: _DbLock | None = None
 
     async def close(self) -> None:
-        if self._db is not None:
-            await self._db.close()
+        try:
+            if self._db is not None:
+                await self._db.close()
+        finally:
             self._db = None
+            if self._lock is not None:
+                self._lock.release()
+                self._lock = None
 
     def _conn(self) -> aiosqlite.Connection:
         if self._db is None:
@@ -205,12 +250,23 @@ class RouteStore:
                     parent.chmod(_DB_DIR_MODE)
                 except OSError:
                     pass
-        self._db = await aiosqlite.connect(self.path)
-        self._db.row_factory = aiosqlite.Row
-        await self._db.executescript(_SCHEMA)
-        await self._db.commit()
-        await self._ensure_wechat_schema()
-        _chmod_private(self.path)
+            self._lock = _DbLock(Path(self.path + ".lock"))
+            self._lock.acquire()
+        try:
+            self._db = await aiosqlite.connect(self.path)
+            self._db.row_factory = aiosqlite.Row
+            await self._db.executescript(_SCHEMA)
+            await self._db.commit()
+            await self._ensure_wechat_schema()
+            _chmod_private(self.path)
+        except BaseException:
+            if self._db is not None:
+                await self._db.close()
+                self._db = None
+            if self._lock is not None:
+                self._lock.release()
+                self._lock = None
+            raise
 
     async def _ensure_wechat_schema(self) -> None:
         """Migrate the pre-token wechat_accounts table in place."""

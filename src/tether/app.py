@@ -16,6 +16,7 @@ import os
 import time
 from collections.abc import Awaitable
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, Literal
 
 from .agent.client import HttpAgentClient
@@ -89,7 +90,7 @@ class TetherApp:
         self,
         config: Config,
         *,
-        db_path: str = "~/.tether/tether.sqlite3",
+        db_path: str | Path,
         connectors: list[IMConnector] | None = None,
         client_factory: ClientFactory | None = None,
         config_path: str | None = None,

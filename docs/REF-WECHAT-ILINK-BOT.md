@@ -538,7 +538,7 @@ Success requires HTTP `200` and a nonempty `x-encrypted-param` response header. 
   exposes no nickname or remark name). **All runtime state is in SQLite**:
   `wechat_accounts(slot, ilink_bot_id, token, base_url, user_id, bound_at, token_saved_at)`,
   `wechat_state(slot, cursor)` and `wechat_context_tokens(slot, peer_id, token)`. There is no credential JSON.
-  The DB defaults to `~/.tether/tether.sqlite3`; it must be `0600` in a private directory (not `/tmp`).
+  The DB defaults to `<config dir>/.tether/<config name>/state.sqlite3`; it must be `0600` in a private directory (not `/tmp`).
   At startup, legacy `~/.tether/wechat/<id>.json` + `.state.json` files are imported and deleted.
 - **Addresses**: the API base is the `baseurl` returned by login (default `https://ilinkai.weixin.qq.com`);
   CDN `https://novac2c.cdn.weixin.qq.com/c2c`; `bot_type=3`.

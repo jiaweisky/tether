@@ -58,9 +58,11 @@ cp config.example.yaml config.yaml   # config.yaml is gitignored
 uv run tether --config config.yaml
 ```
 
-Tether's state DB defaults to `~/.tether/tether.sqlite3`; override it with
-`--db`. It now holds session routes **and WeChat bot tokens**, so keep it `0600`
-in a private directory (backups are sensitive).
+Tether's state DB defaults to `<config dir>/.tether/<config name>/state.sqlite3`
+(for example `.tether/config/state.sqlite3`); override it with `--db`. It holds
+session routes **and WeChat bot tokens**, so keep it `0600` in a private
+directory (backups are sensitive). An exclusive `<db>.lock` prevents two bridge
+processes from sharing one state DB.
 
 For personal WeChat, enable the channel and add a bot with
 `identity.display_name` and `login_via` in `config.yaml` (see
