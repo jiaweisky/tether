@@ -71,6 +71,15 @@ from .streaming import RateLimited, StreamingController
 
 log = get_logger("tether.turn")
 
+# Read-only denials are expected; surface one friendly notice instead of raw tool errors.
+_READ_ONLY_HINTS = (
+    "permission blocked",
+    "permission denied",
+    "not permitted",
+    "read-only",
+    "read only",
+)
+
 # Why agentd left an inbound attachment out of the model prompt (readable wording).
 _OMIT_REASONS = {
     "too_large": "it exceeds the size limit",
@@ -117,6 +126,7 @@ class TurnEngine:
         self._media_seen: set[str] = set()
         self._sent_ref: SentRef | None = None
         self._placeholder_sent = False
+        self._read_only_notice_sent = False
         self._ended = False
         # Set by the app when the engine becomes the conversation's active turn;
         # used by the watchdog to tell a genuinely running turn from a stale one.
@@ -346,7 +356,13 @@ class TurnEngine:
             self._media_paths[path] = None
 
     async def _on_tool_failed(self, data: dict[str, Any]) -> None:
-        self.controller.push_text(f"\n\n⚠️ A tool failed: {_short(data.get('error'))}\n")
+        message = _short(data.get("error"))
+        if any(hint in message.lower() for hint in _READ_ONLY_HINTS):
+            if not self._read_only_notice_sent:
+                self._read_only_notice_sent = True
+                await self._send_notice("🔒 当前为只读模式：不能修改文件或执行命令。")
+            return
+        self.controller.push_text(f"\n\n⚠️ A tool failed: {message}\n")
 
     async def _on_step_ended(self, data: dict[str, Any]) -> None:
         self._record_usage(data)

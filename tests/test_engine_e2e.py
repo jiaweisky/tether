@@ -1057,6 +1057,28 @@ async def test_status_shows_agentd_unreachable(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_read_only_tool_denial_is_friendly_and_reported_once(tmp_path):
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+    for event_id in ("t1", "t2"):
+        await app._route_event(
+            Event(
+                event_id,
+                "session.next.tool.failed",
+                {
+                    "sessionID": sid,
+                    "error": {"message": "permission blocked"},
+                    "tool": "write",
+                },
+            )
+        )
+    text = "\n".join(m["text"] for m in conn.messages if m["kind"] == "text")
+    assert text.count("当前为只读模式") == 1
+    assert "A tool failed" not in text
+
+
+@pytest.mark.asyncio
 async def test_tool_edits_send_only_the_final_file_version(tmp_path):
     app, conn, client = await make_app(tmp_path, config=egress_config(tmp_path))
     await app._on_message(inbound("hi"))
