@@ -144,6 +144,7 @@
 | 2026-10-17 | **WeChat config simplified to B**: replaced `accounts[]` + all login switches (`login.enabled/allow/allow_admin_new`, `bots[].login`) with `bots[]` (`id`, required `identity.display_name`, `enabled`, `cred_path`, `login_via[]`). Bare `/login wechat` resolves `(channel,sender)` → bot via `login_via`; the same mapping may not point at two bots. First bind is allowed; same `ilink_bot_id` re-login; a different bound id is rejected until local `tether wechat unbind <id>`; duplicate ids across bots rejected. CLI is `tether login wechat --bot <id>`; no `--allow-new`/`--force`. `login_via`/identity are hot-reloadable. |
 | 2026-10-17 | §5.4/§9/§15: added `channels.wechat.login.allow_admin_new` (default `false`) — an explicit opt-in that lets an **admin's in-chat `/login`** perform a first bind, equivalent to CLI `--allow-new`; the default remains deny-new-in-chat. |
 | 2026-10-17 | **Implemented** the WeChat personal connector: iLink thin client (QR login, long-poll, AES-128-ECB CDN media, typing), direct-only text/image/video/file, multi-account slots, default-deny login admission, binding records in SQLite, CLI `tether login wechat`, and in-chat `/login wechat`. Unit/contract tests cover config, protocol, media, admission and app routing. |
+| 2026-10-17 | **Tool asks are auto-answered by default**: Tether's default `permissions.auto` is now `once` for every action (including `default`), so agentd's asks do not create avoidable HITL cards; the security boundary is agentd's sandbox + `inboundPermissions`. `ask`/`reject` remain opt-in. **webfetch** runs in-process and is not covered by `network: no-egress`, so agentd must deny it when not needed. |
 | 2026-10-17 | **State DB is per-config and locked**: the default is now `<config dir>/.tether/<config name>/state.sqlite3` (e.g. `.tether/config/state.sqlite3`) instead of the shared `~/.tether/tether.sqlite3`; `--db` still overrides. An exclusive `<db>.lock` makes a second bridge process fail at startup instead of sharing routes/WeChat state. Existing deployments must move their DB or pass `--db` to the old path. |
 | 2026-10-17 | §2.5/§2.6/§2.7/§2.8/§3.1/§3.2/§3.6/§5.4/§6.6/§8/§9/§10/§11/§13/§14/§15: **WeChat multi-account** — one WeChat channel may now run several logged-in accounts. Each account is a **connector instance** with an `account` dimension in `Conversation.key`, its own `cred_path`, token-independent binding record, long-poll cursor, `context_token` cache, identity and failure state. Login is per account (`tether login wechat --account <id>` / `/login wechat <id>`, admin + direct chat only). Login admission is **default-deny** for new bindings: a scan completes only if the returned `ilink_bot_id` is already bound to the target slot (re-login) or listed in `login.allow`; the first bind needs CLI `--allow-new` or a pre-added id. Login controls: `channels.wechat.accounts[].login`, global `login.enabled`, and the `login.allow` allowlist; `accounts[].enabled` only decides whether the account runs. An expired token (`errcode -14`) takes down only that account (`login_required`); duplicate `ilink_bot_id`s are rejected at startup; login policy is hot-reloadable while the account list/credentials still need a restart. The legacy single-account `cred_path` remains a shorthand for one implicit account whose `Conversation.key` is unchanged. |
 
@@ -2135,12 +2136,12 @@ permissions:
     read: once
     glob: once
     grep: once
-    webfetch: ask
-    bash: ask
-    write: ask
-    edit: ask
-    apply_patch: ask
-  default: ask
+    webfetch: once
+    bash: once
+    write: once
+    edit: once
+    apply_patch: once
+  default: once
   timeout_s: 300
   fallback: reject                    # reject|allow
   poll_interval_s: 30                 # HITL fallback polling (§4.3)
@@ -2264,10 +2265,11 @@ inputModalities: [text, image]       # the endpoint model's actual capabilities
 
 ### 10.2 Agent execution permissions
 
-- Choose a posture per §9.2: **posture A** (dangerous tools stay `ask`, confirmed via HITL) or **posture B** (deny, dangerous operations
-  unavailable to the model). HITL only takes effect for `ask`.
-- The bridge-side `permissions.auto` auto-allows only **deterministically safe** read-only actions; everything else is `ask`.
-- Explicitly recorded: `webfetch` is an SSRF/exfiltration vector; defaults to `ask` (or deny).
+- **Tether is not the security boundary.** By default it auto-answers the agent's asks with `once` for every action, so a normal turn does not
+  park on HITL; agentd's `sandbox` + `inboundPermissions` enforce what may run and what may be read/written.
+- Operators can opt into HITL per action with `ask` (or deny outright with `reject`).
+- **webfetch is the exception**: it runs in-process, outside the command sandbox, so it is not covered by `network: no-egress`. Deny it in
+  agentd (`inboundPermissions`) if the deployment does not need network fetches; otherwise it is an SSRF/exfiltration path.
 
 ### 10.3 Secrets
 

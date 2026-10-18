@@ -88,7 +88,9 @@ async def test_reconcile_restores_and_surfaces_pending_permission(tmp_path):
 
 @pytest.mark.asyncio
 async def test_restore_hitl_does_not_duplicate_known_pending(tmp_path):
-    app, conn, client = await make_app(tmp_path)
+    config = Config()
+    config.permissions.auto["bash"] = "ask"
+    app, conn, client = await make_app(tmp_path, config=config)
     await app._on_message(inbound("do it", kind="group", conv_id="g1"))
     sid = client.prompts[0]["sid"]
     await app._route_event(

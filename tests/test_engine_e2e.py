@@ -33,6 +33,12 @@ from tether.models import (
 )
 
 
+def ask_bash_config() -> Config:
+    config = Config()
+    config.permissions.auto["bash"] = "ask"
+    return config
+
+
 async def make_app(tmp_path, config: Config | None = None, connector=None):
     metrics.reset()  # the registry is process-global; isolate counter assertions
     config = config or Config()
@@ -122,7 +128,9 @@ async def test_group_users_share_one_session(tmp_path):
 
 @pytest.mark.asyncio
 async def test_permission_card_and_click(tmp_path):
-    app, conn, client = await make_app(tmp_path)
+    config = Config()
+    config.permissions.auto["bash"] = "ask"
+    app, conn, client = await make_app(tmp_path, config=config)
     await app._on_message(inbound("run it", kind="group", conv_id="g1"))
     sid = client.prompts[0]["sid"]
     await app._route_event(
@@ -285,7 +293,7 @@ async def test_missing_session_is_recreated(tmp_path):
 
 @pytest.mark.asyncio
 async def test_stale_interaction_is_ignored(tmp_path):
-    app, conn, client = await make_app(tmp_path)
+    app, conn, client = await make_app(tmp_path, config=ask_bash_config())
     await app._on_message(inbound("do it", kind="group", conv_id="g1"))
     sid = client.prompts[0]["sid"]
     await app._route_event(
@@ -308,7 +316,7 @@ async def test_stale_interaction_is_ignored(tmp_path):
 
 @pytest.mark.asyncio
 async def test_interaction_after_restart_attaches_resumed_engine(tmp_path):
-    app, conn, client = await make_app(tmp_path)
+    app, conn, client = await make_app(tmp_path, config=ask_bash_config())
     await app._on_message(inbound("do it", kind="group", conv_id="g1"))
     sid = client.prompts[0]["sid"]
     await app._route_event(
@@ -387,6 +395,7 @@ async def test_idle_does_not_leave_thinking_placeholder(tmp_path):
 @pytest.mark.asyncio
 async def test_permission_timeout_auto_replies(tmp_path):
     config = Config()
+    config.permissions.auto["bash"] = "ask"
     config.permissions.timeout_s = 1
     app, conn, client = await make_app(tmp_path, config=config)
     await app._on_message(inbound("hi"))
@@ -442,7 +451,9 @@ async def test_step_started_shows_working_hint(tmp_path):
 
 @pytest.mark.asyncio
 async def test_permission_card_failure_falls_back_to_numbered_text(tmp_path):
-    app, conn, client = await make_app(tmp_path)
+    config = Config()
+    config.permissions.auto["bash"] = "ask"
+    app, conn, client = await make_app(tmp_path, config=config)
 
     async def boom(*args, **kwargs):
         raise RuntimeError("wecom card rejected")
@@ -596,7 +607,7 @@ async def test_number_reply_to_stale_interaction_is_dropped(tmp_path):
 
 @pytest.mark.asyncio
 async def test_turn_finish_clears_pending_interactions(tmp_path):
-    app, conn, client = await make_app(tmp_path)
+    app, conn, client = await make_app(tmp_path, config=ask_bash_config())
     await app._on_message(inbound("hi", message_id="m1"))
     sid = client.prompts[0]["sid"]
     await app._route_event(

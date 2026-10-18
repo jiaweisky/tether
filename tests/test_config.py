@@ -31,6 +31,13 @@ def test_isolated_mode_requires_control_and_source():
     validate_startup(ok)  # no raise
 
 
+def test_default_permissions_auto_approve_tools():
+    config = Config()
+    for action in ("read", "glob", "grep", "webfetch", "bash", "write", "edit", "apply_patch"):
+        assert config.permissions.action_for(action) == "once"
+    assert config.permissions.action_for("unknown_tool") == "once"
+
+
 def test_load_config_from_yaml(tmp_path):
     path = tmp_path / "c.yaml"
     path.write_text("agent:\n  default_agent: plan\n")

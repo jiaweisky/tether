@@ -225,21 +225,25 @@ class MediaConfig(BaseModel):
 
 
 def _default_permission_auto() -> dict[str, PermissionAction]:
+    # Tether is the transport, not a second security policy. agentd's sandbox
+    # and inboundPermissions own the boundary; auto-answer its asks so a normal
+    # turn never parks on an avoidable HITL card. Operators can opt into HITL
+    # per action with ``ask``.
     return {
         "read": "once",
         "glob": "once",
         "grep": "once",
-        "webfetch": "ask",
-        "bash": "ask",
-        "write": "ask",
-        "edit": "ask",
-        "apply_patch": "ask",
+        "webfetch": "once",
+        "bash": "once",
+        "write": "once",
+        "edit": "once",
+        "apply_patch": "once",
     }
 
 
 class PermissionsConfig(BaseModel):
     auto: dict[str, PermissionAction] = Field(default_factory=_default_permission_auto)
-    default: PermissionAction = "ask"
+    default: PermissionAction = "once"
     timeout_s: int = 300
     fallback: Literal["reject", "allow"] = "reject"
     poll_interval_s: int = 30
