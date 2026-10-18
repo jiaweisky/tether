@@ -71,8 +71,10 @@ from .streaming import RateLimited, StreamingController
 
 log = get_logger("tether.turn")
 
-# Read-only denials are expected; surface one friendly notice instead of raw tool errors.
-_READ_ONLY_HINTS = (
+# agentd policy denials are expected sometimes; surface one friendly notice instead
+# of raw tool errors. Tether cannot infer the deployment's read-only/read-write
+# mode from this error, so the wording must stay generic.
+_DENIED_HINTS = (
     "permission blocked",
     "permission denied",
     "not permitted",
@@ -126,7 +128,7 @@ class TurnEngine:
         self._media_seen: set[str] = set()
         self._sent_ref: SentRef | None = None
         self._placeholder_sent = False
-        self._read_only_notice_sent = False
+        self._denied_notice_sent = False
         self._ended = False
         # Set by the app when the engine becomes the conversation's active turn;
         # used by the watchdog to tell a genuinely running turn from a stale one.
@@ -357,10 +359,10 @@ class TurnEngine:
 
     async def _on_tool_failed(self, data: dict[str, Any]) -> None:
         message = _short(data.get("error"))
-        if any(hint in message.lower() for hint in _READ_ONLY_HINTS):
-            if not self._read_only_notice_sent:
-                self._read_only_notice_sent = True
-                await self._send_notice("🔒 当前为只读模式：不能修改文件或执行命令。")
+        if any(hint in message.lower() for hint in _DENIED_HINTS):
+            if not self._denied_notice_sent:
+                self._denied_notice_sent = True
+                await self._send_notice("🔒 当前策略不允许该操作。")
             return
         self.controller.push_text(f"\n\n⚠️ A tool failed: {message}\n")
 
