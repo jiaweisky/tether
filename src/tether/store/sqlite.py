@@ -12,6 +12,7 @@ import fcntl
 import json
 import os
 import time
+import weakref
 from pathlib import Path
 from typing import IO
 
@@ -21,6 +22,11 @@ from ..models import Conversation, PendingInteraction, Route
 
 _DB_FILE_MODE = 0o600
 _DB_DIR_MODE = 0o700
+
+# Live connected stores. Lets tests close connections left open by a test
+# body before the event loop shuts down (an unclosed aiosqlite worker thread
+# crashes with "Event loop is closed" at teardown).
+_open_stores: weakref.WeakSet[RouteStore] = weakref.WeakSet()
 
 _WECHAT_ACCOUNTS_DDL = """
 CREATE TABLE IF NOT EXISTS wechat_accounts (
@@ -191,6 +197,7 @@ class RouteStore:
             if self._db is not None:
                 await self._db.close()
         finally:
+            _open_stores.discard(self)
             self._db = None
             if self._lock is not None:
                 self._lock.release()
@@ -259,6 +266,7 @@ class RouteStore:
             await self._db.commit()
             await self._ensure_wechat_schema()
             _chmod_private(self.path)
+            _open_stores.add(self)
         except BaseException:
             if self._db is not None:
                 await self._db.close()
