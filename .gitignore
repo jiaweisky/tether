@@ -23,3 +23,6 @@ config.yaml
 .idea/
 .vscode/
 .DS_Store
+
+# PyInstaller
+tether.spec
