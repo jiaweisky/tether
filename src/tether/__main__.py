@@ -57,10 +57,12 @@ async def _run(config_path: str, db_path: str | None) -> None:
 
     def request_stop() -> None:
         nonlocal presses
+
         presses += 1
         if presses >= 2:  # a second interrupt forces exit even if shutdown is stuck
             log.warning("force_exit")
             os._exit(1)
+
         log.info("shutdown_requested")
         stop_event.set()
 
