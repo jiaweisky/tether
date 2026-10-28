@@ -14,8 +14,8 @@ from typing import Any
 import httpx
 from httpx_sse import aconnect_sse
 
-from .errors import AgentError
-from .events import (
+from tether.agent.errors import AgentError
+from tether.agent.events import (
     AgentInfo,
     Event,
     ModelInfo,

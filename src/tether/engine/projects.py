@@ -27,10 +27,10 @@ from typing import Any, Protocol
 
 import httpx
 
-from ..config import Config
-from ..metrics import metrics
-from ..models import Conversation
-from ..util.logging import get_logger
+from tether.config import Config
+from tether.metrics import metrics
+from tether.models import Conversation
+from tether.util.logging import get_logger
 
 log = get_logger("tether.projects")
 

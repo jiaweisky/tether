@@ -10,9 +10,9 @@ from __future__ import annotations
 import json
 from typing import Any, Literal
 
-from ..agent.events import PendingPermission, PendingQuestion
-from ..config import Config
-from ..models import (
+from tether.agent.events import PendingPermission, PendingQuestion
+from tether.config import Config
+from tether.models import (
     Button,
     Card,
     CardQuestion,

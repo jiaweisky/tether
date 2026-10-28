@@ -28,8 +28,8 @@ from urllib.parse import urlparse
 import httpx
 import websockets
 
-from ...util.logging import get_logger
-from ...util.net import is_public_host
+from tether.util.logging import get_logger
+from tether.util.net import is_public_host
 
 log = get_logger("tether.qq")
 

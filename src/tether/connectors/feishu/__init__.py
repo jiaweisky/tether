@@ -1,3 +1,3 @@
 from __future__ import annotations
 
-from .connector import *  # noqa: F401,F403
+from tether.connectors.feishu.connector import *  # noqa: F401,F403

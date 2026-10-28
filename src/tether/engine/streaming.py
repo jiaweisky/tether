@@ -15,8 +15,8 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
-from ..metrics import metrics
-from ..util.logging import get_logger
+from tether.metrics import metrics
+from tether.util.logging import get_logger
 
 log = get_logger("tether.streaming")
 

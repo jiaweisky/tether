@@ -11,14 +11,14 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from ..agent.client import HttpAgentClient
-from ..agent.errors import AgentError
-from ..config import Config
-from ..connector import IMConnector
-from ..models import BotIdentity, Conversation, Route
-from ..store.sqlite import RouteStore
-from ..util.logging import get_logger
-from .projects import LeaseManager, ProjectProvider
+from tether.agent.client import HttpAgentClient
+from tether.agent.errors import AgentError
+from tether.config import Config
+from tether.connector import IMConnector
+from tether.engine.projects import LeaseManager, ProjectProvider
+from tether.models import BotIdentity, Conversation, Route
+from tether.store.sqlite import RouteStore
+from tether.util.logging import get_logger
 
 log = get_logger("tether.router")
 

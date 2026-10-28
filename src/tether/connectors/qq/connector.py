@@ -18,9 +18,11 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
-from ...capabilities import Capabilities, MarkdownLevel
-from ...connector import Unsupported
-from ...models import (
+from tether.capabilities import Capabilities, MarkdownLevel
+from tether.connector import Unsupported
+from tether.connectors.base import BaseConnector
+from tether.connectors.qq.sdk import QQSDK, QQClient, QQError
+from tether.models import (
     Attachment,
     BotIdentity,
     Button,
@@ -36,10 +38,8 @@ from ...models import (
     Sender,
     normalize_media_kind,
 )
-from ...util.dedup import DedupCache
-from ...util.logging import get_logger
-from ..base import BaseConnector
-from .sdk import QQSDK, QQClient, QQError
+from tether.util.dedup import DedupCache
+from tether.util.logging import get_logger
 
 log = get_logger("tether.qq")
 

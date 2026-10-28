@@ -19,9 +19,9 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
 
-from .agent.client import HttpAgentClient
-from .agent.errors import AgentError, user_message
-from .agent.events import (
+from tether.agent.client import HttpAgentClient
+from tether.agent.errors import AgentError, user_message
+from tether.agent.events import (
     PERMISSION_ASKED,
     PERMISSION_REPLIED,
     QUESTION_ASKED,
@@ -30,24 +30,24 @@ from .agent.events import (
     SESSION_STATUS,
     Event,
 )
-from .config import Config, load_config, validate_startup
-from .connector import IMConnector, build_connectors
-from .connectors.wechat.login import (
+from tether.config import Config, load_config, validate_startup
+from tether.connector import IMConnector, build_connectors
+from tether.connectors.wechat.login import (
     WeChatLoginError,
     WeChatLoginRejected,
     WeChatVerifyCodeRequired,
 )
-from .connectors.wechat.migrate import migrate_legacy_wechat_files
-from .engine import hitl
-from .engine.commands import Command, help_text, parse_command, unescape_command
-from .engine.media_egress import MediaEgress, read_path_media, record_blocked
-from .engine.media_ingest import MediaIngest
-from .engine.projects import build_provider
-from .engine.prompt import PromptComposer
-from .engine.router import ClientFactory, Router
-from .engine.turn import TurnEngine
-from .metrics import metrics
-from .models import (
+from tether.connectors.wechat.migrate import migrate_legacy_wechat_files
+from tether.engine import hitl
+from tether.engine.commands import Command, help_text, parse_command, unescape_command
+from tether.engine.media_egress import MediaEgress, read_path_media, record_blocked
+from tether.engine.media_ingest import MediaIngest
+from tether.engine.projects import build_provider
+from tether.engine.prompt import PromptComposer
+from tether.engine.router import ClientFactory, Router
+from tether.engine.turn import TurnEngine
+from tether.metrics import metrics
+from tether.models import (
     ConnectorEvent,
     Conversation,
     InboundMessage,
@@ -60,13 +60,13 @@ from .models import (
     Sender,
     TextSegment,
 )
-from .render.markdown import render_markdown
-from .render.renderer import DefaultRenderer
-from .store.sqlite import RouteStore
-from .util.dedup import DedupCache
-from .util.logging import get_logger
-from .util.path_policy import PathPolicy, resolve_under
-from .util.redact import redact_secrets
+from tether.render.markdown import render_markdown
+from tether.render.renderer import DefaultRenderer
+from tether.store.sqlite import RouteStore
+from tether.util.dedup import DedupCache
+from tether.util.logging import get_logger
+from tether.util.path_policy import PathPolicy, resolve_under
+from tether.util.redact import redact_secrets
 
 log = get_logger("tether.app")
 
@@ -1580,7 +1580,7 @@ def assistant_text(messages: list[dict]) -> str | None:
 
 def tool_media(messages: list[dict]) -> list[RichMedia]:
     """File parts produced by tool calls within a transcript."""
-    from .engine.media_egress import extract_file_parts
+    from tether.engine.media_egress import extract_file_parts
 
     out: list[RichMedia] = []
     for message in messages:

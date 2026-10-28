@@ -18,7 +18,7 @@ from typing import IO
 
 import aiosqlite
 
-from ..models import Conversation, PendingInteraction, Route
+from tether.models import Conversation, PendingInteraction, Route
 
 _DB_FILE_MODE = 0o600
 _DB_DIR_MODE = 0o700

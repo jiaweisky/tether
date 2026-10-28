@@ -14,9 +14,10 @@ import uuid
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from ...capabilities import Capabilities, MarkdownLevel
-from ...connector import Unsupported
-from ...models import (
+from tether.capabilities import Capabilities, MarkdownLevel
+from tether.connector import Unsupported
+from tether.connectors.base import BaseConnector
+from tether.models import (
     Attachment,
     BotIdentity,
     Card,
@@ -31,8 +32,7 @@ from ...models import (
     SentRef,
     normalize_media_kind,
 )
-from ...util.logging import get_logger
-from ..base import BaseConnector
+from tether.util.logging import get_logger
 
 log = get_logger("tether.wecom")
 

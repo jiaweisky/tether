@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .dedup import DedupCache
-from .throttle import TokenBucket
+from tether.util.dedup import DedupCache
+from tether.util.throttle import TokenBucket
 
 __all__ = ["DedupCache", "TokenBucket"]

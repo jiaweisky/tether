@@ -14,8 +14,8 @@ from typing import Any
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
-from ..capabilities import MarkdownLevel
-from ..models import RichMedia
+from tether.capabilities import MarkdownLevel
+from tether.models import RichMedia
 
 # Inline wrappers: opening token -> (closing token, marker used at rich levels).
 _WRAPPED = {

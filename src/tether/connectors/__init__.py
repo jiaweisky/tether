@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ..connector import IMConnector, register_connector
-from .fake import FakeConnector
+from tether.connector import IMConnector, register_connector
+from tether.connectors.fake import FakeConnector
 
 if TYPE_CHECKING:
-    from ..config import Config
+    from tether.config import Config
 
 __all__ = ["FakeConnector", "build_enabled", "register_builtins"]
 
@@ -29,7 +29,7 @@ def _make_wecom(
     reconnect_max_ms: int | None = None,
     **_,
 ):
-    from .wecom.connector import WeComConnector
+    from tether.connectors.wecom.connector import WeComConnector
 
     return WeComConnector(
         bot_id=bot_id,
@@ -40,13 +40,13 @@ def _make_wecom(
 
 
 def _make_feishu(*, app_id: str, app_secret: str, **_):
-    from .feishu.connector import FeishuConnector
+    from tether.connectors.feishu.connector import FeishuConnector
 
     return FeishuConnector(app_id=app_id, app_secret=app_secret)
 
 
 def _make_qq(*, appid: str, secret: str, **_):
-    from .qq.connector import QQConnector
+    from tether.connectors.qq.connector import QQConnector
 
     return QQConnector(appid=appid, secret=secret)
 
@@ -59,7 +59,7 @@ def _make_wechat(
     store: Any = None,
     **_,
 ):
-    from .wechat.connector import WeChatConnector
+    from tether.connectors.wechat.connector import WeChatConnector
 
     return WeChatConnector(
         spec=spec,

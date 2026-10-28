@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..capabilities import Capabilities, MarkdownLevel
-from ..models import (
+from tether.capabilities import Capabilities, MarkdownLevel
+from tether.connectors.base import BaseConnector
+from tether.models import (
     Attachment,
     BotIdentity,
     Card,
@@ -20,7 +21,6 @@ from ..models import (
     SentRef,
     normalize_media_kind,
 )
-from .base import BaseConnector
 
 
 def fake_capabilities() -> Capabilities:

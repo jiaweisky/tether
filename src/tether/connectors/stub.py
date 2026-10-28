@@ -7,8 +7,8 @@ real platform.
 
 from __future__ import annotations
 
-from ..capabilities import Capabilities
-from .base import BaseConnector
+from tether.capabilities import Capabilities
+from tether.connectors.base import BaseConnector
 
 
 class ScaffoldConnector(BaseConnector):

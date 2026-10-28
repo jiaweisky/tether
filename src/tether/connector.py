@@ -10,8 +10,8 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol, runtime_checkable
 
-from .capabilities import Capabilities
-from .models import (
+from tether.capabilities import Capabilities
+from tether.models import (
     Attachment,
     BotIdentity,
     Card,
@@ -97,6 +97,6 @@ def build_connectors(config: Any, store: Any = None) -> list[IMConnector]:
     platform SDK. ``store`` is the route store, used by multi-account channels
     for account-binding records.
     """
-    from .connectors import build_enabled
+    from tether.connectors import build_enabled
 
     return build_enabled(config, store=store)

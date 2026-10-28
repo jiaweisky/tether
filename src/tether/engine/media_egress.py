@@ -16,10 +16,10 @@ from urllib.parse import urlparse
 
 import httpx
 
-from ..config import Config
-from ..connector import IMConnector
-from ..metrics import metrics
-from ..models import (
+from tether.config import Config
+from tether.connector import IMConnector
+from tether.metrics import metrics
+from tether.models import (
     Conversation,
     MediaSegment,
     NormalizedMediaKind,
@@ -28,9 +28,9 @@ from ..models import (
     TextSegment,
     normalize_media_kind,
 )
-from ..util.logging import get_logger
-from ..util.media import compress_image, sniff_mime
-from ..util.net import is_public_host
+from tether.util.logging import get_logger
+from tether.util.media import compress_image, sniff_mime
+from tether.util.net import is_public_host
 
 log = get_logger("tether.media")
 

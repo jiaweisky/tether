@@ -17,23 +17,11 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
-from ...capabilities import Capabilities, MarkdownLevel
-from ...config import WeChatBotSpec
-from ...connector import Unsupported
-from ...metrics import metrics
-from ...models import (
-    Attachment,
-    BotIdentity,
-    Conversation,
-    InboundMessage,
-    MediaBytes,
-    RichMedia,
-    Sender,
-    normalize_media_kind,
-)
-from ...util.logging import get_logger
-from ..base import BaseConnector
-from .client import (
+from tether.capabilities import Capabilities, MarkdownLevel
+from tether.config import WeChatBotSpec
+from tether.connector import Unsupported
+from tether.connectors.base import BaseConnector
+from tether.connectors.wechat.client import (
     DEFAULT_CDN_BASE,
     LONG_POLL_TIMEOUT_S,
     MAX_CDN_BYTES,
@@ -49,15 +37,27 @@ from .client import (
     padded_size,
     parse_aes_key,
 )
-from .login import (
+from tether.connectors.wechat.login import (
     WeChatLoginError,
     WeChatLoginService,
     qr_png,
 )
-from .storage import WeChatCredential, WeChatState
+from tether.connectors.wechat.storage import WeChatCredential, WeChatState
+from tether.metrics import metrics
+from tether.models import (
+    Attachment,
+    BotIdentity,
+    Conversation,
+    InboundMessage,
+    MediaBytes,
+    RichMedia,
+    Sender,
+    normalize_media_kind,
+)
+from tether.util.logging import get_logger
 
 if TYPE_CHECKING:
-    from ...store.sqlite import RouteStore
+    from tether.store.sqlite import RouteStore
 
 log = get_logger("tether.wechat")
 

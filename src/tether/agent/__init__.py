@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from .client import AgentClient, HttpAgentClient
-from .errors import AgentError, user_message
-from .events import Event
+from tether.agent.client import AgentClient, HttpAgentClient
+from tether.agent.errors import AgentError, user_message
+from tether.agent.events import Event
 
 __all__ = ["AgentClient", "HttpAgentClient", "AgentError", "user_message", "Event"]

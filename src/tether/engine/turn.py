@@ -11,9 +11,9 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
-from ..agent.client import HttpAgentClient
-from ..agent.errors import AgentError
-from ..agent.events import (
+from tether.agent.client import HttpAgentClient
+from tether.agent.errors import AgentError
+from tether.agent.events import (
     ATTACHMENT_OMITTED,
     COMPACTION_ENDED,
     COMPACTION_STARTED,
@@ -40,11 +40,20 @@ from ..agent.events import (
     PendingPermission,
     PendingQuestion,
 )
-from ..agent.usage import UsageTokens, parse_usage
-from ..config import Config
-from ..connector import IMConnector
-from ..metrics import metrics
-from ..models import (
+from tether.agent.usage import UsageTokens, parse_usage
+from tether.config import Config
+from tether.connector import IMConnector
+from tether.engine import hitl
+from tether.engine.media_egress import (
+    MediaEgress,
+    extract_file_parts,
+    files_from_paths,
+    record_blocked,
+    structured_file_paths,
+)
+from tether.engine.streaming import RateLimited, StreamingController
+from tether.metrics import metrics
+from tether.models import (
     Card,
     InboundMessage,
     OutboundPlan,
@@ -56,18 +65,9 @@ from ..models import (
     TextSegment,
     Usage,
 )
-from ..render.renderer import DefaultRenderer
-from ..util.logging import get_logger
-from ..util.path_policy import PathPolicy, resolve_under
-from . import hitl
-from .media_egress import (
-    MediaEgress,
-    extract_file_parts,
-    files_from_paths,
-    record_blocked,
-    structured_file_paths,
-)
-from .streaming import RateLimited, StreamingController
+from tether.render.renderer import DefaultRenderer
+from tether.util.logging import get_logger
+from tether.util.path_policy import PathPolicy, resolve_under
 
 log = get_logger("tether.turn")
 

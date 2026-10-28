@@ -7,8 +7,8 @@ splits over-long text on semantic boundaries.
 
 from __future__ import annotations
 
-from ..capabilities import Capabilities
-from ..models import (
+from tether.capabilities import Capabilities
+from tether.models import (
     MediaSegment,
     OutboundPlan,
     RichDoc,
@@ -16,7 +16,7 @@ from ..models import (
     TextSegment,
     Usage,
 )
-from .markdown import render_markdown
+from tether.render.markdown import render_markdown
 
 
 class DefaultRenderer:

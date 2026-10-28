@@ -17,7 +17,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field, field_validator
 
-from .util.path_policy import compile_rules
+from tether.util.path_policy import compile_rules
 
 # ``$$`` (a literal ``$``) or ``${VAR}`` / ``${VAR:-default}``.
 _ENV_REF = re.compile(r"\$\$|\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")

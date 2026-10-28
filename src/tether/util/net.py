@@ -5,7 +5,7 @@ from __future__ import annotations
 import ipaddress
 import socket
 
-from .logging import get_logger
+from tether.util.logging import get_logger
 
 log = get_logger("tether.net")
 

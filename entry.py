@@ -1,4 +1,4 @@
-"""PyInstaller entry point: import tether as a package so relative imports work."""
+"""PyInstaller entry point: import the tether package and run its CLI."""
 
 from tether.__main__ import main
 

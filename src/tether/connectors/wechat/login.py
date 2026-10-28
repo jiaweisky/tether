@@ -13,15 +13,15 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ...config import WeChatBotSpec
-from ...metrics import metrics
-from ...store.sqlite import WeChatBindingConflict, WeChatRebindRequired
-from ...util.logging import get_logger
-from .client import DEFAULT_API_BASE, WeChatClient, WeChatClientProtocol
-from .storage import WeChatCredential, str_or_none
+from tether.config import WeChatBotSpec
+from tether.connectors.wechat.client import DEFAULT_API_BASE, WeChatClient, WeChatClientProtocol
+from tether.connectors.wechat.storage import WeChatCredential, str_or_none
+from tether.metrics import metrics
+from tether.store.sqlite import WeChatBindingConflict, WeChatRebindRequired
+from tether.util.logging import get_logger
 
 if TYPE_CHECKING:
-    from ...store.sqlite import RouteStore
+    from tether.store.sqlite import RouteStore
 
 log = get_logger("tether.wechat.login")
 

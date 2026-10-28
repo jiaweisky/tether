@@ -5,14 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ...config import Config, WeChatBotConfig
-from ...store.sqlite import (
+from tether.config import Config, WeChatBotConfig
+from tether.connectors.wechat.storage import WeChatCredential, WeChatState
+from tether.store.sqlite import (
     RouteStore,
     WeChatBindingConflict,
     WeChatRebindRequired,
 )
-from ...util.logging import get_logger
-from .storage import WeChatCredential, WeChatState
+from tether.util.logging import get_logger
 
 log = get_logger("tether.wechat.migrate")
 

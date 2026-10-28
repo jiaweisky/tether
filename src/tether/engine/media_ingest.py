@@ -13,11 +13,11 @@ import base64
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..config import Config
-from ..connector import IMConnector
-from ..models import Attachment, MediaBytes, normalize_media_kind
-from ..util.logging import get_logger
-from ..util.media import sniff_mime
+from tether.config import Config
+from tether.connector import IMConnector
+from tether.models import Attachment, MediaBytes, normalize_media_kind
+from tether.util.logging import get_logger
+from tether.util.media import sniff_mime
 
 log = get_logger("tether.media")
 

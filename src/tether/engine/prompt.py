@@ -10,8 +10,15 @@ from __future__ import annotations
 
 import re
 
-from ..config import Config
-from ..models import Attachment, BotIdentity, InboundMessage, Route, Sender, normalize_media_kind
+from tether.config import Config
+from tether.models import (
+    Attachment,
+    BotIdentity,
+    InboundMessage,
+    Route,
+    Sender,
+    normalize_media_kind,
+)
 
 _SPEAKER_PREFIX_RE = re.compile(r"^\s*\[[^\]]{1,64}\]:\s*", re.MULTILINE)
 

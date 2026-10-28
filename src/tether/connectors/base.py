@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
-from ..capabilities import Capabilities
-from ..connector import Unsupported
-from ..models import (
+from tether.capabilities import Capabilities
+from tether.connector import Unsupported
+from tether.models import (
     Attachment,
     BotIdentity,
     Card,
@@ -31,7 +31,7 @@ from ..models import (
     SentRef,
     TextSegment,
 )
-from ..util.throttle import TokenBucket
+from tether.util.throttle import TokenBucket
 
 Emit = Callable[[IncomingItem], Awaitable[None]]
 
