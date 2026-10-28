@@ -133,3 +133,138 @@ async def test_identity_precedence_channel_over_global_over_platform(tmp_path):
     route2 = await router.get_or_create(Conversation(channel="qq", kind="direct", id="c2"))
     identity2 = await router.refresh_identity(route2, conn)
     assert identity2.name == "Global"  # no channel override -> global default
+
+
+class _CountingClient(FakeAgentClient):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.model_calls = 0
+
+    async def list_models(self):
+        self.model_calls += 1
+        return await super().list_models()
+
+
+def test_client_factory_is_cached_per_base_and_uses_pool_token(tmp_path):
+    config = Config.model_validate(
+        {
+            "server": {
+                "token": "top-token",
+                "pool": [{"name": "a", "base_url": BASE, "token": "pool-token"}],
+            }
+        }
+    )
+    calls: list[tuple[str, str | None]] = []
+    clients: list[FakeAgentClient] = []
+
+    def factory(base_url: str, token: str | None) -> FakeAgentClient:
+        calls.append((base_url, token))
+        client = FakeAgentClient(base_url, token)
+        clients.append(client)
+        return client
+
+    router = Router(
+        config,
+        RouteStore(str(tmp_path / "r.db")),
+        build_provider(config),
+        client_factory=factory,
+    )
+
+    first = router.client_for_base(BASE)
+    second = router.client_for_base(BASE + "/")
+    assert first is second
+    assert calls == [(BASE, "pool-token")]
+    assert clients[0].token == "pool-token"
+
+
+@pytest.mark.asyncio
+async def test_context_limit_model_list_is_cached_per_base(tmp_path):
+    client = _CountingClient()
+    client.models = [ModelInfo("m", context_limit=4096)]
+    router = Router(
+        Config(),
+        RouteStore(str(tmp_path / "r.db")),
+        build_provider(Config()),
+        client_factory=lambda _base, _token: client,
+    )
+
+    assert await router.resolve_context_limit(BASE, "m") == 4096
+    assert await router.resolve_context_limit(BASE, "m") == 4096
+    assert client.model_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_context_limit_lookup_failure_is_optional(tmp_path):
+    class _BrokenModels(FakeAgentClient):
+        async def list_models(self):
+            raise RuntimeError("boom")
+
+    client = _BrokenModels()
+    router = Router(
+        Config(),
+        RouteStore(str(tmp_path / "r.db")),
+        build_provider(Config()),
+        client_factory=lambda _base, _token: client,
+    )
+    assert await router.resolve_context_limit(BASE, "m") is None
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_persists_route_and_registers_session(tmp_path):
+    from tether.models import Conversation
+
+    client = _CountingClient()
+    client.agents = [AgentInfo("build")]
+    client.models = [ModelInfo("m", context_limit=8192)]
+    config = Config.model_validate({"agent": {"default_model": "m"}})
+    store = RouteStore(str(tmp_path / "r.db"))
+    await store.connect()
+    router = Router(
+        config,
+        store,
+        build_provider(config),
+        client_factory=lambda _base, _token: client,
+    )
+    conv = Conversation(channel="wecom", kind="direct", id="c1")
+    route = await router.get_or_create(conv)
+
+    assert route.session_id in client.sessions
+    assert route.agent == "build"
+    assert route.model == "m"
+    assert route.context_limit == 8192
+    assert route.server_base == BASE
+    assert await router.get_by_session(route.session_id) is route
+    persisted = await router.store.get(conv.key)
+    assert persisted is not None
+    assert persisted.session_id == route.session_id
+
+
+@pytest.mark.asyncio
+async def test_working_directory_prefers_lease_then_pool(tmp_path):
+    from tether.engine.projects import ProjectLease
+    from tether.models import Conversation, Route
+
+    config = Config.model_validate(
+        {
+            "server": {
+                "working_directory": "/srv/default",
+                "pool": [
+                    {
+                        "name": "a",
+                        "base_url": BASE,
+                        "working_directory": "/srv/pool",
+                    }
+                ],
+            }
+        }
+    )
+    router = Router(config, RouteStore(str(tmp_path / "r.db")), build_provider(config))
+    conv = Conversation(channel="wecom", kind="direct", id="c1")
+    route = Route(conversation=conv, session_id="s1", server_base=BASE, agent="build")
+
+    assert router.working_directory(route) == "/srv/pool"
+    await router.leases.register(
+        route.key,
+        ProjectLease(project_id="p", server_base=BASE, working_directory="/srv/lease"),
+    )
+    assert router.working_directory(route) == "/srv/lease"

@@ -84,3 +84,22 @@ def test_wecom_accepts_per_channel_identity():
 def test_invalid_outbound_pattern_is_rejected():
     with pytest.raises(ValueError):
         Config.model_validate({"media": {"outbound": {"patterns": ["[z-a]"]}}})
+
+
+def test_server_token_prefers_pool_entry_then_top_level():
+    config = Config.model_validate(
+        {
+            "server": {
+                "token": "top",
+                "pool": [
+                    {"name": "a", "base_url": "http://a/", "token": "pool-a"},
+                    {"name": "b", "base_url": "http://b"},
+                ],
+            }
+        }
+    )
+    assert config.server_token("http://a") == "pool-a"
+    assert config.server_token("http://a/") == "pool-a"
+    # Current behavior: a pool entry with token=None does not inherit the top-level token.
+    assert config.server_token("http://b") is None
+    assert config.server_token("http://unknown") == "top"
