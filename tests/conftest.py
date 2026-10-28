@@ -5,6 +5,12 @@ import asyncio
 import pytest
 
 from tether.store.sqlite import _open_stores
+from tether.util.logging import configure_logging
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Use deterministic, non-JSON logging during tests."""
+    configure_logging("INFO", json=False)
 
 
 @pytest.fixture(autouse=True)

@@ -38,6 +38,5 @@ def configure_logging(level: str = "INFO", json: bool = True) -> None:
 
 
 def get_logger(name: str = "tether"):
-    """Return a bound logger, configuring logging with defaults on first use."""
-    configure_logging()
+    """Return a structlog logger; call ``configure_logging`` before first use."""
     return structlog.get_logger(name)
