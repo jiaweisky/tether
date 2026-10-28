@@ -234,6 +234,43 @@ class HttpAgentClient:
 
         return []
 
+    async def session_replay(
+        self, sid: str, *, after: int = -1, limit: int = 100
+    ) -> list[Event]:
+        """Read a finite page sequence of a session's durable events.
+
+        agentd exposes durable history through ``GET /api/session/{sid}/history``;
+        this method normalizes the wire frames into Event objects and follows the
+        ``after`` cursor until the history is exhausted.
+        """
+        events: list[Event] = []
+        cursor = after
+
+        while True:
+            page = await self.history(sid, after=cursor, limit=limit)
+            if not page:
+                break
+
+            last_seq = cursor
+            for raw in page:
+                event = _event_from_data(raw)
+                if event is None:
+                    continue
+
+                events.append(event)
+                seq = _event_seq(event)
+                if seq is not None and seq > last_seq:
+                    last_seq = seq
+
+            # No cursor movement means a malformed or non-durable page; stop
+            # rather than looping forever.
+            if last_seq <= cursor or len(page) < limit:
+                break
+
+            cursor = last_seq
+
+        return events
+
     # -- interaction -------------------------------------------------------
     async def reply_permission(
         self, sid: str, rid: str, *, reply: str, message: str | None = None
@@ -302,12 +339,34 @@ def _event_from_sse(payload: str | None) -> Event | None:
     if data is None:
         return None
 
+    return _event_from_data(data)
+
+
+def _event_from_data(data: dict[str, Any]) -> Event | None:
+    if not isinstance(data, dict):
+        return None
+
     return Event(
         id=str(data.get("id", "")),
         type=str(data.get("type", "")),
         data=dict(data.get("data") or {}),
         durable=data.get("durable"),
     )
+
+
+def _event_seq(event: Event) -> int | None:
+    durable = event.durable if isinstance(event.durable, dict) else None
+    if durable is None:
+        return None
+
+    value = durable.get("seq")
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return None
+
+    try:
+        return int(value)
+    except ValueError:
+        return None
 
 
 def _error_from_response(resp: httpx.Response) -> AgentError:

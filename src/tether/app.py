@@ -163,6 +163,16 @@ class TetherApp:
         for base_url in self._base_urls():
             await self._ensure_sse(base_url)
 
+        # A normal restart must also retire persisted pending interactions the
+        # backend no longer has; this was previously only done after an SSE
+        # reconnect. Best-effort: a cold/unreachable backend leaves them intact.
+        for base_url in self._base_urls():
+            client = self.router.client_for_base(base_url)
+            try:
+                await self._restore_hitl(client, clear_stale=True)
+            except Exception:  # noqa: BLE001 - startup must not fail on HITL recovery
+                log.exception("startup_hitl_reconcile_failed", base=base_url)
+
         self._janitor_task = asyncio.ensure_future(self._janitor())
         self._watchdog_task = asyncio.ensure_future(self._watchdog_loop())
 
@@ -237,6 +247,14 @@ class TetherApp:
                     await asyncio.wait_for(engine.shutdown(), timeout=2)
                 else:
                     await engine.pause()
+
+            # Persist the replay cursor even when the turn keeps running on the
+            # backend. A bridge restart must not replay events from this turn
+            # into the next one.
+            with contextlib.suppress(Exception):
+                engine.route.last_seq = max(engine.route.last_seq, engine.last_seq)
+                await self.router.save(engine.route)
+                engine.cursor_dirty = False
 
         log.info("stop_turns_closed", elapsed_ms=_ms_since(started))
 
@@ -621,6 +639,38 @@ class TetherApp:
         log.info("connector_event", kind=event.kind, conversation=event.conversation.key)
 
     # -- turn lifecycle ----------------------------------------------------
+    async def _prime_route_cursor(self, client: HttpAgentClient, route: Route) -> None:
+        """Advance a route to the latest durable sequence without replaying it.
+
+        Used before a new turn when no engine is active. Events from a previous
+        turn are historical for this turn; only their cursor matters.
+        """
+        try:
+            events = await client.session_replay(
+                route.session_id, after=route.last_seq
+            )
+        except AgentError as exc:
+            log.warning(
+                "route_cursor_prime_failed",
+                session=route.session_id,
+                error=exc.code,
+            )
+            return
+
+        latest = route.last_seq
+        for event in events:
+            seq = _durable_seq(event)
+            if seq is not None and seq > latest:
+                latest = seq
+
+        if latest > route.last_seq:
+            route.last_seq = latest
+            log.info(
+                "route_cursor_primed",
+                session=route.session_id,
+                seq=latest,
+            )
+
     async def _start_turn(self, route: Route, msg: InboundMessage, connector: IMConnector) -> None:
         working_dir = self.router.working_directory(route)
         identity = await self.router.refresh_identity(route, connector)
@@ -635,6 +685,46 @@ class TetherApp:
         )
         if result.notes:
             prompt = f"{result.note_text()}\n\n{prompt}"
+
+        # A new turn must start from the latest durable cursor. If the bridge
+        # crashed mid-turn, the persisted cursor can be stale; replayed events
+        # from the previous turn must not leak into this one. If the session is
+        # still running, attach/recover it instead of discarding its events.
+        sid = route.session_id
+        if sid not in self._turns:
+            client = self.router.client_for(route)
+            try:
+                active = await client.active_sessions()
+            except AgentError as exc:
+                log.warning("active_probe_failed", session=sid, error=exc.code)
+                active = None
+
+            if active is None:
+                # Cannot safely decide: do not advance the cursor and risk
+                # discarding a still-running turn.
+                pass
+            elif sid in active:
+                self._attach_resumed_engine(sid, route)
+                await self._recover_active(client, sid, route)
+
+                # The turn may have finished between the probe and the attach;
+                # in that case the live idle event is already gone. Finish the
+                # resumed engine immediately instead of leaving a zombie that
+                # blocks the queued new turn.
+                try:
+                    still_active = await client.active_sessions()
+                except AgentError:
+                    still_active = None
+
+                if still_active is not None and sid not in still_active:
+                    resumed = self._turns.get(sid)
+                    if resumed is not None:
+                        try:
+                            await resumed.finish()
+                        except Exception:  # noqa: BLE001 - the watchdog retries
+                            log.exception("resumed_turn_finish_failed", session=sid)
+            else:
+                await self._prime_route_cursor(client, route)
 
         # Two attempts: if the agent session was deleted (e.g. agentd restarted
         # with a fresh root), recreate it once and retry.
@@ -698,6 +788,10 @@ class TetherApp:
         sid = engine.route.session_id
         self._turns[sid] = engine
 
+        # A queued turn may have been created while an earlier turn was still
+        # advancing the route cursor. Start it from the cursor current at
+        # activation time, not the stale value captured at construction.
+        engine.last_seq = max(engine.last_seq, engine.route.last_seq)
         engine.route.active_turn_sender = engine.inbound.sender.id
         engine.activated_at = time.monotonic()
 
@@ -721,6 +815,7 @@ class TetherApp:
             await self._activate(queue[0])
 
         await self.router.save(engine.route)
+        engine.cursor_dirty = False
         self._bump("turns")
 
     def _remove_engine(self, engine: TurnEngine) -> list[TurnEngine]:
@@ -1162,7 +1257,10 @@ class TetherApp:
             await asyncio.sleep(backoff)
 
             backoff = min(backoff * 2, 30.0)
-            await self._reconcile(base_url, client)
+            try:
+                await self._reconcile(base_url, client)
+            except Exception:  # noqa: BLE001 - reconnect/reconcile must not kill the stream loop
+                log.exception("reconcile_failed", base=base_url)
 
     async def _route_event(self, event: Event) -> None:
         sid = event.session_id
@@ -1171,6 +1269,7 @@ class TetherApp:
 
         engine = self._turns.get(sid)
         if engine is not None:
+            self._observe_event_seq(engine, event)
             await engine.handle_event(event)
 
             if event.type in (
@@ -1241,50 +1340,153 @@ class TetherApp:
                 )
 
                 try:
+                    # The idle event was lost, so recover the durable final
+                    # transcript before closing the turn; finishing without it
+                    # would flush an empty or half-written answer.
+                    text, media = await self._read_turn_snapshot(
+                        self.router.client_for_base(base), engine.route.session_id
+                    )
+                    self._seed_engine_snapshot(engine, text, media)
                     await engine.finish()
                 except Exception:  # noqa: BLE001 - one bad turn must not kill the watchdog
                     log.exception("stale_turn_finish_failed", session=engine.route.session_id)
 
+    def _observe_event_seq(self, engine: TurnEngine, event: Event) -> None:
+        seq = _durable_seq(event)
+        if seq is not None and seq > engine.last_seq:
+            engine.last_seq = seq
+            engine.route.last_seq = seq
+            engine.cursor_dirty = True
+
+    async def _replay_engine(self, client: HttpAgentClient, engine: TurnEngine) -> bool:
+        """Replay durable events missed while the global SSE was disconnected.
+
+        Returns True when the replay itself ended the turn.
+        """
+        try:
+            events = await client.session_replay(
+                engine.route.session_id, after=engine.last_seq
+            )
+        except AgentError as exc:
+            log.warning(
+                "session_replay_failed",
+                session=engine.route.session_id,
+                error=exc.code,
+            )
+            return False
+
+        for event in events:
+            seq = _durable_seq(event)
+            # A live event may have advanced the cursor while history was
+            # fetching; never apply the same aggregate sequence twice.
+            if seq is not None and seq <= engine.last_seq:
+                continue
+
+            self._observe_event_seq(engine, event)
+            await engine.handle_event(event)
+            if engine._ended:
+                return True
+
+        return False
+
     async def _reconcile(self, base_url: str, client: HttpAgentClient) -> None:
         """Recover live state after the event stream reconnects."""
+        base = base_url.rstrip("/")
+        finished: set[str] = set()
+        for engine in list(self._turns.values()):
+            if engine.route.server_base.rstrip("/") != base:
+                continue
+
+            try:
+                ended = await self._replay_engine(client, engine)
+            except Exception:  # noqa: BLE001 - one bad turn must not stop reconcile
+                log.exception("session_replay_handler_failed", session=engine.route.session_id)
+                continue
+
+            if ended:
+                finished.add(engine.route.session_id)
+
         try:
             active = await client.active_sessions()
         except AgentError as exc:
             log.warning("reconcile_active_failed", error=exc.code)
             return
 
-        for sid in active:
+        active_ids = set(active)
+        for sid in active_ids:
+            if sid in finished:
+                continue
+
             route = await self.router.get_by_session(sid)
             if route is None:
                 continue
 
             await self._recover_active(client, sid, route)
 
-        await self._restore_hitl(client)
+        # A turn can finish while the bridge is disconnected, so it no longer
+        # appears in active_sessions. Recover the durable final transcript for
+        # every local turn on this base before finishing it; otherwise the lost
+        # idle event would flush an empty or partial answer.
+        now = time.monotonic()
+        for engine in list(self._turns.values()):
+            sid = engine.route.session_id
+            if (
+                engine.route.server_base.rstrip("/") != base
+                or sid in active_ids
+                or sid in finished
+            ):
+                continue
 
-    async def _recover_active(self, client: HttpAgentClient, sid: str, route: Route) -> None:
-        """Recover text/media of an in-flight turn (live deltas were lost)."""
+            if not engine.activated_at or now - engine.activated_at < _WATCHDOG_GRACE_S:
+                continue
+
+            await self._recover_active(client, sid, engine.route)
+
+            try:
+                await engine.finish()
+            except Exception:  # noqa: BLE001 - one bad turn must not stop reconcile
+                log.exception("reconcile_finish_failed", session=sid)
+
+        await self._restore_hitl(client, clear_stale=True)
+
+    async def _read_turn_snapshot(
+        self, client: HttpAgentClient, sid: str
+    ) -> tuple[str | None, list[RichMedia]]:
+        """Read the durable transcript for a session, or ``(None, [])`` on failure."""
         try:
             messages = await client.messages(sid)
         except AgentError as exc:
             log.warning("reconcile_message_failed", session=sid, error=exc.code)
-            return
+            return None, []
 
-        text = assistant_text(messages)
-        media = tool_media(messages)
+        # Recover only the current turn. Using the whole transcript would
+        # re-send text/media from earlier turns when this turn is tool-only or
+        # has no text of its own.
+        current = _current_turn_messages(messages)
+        return assistant_text(current), tool_media(current)
+
+    def _seed_engine_snapshot(
+        self, engine: TurnEngine, text: str | None, media: list[RichMedia]
+    ) -> None:
+        """Replace a turn's partial live buffer with durable final state."""
+        if text:
+            engine.controller.text = text
+
+        known = {_media_key(item) for item in engine.media}
+        for item in media:
+            key = _media_key(item)
+            if key not in known:
+                engine.media.append(item)
+                known.add(key)
+
+    async def _recover_active(self, client: HttpAgentClient, sid: str, route: Route) -> None:
+        """Recover text/media of an in-flight turn (live deltas were lost)."""
+        text, media = await self._read_turn_snapshot(client, sid)
         engine = self._turns.get(sid)
         if engine is not None:
             # Replace the possibly-incomplete live buffer with the durable text so
             # the final flush is complete.
-            if text:
-                engine.controller.text = text
-
-            known = {_media_key(item) for item in engine.media}
-            for item in media:
-                if _media_key(item) not in known:
-                    engine.media.append(item)
-                    known.add(_media_key(item))
-
+            self._seed_engine_snapshot(engine, text, media)
             log.info("reconcile_turn_seeded", session=sid, chars=len(text or ""))
             return
 
@@ -1293,7 +1495,9 @@ class TetherApp:
         if connector is not None and text:
             await self._notice(connector, route.conversation, text)
 
-    async def _restore_hitl(self, client: HttpAgentClient) -> None:
+    async def _restore_hitl(
+        self, client: HttpAgentClient, *, clear_stale: bool = True
+    ) -> None:
         """Restore pending interactions and surface any we never saw."""
         perms, questions = [], []
 
@@ -1303,6 +1507,9 @@ class TetherApp:
         except AgentError as exc:
             log.warning("reconcile_hitl_failed", error=exc.code)
             return
+
+        if clear_stale:
+            await self._clear_stale_pending(client, perms, questions)
 
         for perm in perms:
             route = await self.router.get_by_session(perm.session_id)
@@ -1343,6 +1550,77 @@ class TetherApp:
                 else:
                     await self._notice(connector, route.conversation, text)
 
+    async def _flush_cursors(self) -> None:
+        """Periodically persist active-turn replay cursors.
+
+        This bounds the crash window without writing the route on every event.
+        """
+        for engine in list(self._turns.values()):
+            if not engine.cursor_dirty:
+                continue
+
+            engine.route.last_seq = max(engine.route.last_seq, engine.last_seq)
+            try:
+                await self.router.save(engine.route)
+            except Exception:  # noqa: BLE001 - a later janitor pass retries
+                log.exception("cursor_flush_failed", session=engine.route.session_id)
+                continue
+            engine.cursor_dirty = False
+
+    async def _clear_stale_pending(
+        self,
+        client: HttpAgentClient,
+        perms: list,
+        questions: list,
+    ) -> None:
+        """Remove Route pending entries the backend no longer has.
+
+        Only called on an explicit reconnect/startup reconcile, never on a
+        single transient poll.
+        """
+        backend_ids = {perm.id for perm in perms} | {question.id for question in questions}
+        base = client.base_url.rstrip("/")
+
+        for stored_route in await self.store.all():
+            if stored_route.server_base.rstrip("/") != base:
+                continue
+
+            stale = [
+                rid
+                for rid in stored_route.pending_interactions
+                if rid not in backend_ids
+            ]
+            if not stale:
+                continue
+
+            # Use the Router's canonical object; mutating only the store copy
+            # would leave the in-memory route with stale pending entries.
+            route = await self.router.get_by_session(stored_route.session_id) or stored_route
+            for rid in stale:
+                route.pending_interactions.pop(rid, None)
+                engine = self._turns.get(route.session_id)
+                if engine is not None:
+                    engine.drop_pending(rid)
+
+            log.info(
+                "stale_pending_cleared",
+                session=route.session_id,
+                conversation=route.key,
+                request_ids=stale,
+            )
+            await self.router.save(route)
+
+            connector = self._connector_for(
+                route.conversation.channel, route.conversation.account
+            )
+            if connector is not None:
+                with contextlib.suppress(Exception):
+                    await self._notice(
+                        connector,
+                        route.conversation,
+                        "⌛ 之前的确认/问题已失效，请重新发起。",
+                    )
+
     async def _register_pending(
         self, route: Route, kind: Literal["permission", "question"], rid: str, *, options: list[str]
     ) -> None:
@@ -1365,9 +1643,14 @@ class TetherApp:
 
                 for _base, client in self._clients.items():
                     try:
-                        await self._restore_hitl(client)
+                        # Periodic polling only adds/surfaces interactions. A
+                        # destructive stale-clear runs on reconnect, not on a
+                        # single empty poll (backend startup can be transient).
+                        await self._restore_hitl(client, clear_stale=False)
                     except Exception:  # noqa: BLE001
                         log.exception("hitl_poll_failed")
+
+                await self._flush_cursors()
 
                 try:
                     reclaimed = await self.router.reclaim_idle()
@@ -1785,6 +2068,31 @@ def _media_key(media: RichMedia) -> tuple:
         len(media.data or b""),
         hashlib.sha1(media.data).hexdigest() if media.data else None,
     )
+
+
+def _current_turn_messages(messages: list[dict]) -> list[dict]:
+    """Messages after the latest user message (or the whole list if none)."""
+    last_user = -1
+    for index, message in enumerate(messages):
+        if message.get("type") == "user":
+            last_user = index
+
+    return messages[last_user + 1 :] if last_user >= 0 else messages
+
+
+def _durable_seq(event: Event) -> int | None:
+    durable = event.durable if isinstance(event.durable, dict) else None
+    if durable is None:
+        return None
+
+    value = durable.get("seq")
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return None
+
+    try:
+        return int(value)
+    except ValueError:
+        return None
 
 
 def assistant_text(messages: list[dict]) -> str | None:

@@ -279,6 +279,8 @@ class Route:
     participants: dict[str, str] = field(default_factory=dict)
     active_turn_sender: str | None = None
     queue_depth: int = 0
+    # Last durable event sequence observed for this session, across turns.
+    last_seq: int = -1
     # Bot identity synchronised from the platform.
     bot_name: str | None = None
     bot_description: str | None = None

@@ -8,6 +8,7 @@ from typing import Any
 from tether.agent.errors import AgentError
 from tether.agent.events import (
     AgentInfo,
+    Event,
     ModelInfo,
     PendingPermission,
     PendingQuestion,
@@ -17,7 +18,7 @@ from tether.agent.events import (
 
 
 class FakeAgentClient:
-    def __init__(self, base_url: str = "http://fake", token: str | None = None) -> None:
+    def __init__(self, base_url: str = "http://127.0.0.1:8787", token: str | None = None) -> None:
         self.base_url = base_url
         self.token = token
         self.sessions: dict[str, SessionInfo] = {}
@@ -35,6 +36,8 @@ class FakeAgentClient:
         self.models: list[ModelInfo] = [ModelInfo("m", "openai", ["text", "image"], [])]
         self.active: set[str] = set()
         self.message_store: dict[str, list[dict[str, Any]]] = {}
+        self.replay_events: dict[str, list[Event]] = {}
+        self.replay_requests: list[tuple[str, int]] = []
         self.agents: list[AgentInfo] = [AgentInfo("build", description="Build agent")]
         self.fail_next_prompt_with: str | tuple[str, str, int | None] | None = None
         self.permission_reply_error: str | None = None
@@ -109,6 +112,20 @@ class FakeAgentClient:
 
     async def history(self, sid, *, after=0, limit=200):
         return []
+
+    async def session_replay(self, sid, *, after=-1, limit=100):
+        self.replay_requests.append((sid, after))
+        events = self.replay_events.get(sid, [])
+        out = []
+        for event in events:
+            durable = event.durable if isinstance(event.durable, dict) else {}
+            try:
+                seq = int(durable.get("seq"))
+            except (TypeError, ValueError):
+                seq = None
+            if seq is None or seq > after:
+                out.append(event)
+        return out
 
     # interaction
     async def reply_permission(self, sid, rid, *, reply, message=None):

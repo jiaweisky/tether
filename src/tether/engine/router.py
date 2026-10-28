@@ -311,6 +311,7 @@ class Router:
         route.pending_interactions.clear()
         route.active_turn_sender = None
         route.queue_depth = 0
+        route.last_seq = -1
 
         self._remember(route)
         self._validated.add(route.session_id)

@@ -130,6 +130,11 @@ class TurnEngine:
         self._placeholder_sent = False
         self._denied_notice_sent = False
         self._ended = False
+        # Last durable aggregate sequence observed for this session. Used to
+        # replay only the events missed across an SSE reconnect. It is kept on
+        # the Route as well so a new turn does not replay earlier turns.
+        self.last_seq: int = route.last_seq
+        self.cursor_dirty = False
         # Set by the app when the engine becomes the conversation's active turn;
         # used by the watchdog to tell a genuinely running turn from a stale one.
         self.activated_at: float = 0.0
@@ -520,6 +525,13 @@ class TurnEngine:
             options=options,
         )
         self._schedule_timeout(kind, request_id)
+
+    def drop_pending(self, request_id: str) -> None:
+        """Forget one pending interaction and cancel its timeout timer."""
+        self.route.pending_interactions.pop(request_id, None)
+        task = self._timers.pop(request_id, None)
+        if task is not None:
+            task.cancel()
 
     def _schedule_timeout(self, kind: Literal["permission", "question"], request_id: str) -> None:
         """Never let an unanswered interaction park the turn forever.
