@@ -108,12 +108,14 @@ class FeishuConnector(BaseConnector):
     # -- lifecycle ---------------------------------------------------------
     async def _connect(self) -> None:
         self._loop = asyncio.get_running_loop()
+
         try:
             await asyncio.to_thread(
                 self._sdk.start, self._on_message, self._on_card, self._on_recall
             )
         except Exception:  # noqa: BLE001 - a failed channel must not kill Tether
             log.error("feishu_stream_failed", exc_info=True)
+
         try:
             self._bot = await asyncio.to_thread(self._sdk.bot_info)
         except Exception:  # noqa: BLE001 - identity is best-effort
@@ -136,6 +138,7 @@ class FeishuConnector(BaseConnector):
         except Exception:  # noqa: BLE001 - a parse error must not kill the stream
             log.warning("feishu_message_parse_failed", exc_info=True)
             return
+
         if item is not None:
             self._submit(item)
 
@@ -145,6 +148,7 @@ class FeishuConnector(BaseConnector):
         except Exception:  # noqa: BLE001
             log.warning("feishu_card_parse_failed", exc_info=True)
             return
+
         if item is not None:
             self._submit(item)
 
@@ -160,12 +164,14 @@ class FeishuConnector(BaseConnector):
         except Exception:  # noqa: BLE001
             log.warning("feishu_recall_parse_failed", exc_info=True)
             return
+
         self._submit(item)
 
     def _submit(self, item: Any) -> None:
         loop = self._loop
         if loop is None:
             return
+
         asyncio.run_coroutine_threadsafe(self.emit(item), loop)
 
     def _inbound_message(self, event: Any) -> InboundMessage | None:
@@ -173,10 +179,12 @@ class FeishuConnector(BaseConnector):
         message_id = str(_get(message, "message_id") or "")
         if not message_id:
             return None
+
         sender = _get(event, "event", "sender") or {}
         raw_mentions = _get(message, "mentions") or []
         content = _parse_content(_get(message, "message_type"), _get(message, "content"))
         conv = self._conversation(message)
+
         return InboundMessage(
             channel=self.name,
             message_id=message_id,
@@ -195,10 +203,12 @@ class FeishuConnector(BaseConnector):
             payload = str(value.get("key") or json.dumps(value))
         else:
             payload = str(value or "")
+
         operator = _get(event, "event", "operator") or {}
         context = _get(event, "event", "context") or {}
         sender = _get(operator, "open_id") or _get(operator, "user_id") or "unknown"
         form = _get(action, "form_value")
+
         return IncomingInteraction(
             conversation=self._conversation_from(
                 _get(context, "chat_id"), _get(context, "chat_type")
@@ -239,19 +249,23 @@ class FeishuConnector(BaseConnector):
                 return await self._call(self._sdk.reply, reply_to, "interactive", card)
             except Exception:  # noqa: BLE001 - a stale reply target: send fresh
                 log.warning("feishu_reply_failed", exc_info=True)
+
         return await self._call(self._sdk.send, conv.id, "interactive", card)
 
     async def _update_text(self, ref: SentRef, text: str, *, final: bool = True) -> None:
         if not ref.id:
             raise Unsupported("feishu has no message id to edit")
+
         await self._call(self._sdk.patch, ref.id, _markdown_card(text))
 
     async def acknowledge(self, interaction: IncomingInteraction, text: str) -> None:
         """Rewrite the clicked card to a text notice showing the outcome."""
         if not interaction.message_id:
             return
+
         # The clicked card is JSON 2.0, so the replacement content must be too.
         notice = _card2([{"tag": "markdown", "content": text}])
+
         try:
             await self._call(self._sdk.patch, interaction.message_id, notice)
         except Exception:  # noqa: BLE001 - best-effort acknowledgement
@@ -264,6 +278,7 @@ class FeishuConnector(BaseConnector):
     async def _send_media(self, conv: Conversation, media: RichMedia) -> str:
         if media.data is None:
             raise Unsupported("feishu media send requires bytes")
+
         kind = normalize_media_kind(media.kind)
         filename = media.name or kind
         if kind == "image":
@@ -272,7 +287,9 @@ class FeishuConnector(BaseConnector):
         else:
             key = await self._call(self._sdk.upload_file, media.data, filename, kind)
             content = {"file_key": key}
+
         msg_type = "image" if kind == "image" else "file"
+
         return await self._call(self._sdk.send, conv.id, msg_type, content)
 
     async def _typing(self, conv: Conversation) -> None:
@@ -288,8 +305,10 @@ class FeishuConnector(BaseConnector):
         file_key = str(handle.get("file_key") or "")
         if not message_id or not file_key:
             raise Unsupported("feishu attachment has no message_id/file_key")
+
         kind = "image" if normalize_media_kind(att.kind) == "image" else "file"
         data = await self._call(self._sdk.download, message_id, file_key, kind)
+
         return MediaBytes(data=data, mime=att.mime, name=att.name)
 
     async def upload(self, data: MediaBytes, *, kind: str) -> MediaHandle:
@@ -300,6 +319,7 @@ class FeishuConnector(BaseConnector):
             key = await self._call(
                 self._sdk.upload_file, data.data, data.name or "file", normalized
             )
+
         return MediaHandle(handle=key, kind=normalized)
 
     async def identity(self, conv: Conversation) -> BotIdentity:
@@ -333,11 +353,14 @@ class _ParsedContent:
 
 def _parse_content(message_type: Any, content: Any) -> _ParsedContent:
     data = _json(content)
+
     kind = str(message_type or "")
     if kind == "text":
         return _ParsedContent(str(data.get("text") or ""), [])
+
     if kind == "post":
         return _ParsedContent(_post_text(data), [])
+
     if kind in _MEDIA_TYPES:
         media_kind = _MEDIA_TYPES[kind]
         # Only images/stickers carry ``image_key``; a video ("media") also has a
@@ -346,7 +369,9 @@ def _parse_content(message_type: Any, content: Any) -> _ParsedContent:
         key = str(data.get(source) or "")
         name = data.get("file_name")
         media = [(media_kind, key, str(name) if name else None)] if key else []
+
         return _ParsedContent("", media)
+
     return _ParsedContent("", [])
 
 
@@ -372,7 +397,9 @@ def _post_text(data: dict) -> str:
     title = data.get("title")
     if isinstance(title, str) and title:
         parts.append(title)
+
     walk(data.get("content"))
+
     return "".join(parts).strip()
 
 
@@ -382,6 +409,7 @@ def _replace_mentions(text: str, raw: Any) -> str:
         key, name = _get(item, "key"), _get(item, "name")
         if key and name:
             text = text.replace(str(key), f"@{name}")
+
     return text
 
 
@@ -394,6 +422,7 @@ def _mentions(raw: Any) -> list[Sender]:
                 name=_get(item, "name"),
             )
         )
+
     return out
 
 
@@ -411,6 +440,7 @@ def _card(elements: list[dict], title: str | None = None) -> dict:
     card: dict[str, Any] = {"config": {"wide_screen_mode": True}, "elements": elements}
     if title:
         card["header"] = {"title": {"tag": "plain_text", "content": title}}
+
     return card
 
 
@@ -421,8 +451,10 @@ def _card2(elements: list[dict], title: str | None = None) -> dict:
         "config": {"wide_screen_mode": True},
         "body": {"elements": elements},
     }
+
     if title:
         card["header"] = {"title": {"tag": "plain_text", "content": title}}
+
     return card
 
 
@@ -433,6 +465,7 @@ def _interactive_card(card: Card) -> dict:
         elements = [{"tag": "markdown", "content": card.body}]
         if card.buttons:
             elements.append(_button_row(card.buttons))
+
     return _card2(elements, card.title or "Confirm")
 
 
@@ -469,6 +502,7 @@ def _button_type(style: str | None, index: int) -> str:
     """
     if style in ("primary", "danger", "default"):
         return style
+
     return "primary" if index == 0 else "default"
 
 
@@ -484,6 +518,7 @@ def _questions_form(card: Card) -> dict:
         label = question.header or question.body
         if label:
             elements.append({"tag": "markdown", "content": f"**{label}**"})
+
         if question.multiple:
             elements.extend(
                 {
@@ -506,7 +541,9 @@ def _questions_form(card: Card) -> dict:
                     ],
                 }
             )
+
     elements.append(_submit_button(card.submit_value))
+
     return {"tag": "form", "name": "question_form", "elements": elements}
 
 
@@ -524,12 +561,14 @@ def _submit_button(value: str) -> dict:
 def _json(value: Any) -> dict:
     if isinstance(value, dict):
         return value
+
     if isinstance(value, str) and value:
         try:
             parsed = json.loads(value)
             return parsed if isinstance(parsed, dict) else {}
         except json.JSONDecodeError:
             return {}
+
     return {}
 
 
@@ -538,6 +577,7 @@ def _get(obj: Any, *keys: str) -> Any:
         if obj is None:
             return None
         obj = obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+
     return obj
 
 
@@ -552,6 +592,7 @@ def _ok(resp: Any, action: str) -> Any:
     """
     if not resp.success():
         raise RuntimeError(f"feishu {action} failed: code={resp.code} msg={resp.msg}")
+
     return resp
 
 
@@ -575,24 +616,29 @@ class LarkSDK:
 
     def start(self, on_message: Any, on_card: Any, on_recall: Any) -> None:
         self._stopped.clear()
+
         threading.Thread(
             target=self._run, args=(on_message, on_card, on_recall), daemon=True
         ).start()
+
         # Return once the thread has built the client (or failed); do not block
         # the caller on the socket itself.
         self._ready.wait(timeout=10)
+
         if self._error is not None:
             raise self._error
 
     def _run(self, on_message: Any, on_card: Any, on_recall: Any) -> None:
         # Import inside the thread so lark's module-level event loop binds here.
         asyncio.set_event_loop(asyncio.new_event_loop())
+
         try:
             self._build(on_message, on_card, on_recall)
         except Exception as exc:  # noqa: BLE001 - surface build failure to start()
             self._error = exc
             self._ready.set()
             return
+
         self._ready.set()
         self._supervise(on_message, on_card, on_recall)
 
@@ -605,16 +651,20 @@ class LarkSDK:
         backoff = _STREAM_BACKOFF_S
         while not self._stopped.is_set():
             log.info("feishu_stream_connecting")
+
             try:
                 self._ws.start()  # blocks while connected
                 log.warning("feishu_stream_ended")
             except Exception:  # noqa: BLE001 - rebuild and retry below
                 log.warning("feishu_stream_failed", exc_info=True)
+
             if self._stopped.is_set():
                 break
+
             log.warning("feishu_stream_restarting", backoff_s=backoff)
             self._stopped.wait(backoff)
             backoff = min(backoff * 2, _STREAM_BACKOFF_MAX_S)
+
             try:
                 self._build(on_message, on_card, on_recall)
             except Exception:  # noqa: BLE001 - retry the rebuild next tick
@@ -662,6 +712,7 @@ class LarkSDK:
             .build()
         )
         resp = _ok(self._rest.im.v1.message.reply(request), "reply")
+
         return str(getattr(resp.data, "message_id", ""))
 
     def send(self, chat_id: str, msg_type: str, content: dict) -> str:
@@ -680,6 +731,7 @@ class LarkSDK:
             .build()
         )
         resp = _ok(self._rest.im.v1.message.create(request), "send")
+
         return str(getattr(resp.data, "message_id", ""))
 
     def patch(self, message_id: str, content: dict) -> None:
@@ -709,6 +761,7 @@ class LarkSDK:
             .build()
         )
         resp = _ok(self._rest.im.v1.image.create(request), "upload_image")
+
         return str(getattr(resp.data, "image_key", ""))
 
     def upload_file(self, data: bytes, filename: str, kind: str) -> str:
@@ -729,6 +782,7 @@ class LarkSDK:
             .build()
         )
         resp = _ok(self._rest.im.v1.file.create(request), "upload_file")
+
         return str(getattr(resp.data, "file_key", ""))
 
     def download(self, message_id: str, file_key: str, kind: str) -> bytes:
@@ -742,6 +796,7 @@ class LarkSDK:
             .build()
         )
         resp = _ok(self._rest.im.v1.message_resource.get(request), "download")
+
         return resp.file.read()
 
     def bot_info(self) -> tuple[str | None, str | None]:
@@ -756,6 +811,7 @@ class LarkSDK:
             timeout=10,
         )
         data = resp.json().get("bot") or {}
+
         return data.get("app_name"), None
 
     def _tenant_token(self) -> str | None:
@@ -766,6 +822,7 @@ class LarkSDK:
             json={"app_id": self._app_id, "app_secret": self._app_secret},
             timeout=10,
         )
+
         return (resp.json() or {}).get("tenant_access_token")
 
 

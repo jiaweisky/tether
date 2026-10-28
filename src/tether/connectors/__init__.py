@@ -120,7 +120,9 @@ def build_enabled(config: Config, store: Any = None) -> list[IMConnector]:
         (channels.feishu, _build_feishu),
         (channels.qq, _build_qq),
     )
+
     connectors = [builder(channel) for channel, builder in specs if channel.enabled]
     if channels.wechat.enabled:
         connectors.extend(_build_wechat(channels.wechat, store=store))
+
     return connectors

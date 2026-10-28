@@ -119,6 +119,7 @@ class AibotSDK:
                 raise Unsupported(
                     "wecom-aibot-python-sdk is not installed; install tether[wecom]"
                 ) from exc
+
             self._client = aibot.WSClient(
                 aibot.WSClientOptions(
                     bot_id=self._bot_id,
@@ -128,12 +129,14 @@ class AibotSDK:
                     max_reconnect_attempts=-1,
                 )
             )
+
             ceiling = self._reconnect_max_ms
             manager = getattr(self._client, "_ws_manager", None)
             if ceiling and ceiling > 0 and manager is not None:
                 # The SDK hard-codes the reconnect backoff ceiling (30s) with no
                 # option for it, so set it on the connection manager directly.
                 manager._reconnect_max_delay = ceiling
+
         return self._client
 
     @property
@@ -180,6 +183,7 @@ class AibotSDK:
         total_chunks = max(1, (total + _CHUNK_SIZE - 1) // _CHUNK_SIZE)
         if total_chunks > _MAX_CHUNKS:
             raise Unsupported("wecom media exceeds the ~50MB upload limit")
+
         client = self._ensure_client()
         init = await _upload_cmd(
             client,
@@ -193,9 +197,11 @@ class AibotSDK:
                 "md5": hashlib.md5(data).hexdigest(),
             },
         )
+
         upload_id = (init.get("body") or {}).get("upload_id")
         if not upload_id:
             raise Unsupported("wecom upload init returned no upload_id")
+
         for index in range(total_chunks):
             chunk = data[index * _CHUNK_SIZE : (index + 1) * _CHUNK_SIZE]
             await _upload_cmd(
@@ -208,12 +214,15 @@ class AibotSDK:
                     "base64_data": base64.b64encode(chunk).decode(),
                 },
             )
+
         finish = await _upload_cmd(
             client, aibot, "aibot_upload_media_finish", {"upload_id": upload_id}
         )
+
         media_id = (finish.get("body") or {}).get("media_id")
         if not media_id:
             raise Unsupported("wecom upload finish returned no media_id")
+
         return str(media_id)
 
     async def reply_media(self, frame, media_type, media_id) -> Any:
@@ -292,8 +301,10 @@ class WeComConnector(BaseConnector):
         self._sdk.on("event.enter_chat", self._on_enter_chat)
         self._sdk.on("event.template_card_event", self._on_card_event)
         self._sdk.on("event.feedback_event", self._on_feedback)
+
         for event in _LIFECYCLE_EVENTS:
             self._sdk.on(event, self._on_lifecycle)
+
         await self._sdk.connect()
 
     async def _on_frame(self, frame: Any) -> None:
@@ -311,6 +322,7 @@ class WeComConnector(BaseConnector):
             "voice": self._on_voice,
             "mixed": self._on_mixed,
         }
+
         handler = handlers.get(str(_body(frame).get("msgtype") or ""))
         if handler is not None:
             await handler(frame)
@@ -370,6 +382,7 @@ class WeComConnector(BaseConnector):
         conv = self._conversation(frame)
         self._frames[conv.key] = frame
         body = _body(frame)
+
         # Voice messages usually carry platform-recognised text; if they do, that
         # is the user's message and there is no need to fetch the audio (the
         # model cannot consume it anyway). Only fall back to the audio when no
@@ -378,9 +391,11 @@ class WeComConnector(BaseConnector):
         quote_text, quote_media = self._quote_parts(body)
         if not text:
             text = quote_text
+
         attachments = list(quote_media)
         if not text and _get(body, "voice", "url"):
             attachments.append(self._attachment(body, "voice", "voice"))
+
         await self.emit(
             InboundMessage(
                 channel=self.name,
@@ -414,6 +429,7 @@ class WeComConnector(BaseConnector):
 
     async def _on_enter_chat(self, frame: Any) -> None:
         conv = self._conversation(frame)
+
         # Not a message callback: do not overwrite `_frames` (see _on_card_event).
         await self.emit(ConnectorEvent(kind="enter_chat", conversation=conv, raw=frame))
         if self._welcome_text:
@@ -442,6 +458,7 @@ class WeComConnector(BaseConnector):
         conv = self._conversation(frame)
         body = _body(frame)
         event = body.get("event") or {}
+
         # The click payload is nested: event.template_card_event.event_key.
         payload = event.get("template_card_event") if isinstance(event, dict) else None
         if isinstance(payload, dict):
@@ -450,6 +467,7 @@ class WeComConnector(BaseConnector):
         else:
             value = str(event.get("event_key") or event.get("key") or "")
             form = {}
+
         await self.emit(
             IncomingInteraction(
                 conversation=conv,
@@ -472,6 +490,7 @@ class WeComConnector(BaseConnector):
     ) -> str:
         frame = self._frames.get(conv.key)
         stream_id = self._sdk.generate_stream_id()
+
         if frame is not None:
             # finish closes the streamed message; interim frames keep it open so
             # later updates append to the same message.
@@ -480,12 +499,14 @@ class WeComConnector(BaseConnector):
             await self._sdk.send_message(
                 conv.id, {"msgtype": "markdown", "markdown": {"content": text}}
             )
+
         return stream_id
 
     async def _update_text(self, ref, text: str, *, final: bool = True) -> None:  # noqa: ANN001
         frame = self._frames.get(ref.conversation.key)
         if frame is None:
             raise Unsupported("no active frame to stream an update")
+
         await self._sdk.reply_stream(frame, ref.id, text, finish=final)
 
     async def send_card(
@@ -504,6 +525,7 @@ class WeComConnector(BaseConnector):
         and ``text`` are accepted for interface compatibility and ignored.
         """
         payload = _card_payload(card)
+
         frame = self._frames.get(conv.key)
         if frame is not None:
             # A standalone passive reply renders the card; the streamed-card
@@ -514,9 +536,11 @@ class WeComConnector(BaseConnector):
                 return SentRef(id="", conversation=conv)
             except Exception as exc:  # noqa: BLE001 - try a proactive card
                 log.warning("reply_template_card_failed", conversation=conv.key, error=str(exc))
+
         await self._sdk.send_message(
             conv.id, {"msgtype": "template_card", "template_card": payload}
         )
+
         return SentRef(id="", conversation=conv)
 
     async def acknowledge(self, interaction: IncomingInteraction, text: str) -> None:
@@ -528,11 +552,13 @@ class WeComConnector(BaseConnector):
         frame = interaction.raw
         if not isinstance(frame, dict):
             return
+
         event = _body(frame).get("event") or {}
         payload = event.get("template_card_event") if isinstance(event, dict) else None
         task_id = payload.get("task_id") if isinstance(payload, dict) else None
         if not task_id:
             return
+
         card = {
             "card_type": "text_notice",
             "main_title": {"title": text},
@@ -540,6 +566,7 @@ class WeComConnector(BaseConnector):
             "card_action": {"type": 1, "url": "https://work.weixin.qq.com"},
             "task_id": task_id,
         }
+
         try:
             await self._sdk.update_template_card(frame, card)
         except Exception as exc:  # noqa: BLE001 - best-effort acknowledgement
@@ -549,6 +576,7 @@ class WeComConnector(BaseConnector):
 
     async def _send_card(self, conv: Conversation, card: Card) -> str:
         payload = _card_payload(card)
+
         frame = self._frames.get(conv.key)
         if frame is not None:
             await self._sdk.reply_template_card(frame, payload)
@@ -556,14 +584,17 @@ class WeComConnector(BaseConnector):
             await self._sdk.send_message(
                 conv.id, {"msgtype": "template_card", "template_card": payload}
             )
+
         return "card"
 
     async def _send_media(self, conv: Conversation, media: RichMedia) -> str:
         if media.data is None:
             raise Unsupported("wecom media send requires bytes")
+
         media_type = _wecom_media_type(media.kind)
         filename = _filename(media.name, media.mime, media_type)
         media_id = await self._sdk.upload_media(media.data, media_type, filename)
+
         frame = self._frames.get(conv.key)
         if frame is not None:
             try:
@@ -573,7 +604,9 @@ class WeComConnector(BaseConnector):
                 # The reply slot may already hold the text stream or a card, so
                 # fall through to a proactive push instead of failing.
                 log.warning("wecom_reply_media_failed", conversation=conv.key, error=str(exc))
+
         await self._sdk.send_media_message(conv.id, media_type, media_id)
+
         return "media"
 
     async def _typing(self, conv: Conversation) -> None:
@@ -585,13 +618,16 @@ class WeComConnector(BaseConnector):
         url = handle.get("url")
         if not url:
             raise Unsupported("wecom attachment has no url")
+
         data, name = await self._sdk.download_file(url, handle.get("aeskey"))
+
         return MediaBytes(data=data, mime=att.mime, name=name or att.name)
 
     async def upload(self, data: MediaBytes, *, kind: str) -> MediaHandle:
         media_type = _wecom_media_type(kind)
         filename = _filename(data.name, data.mime, media_type)
         media_id = await self._sdk.upload_media(data.data, media_type, filename)
+
         return MediaHandle(handle=media_id, kind=normalize_media_kind(kind))
 
     async def identity(self, conv: Conversation) -> BotIdentity:
@@ -610,9 +646,11 @@ class WeComConnector(BaseConnector):
         message_id = body.get("msgid") or body.get("message_id")
         if message_id:
             return str(message_id)
+
         headers = frame.get("headers") if isinstance(frame, dict) else None
         if isinstance(headers, dict) and headers.get("req_id"):
             return str(headers["req_id"])
+
         return ""
 
     def _quote_parts(self, body: dict) -> tuple[str, list[Attachment]]:
@@ -625,34 +663,42 @@ class WeComConnector(BaseConnector):
         quote = body.get("quote")
         if not isinstance(quote, dict):
             return "", []
+
         qtype = str(quote.get("msgtype") or "")
         if qtype == "text":
             section = quote.get("text") or {}
             return str(section.get("content") or ""), []
+
         if qtype in ("image", "file", "voice", "video"):
             return "", [self._attachment(quote, qtype, _kind_for(qtype))]
+
         if qtype == "mixed":
             items = _get(quote, "mixed", "msg_item", default=None) or quote.get("msg_item") or []
             return self._mixed_parts(items)
+
         return "", []
 
     def _mixed_parts(self, items: Any) -> tuple[str, list[Attachment]]:
         texts: list[str] = []
         attachments: list[Attachment] = []
+
         for item in items or []:
             if not isinstance(item, dict):
                 continue
+
             item_type = item.get("msgtype")
             if item_type == "text":
                 texts.append(str(_get(item, "text", "content", default="")))
             elif item_type in ("image", "file", "voice"):
                 attachments.append(self._attachment(item, item_type, _kind_for(item_type)))
+
         return "\n".join(t for t in texts if t), attachments
 
     def _attachment(self, body: dict, msgtype: str, kind: str) -> Attachment:
         section = body.get(msgtype) or {}
         handle = {"url": section.get("url"), "aeskey": section.get("aeskey")}
         name = section.get("filename") or section.get("name")
+
         return Attachment(kind=kind, name=name, handle=handle)  # type: ignore[arg-type]
 
     def _conversation(self, frame: Any) -> Conversation:
@@ -661,6 +707,7 @@ class WeComConnector(BaseConnector):
         chattype = str(body.get("chattype") or "").lower()
         is_group = chattype == "group"
         identifier = chatid or str(_get(body, "from", "userid", default="") or "")
+
         return Conversation(
             channel=self.name, kind="group" if is_group else "direct", id=identifier
         )
@@ -672,13 +719,16 @@ class WeComConnector(BaseConnector):
                 id=str(raw_from.get("userid") or raw_from.get("id") or ""),
                 name=raw_from.get("name"),
             )
+
         if raw_from is not None:
             return Sender(id=str(raw_from))
+
         return Sender(id=str(body.get("userid") or "unknown"))
 
     def _mentions(self, body: dict) -> list[Sender]:
         raw = body.get("mentions") or []
         out: list[Sender] = []
+
         for item in raw:
             if isinstance(item, dict):
                 out.append(
@@ -686,6 +736,7 @@ class WeComConnector(BaseConnector):
                         id=str(item.get("userid") or item.get("id") or ""), name=item.get("name")
                     )
                 )
+
         return out
 
 
@@ -704,9 +755,11 @@ def _get(obj: Any, *keys: str, default: Any = None) -> Any:
     for key in keys:
         if not isinstance(obj, dict):
             return default
+
         obj = obj.get(key)
         if obj is None:
             return default
+
     return obj
 
 
@@ -733,6 +786,7 @@ def _button_card(card: Card) -> dict:
         {"text": button.text, "key": button.value, "style": _button_style(button.style, index)}
         for index, button in enumerate(card.buttons)
     ]
+
     return {
         "card_type": "button_interaction",
         "main_title": {"title": card.title or "", "desc": card.body},
@@ -756,6 +810,7 @@ def _questions_card(card: Card) -> dict:
     """
     if len(card.questions) == 1:
         question = card.questions[0]
+
         return {
             "card_type": "vote_interaction",
             "main_title": {"title": card.title or "", "desc": question.header or question.body},
@@ -770,11 +825,13 @@ def _questions_card(card: Card) -> dict:
             "submit_button": {"text": "提交", "key": card.submit_value},
             "task_id": f"tether-{uuid.uuid4().hex}",
         }
+
     # A ``multiple_interaction`` card holds at most 3 selectors; a multi-choice
     # question cannot be combined with others. Anything else falls back to the
     # numbered prompt.
     if len(card.questions) > 3 or any(question.multiple for question in card.questions):
         raise Unsupported("WeCom supports at most 3 single-choice questions per card")
+
     return {
         "card_type": "multiple_interaction",
         "main_title": {"title": card.title or "", "desc": ""},
@@ -805,14 +862,17 @@ def _selection_form(payload: dict, value: str) -> dict[str, Any]:
     specs = _question_specs(value)
     if not specs or not items:
         return {}
+
     form: dict[str, Any] = {}
     for item in items:
         key = str(item.get("question_key") or "")
         if len(key) < 2 or key[0] != "q" or not key[1:].isdigit():
             continue
+
         index = int(key[1:])
         if index >= len(specs):
             continue
+
         option_ids = (item.get("option_ids") or {}).get("option_id") or []
         spec = specs[index]
         if spec.get("multiple"):
@@ -824,6 +884,7 @@ def _selection_form(payload: dict, value: str) -> dict[str, Any]:
             choice = int(raw) if raw.isdigit() else -1
             if 0 <= choice < len(options):
                 form[f"q{index}"] = options[choice]
+
     return form
 
 
@@ -833,7 +894,9 @@ def _question_specs(value: str) -> list[dict]:
         data = json.loads(value)
     except (ValueError, TypeError):
         return []
+
     specs = data.get("specs") if isinstance(data, dict) else None
+
     return specs if isinstance(specs, list) else []
 
 

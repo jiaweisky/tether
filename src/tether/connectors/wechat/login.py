@@ -75,11 +75,13 @@ class WeChatLoginService:
     ) -> LoginSession:
         self._ensure_channel_enabled()
         client = WeChatClient(base_url=DEFAULT_API_BASE)
+
         try:
             payload = await client.get_qr(local_tokens=local_tokens)
         except BaseException:
             await client.close()
             raise
+
         return LoginSession(
             client=client,
             bot=bot,
@@ -99,6 +101,7 @@ class WeChatLoginService:
         deadline = time.monotonic() + timeout
         pending_verify: str | None = None
         refreshes = 0
+
         try:
             while time.monotonic() < deadline:
                 status = await session.client.poll_qr(
@@ -106,6 +109,7 @@ class WeChatLoginService:
                     verify_code=pending_verify,
                     base_url=session.base_url,
                 )
+
                 state = str(status.get("status") or "wait")
                 if state in ("wait", "scaned"):
                     if pending_verify:
@@ -137,6 +141,7 @@ class WeChatLoginService:
                 await asyncio.sleep(_POLL_INTERVAL_S)
         finally:
             await session.client.close()
+
         raise WeChatLoginError("timed out waiting for the QR code to be scanned")
 
     async def _confirmed(
@@ -148,6 +153,7 @@ class WeChatLoginService:
         token = str(status.get("bot_token") or "").strip()
         if not bot_id or not token:
             raise WeChatLoginRejected(bot_id or None, "login confirmation was incomplete")
+
         credential = WeChatCredential(
             token=token,
             base_url=str(status.get("baseurl") or DEFAULT_API_BASE).rstrip("/"),
@@ -155,8 +161,10 @@ class WeChatLoginService:
             user_id=str_or_none(status.get("ilink_user_id")),
             saved_at=time.time(),
         )
+
         if self.store is None:
             raise WeChatLoginError("no route store is configured")
+
         try:
             await self.store.save_wechat_login(
                 bot.slot,
@@ -178,12 +186,14 @@ class WeChatLoginService:
                 f"bot {bot.slot!r} is already bound to {exc.current_bot_id}; "
                 "clear the binding before logging in a different account",
             ) from exc
+
         log.info(
             "wechat_login_bound",
             bot=bot.slot,
             bot_id=bot_id,
             base_url=credential.base_url,
         )
+
         return credential
 
     async def _refresh_qr(
@@ -195,6 +205,7 @@ class WeChatLoginService:
         session.qrcode = str(payload["qrcode"])
         session.content = str(payload["qrcode_img_content"])
         session.base_url = DEFAULT_API_BASE
+
         if on_refresh is not None:
             await on_refresh(session.content)
 
@@ -211,7 +222,9 @@ def qr_png(content: str) -> bytes | None:
         import qrcode
     except ImportError:
         return None
+
     image = qrcode.make(content)
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
+
     return buffer.getvalue()

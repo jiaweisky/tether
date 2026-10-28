@@ -43,12 +43,15 @@ class Metrics:
             "# TYPE tether_uptime_seconds gauge",
             f"tether_uptime_seconds {self.uptime_s():.1f}",
         ]
+
         for name, count in sorted(self.counters.items()):
             lines.append(f"# TYPE tether_{name}_total counter")
             lines.append(f"tether_{name}_total {count}")
+
         for name, gauge in sorted(self.gauges.items()):
             lines.append(f"# TYPE tether_{name} gauge")
             lines.append(f"tether_{name} {gauge}")
+
         return "\n".join(lines) + "\n"
 
 

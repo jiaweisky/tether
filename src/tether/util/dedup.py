@@ -30,8 +30,10 @@ class DedupCache:
     def is_duplicate(self, key: str) -> bool:
         now = self._clock()
         self._evict(now)
+
         if key in self._items:
             return True
+
         self._items[key] = now
         return False
 

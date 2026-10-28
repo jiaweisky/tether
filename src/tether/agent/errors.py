@@ -48,6 +48,8 @@ def user_message(
         or (status is not None and 400 <= status < 500 and code not in _ERROR_MESSAGES)
     ):
         return detail
+
     if code in _ERROR_MESSAGES:
         return _ERROR_MESSAGES[code]
+
     return fallback or "Something went wrong. Please retry."

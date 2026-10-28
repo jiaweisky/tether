@@ -18,8 +18,10 @@ class WeChatCredential:
     def from_dict(cls, data: dict[str, Any]) -> WeChatCredential | None:
         token = str(data.get("token") or "").strip()
         base_url = str(data.get("baseUrl") or data.get("base_url") or "").strip()
+
         if not token or not base_url:
             return None
+
         return cls(
             token=token,
             base_url=base_url.rstrip("/"),
@@ -42,6 +44,7 @@ class WeChatState:
             for key, value in raw_tokens.items()
             if isinstance(value, str) and value
         }
+
         return cls(cursor=str(data.get("cursor") or ""), context_tokens=tokens)
 
 

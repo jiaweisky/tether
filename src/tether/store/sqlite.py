@@ -78,6 +78,7 @@ class _DbLock:
     def acquire(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fh = self.path.open("a+")
+
         try:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
@@ -85,16 +86,20 @@ class _DbLock:
             raise DatabaseInUseError(
                 f"state database is already in use by another tether process: {self.path}"
             ) from exc
+
         try:
             os.chmod(self.path, _DB_FILE_MODE)
         except OSError:
             pass
+
         self._fh = fh
 
     def release(self) -> None:
         if self._fh is None:
             return
+
         fh, self._fh = self._fh, None
+
         try:
             fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
         finally:
@@ -155,6 +160,7 @@ def _route_to_json(route: Route) -> str:
         },
         "stream_ref": route.stream_ref,
     }
+
     return json.dumps(payload)
 
 
@@ -164,6 +170,7 @@ def _route_from_json(raw: str) -> Route:
     pending = {
         rid: PendingInteraction(**p) for rid, p in (d.get("pending_interactions") or {}).items()
     }
+
     return Route(
         conversation=conv,
         session_id=d["session_id"],
@@ -199,6 +206,7 @@ class RouteStore:
         finally:
             _open_stores.discard(self)
             self._db = None
+
             if self._lock is not None:
                 self._lock.release()
                 self._lock = None
@@ -211,6 +219,7 @@ class RouteStore:
     async def get(self, key: str) -> Route | None:
         async with self._conn().execute("SELECT data FROM routes WHERE key = ?", (key,)) as cur:
             row = await cur.fetchone()
+
         return _route_from_json(row["data"]) if row else None
 
     async def get_by_session(self, session_id: str) -> Route | None:
@@ -218,6 +227,7 @@ class RouteStore:
             "SELECT data FROM routes WHERE session_id = ?", (session_id,)
         ) as cur:
             row = await cur.fetchone()
+
         return _route_from_json(row["data"]) if row else None
 
     async def put(self, route: Route) -> None:
@@ -236,11 +246,13 @@ class RouteStore:
     async def all(self) -> list[Route]:
         async with self._conn().execute("SELECT data FROM routes") as cur:
             rows = await cur.fetchall()
+
         return [_route_from_json(r["data"]) for r in rows]
 
     async def count(self) -> int:
         async with self._conn().execute("SELECT COUNT(*) AS n FROM routes") as cur:
             row = await cur.fetchone()
+
         return int(row["n"]) if row else 0
 
     async def flush(self) -> None:
@@ -252,39 +264,48 @@ class RouteStore:
             parent = Path(self.path).parent
             created = not parent.exists()
             parent.mkdir(parents=True, exist_ok=True)
+
             if created or parent == Path.home() / ".tether":
                 try:
                     parent.chmod(_DB_DIR_MODE)
                 except OSError:
                     pass
+
             self._lock = _DbLock(Path(self.path + ".lock"))
             self._lock.acquire()
         try:
             self._db = await aiosqlite.connect(self.path)
             self._db.row_factory = aiosqlite.Row
+
             await self._db.executescript(_SCHEMA)
             await self._db.commit()
             await self._ensure_wechat_schema()
+
             _chmod_private(self.path)
             _open_stores.add(self)
         except BaseException:
             if self._db is not None:
                 await self._db.close()
                 self._db = None
+
             if self._lock is not None:
                 self._lock.release()
                 self._lock = None
+
             raise
 
     async def _ensure_wechat_schema(self) -> None:
         """Migrate the pre-token wechat_accounts table in place."""
         async with self._conn().execute("PRAGMA table_info(wechat_accounts)") as cur:
             columns = {str(row["name"]) for row in await cur.fetchall()}
+
         if not columns:
             return
+
         if "token" not in columns:
             await self._rebuild_wechat_accounts()
             return
+
         await self._add_missing_wechat_columns(columns)
 
     async def _rebuild_wechat_accounts(self) -> None:
@@ -312,6 +333,7 @@ class RouteStore:
                 await self._conn().execute(
                     f"ALTER TABLE wechat_accounts ADD COLUMN {column} {decl}"
                 )
+
         await self._conn().commit()
 
     async def wechat_account(self, slot: str) -> dict[str, object] | None:
@@ -321,6 +343,7 @@ class RouteStore:
             (slot,),
         ) as cur:
             row = await cur.fetchone()
+
         return dict(row) if row else None
 
     async def wechat_binding(self, slot: str) -> str | None:
@@ -329,6 +352,7 @@ class RouteStore:
             "SELECT ilink_bot_id FROM wechat_accounts WHERE slot = ?", (slot,)
         ) as cur:
             row = await cur.fetchone()
+
         return str(row["ilink_bot_id"]) if row and row["ilink_bot_id"] else None
 
     async def wechat_binding_by_bot_id(self, bot_id: str) -> str | None:
@@ -337,6 +361,7 @@ class RouteStore:
             "SELECT slot FROM wechat_accounts WHERE ilink_bot_id = ?", (bot_id,)
         ) as cur:
             row = await cur.fetchone()
+
         return str(row["slot"]) if row else None
 
     async def wechat_bindings(self) -> dict[str, str]:
@@ -344,6 +369,7 @@ class RouteStore:
             "SELECT slot, ilink_bot_id FROM wechat_accounts WHERE ilink_bot_id IS NOT NULL"
         ) as cur:
             rows = await cur.fetchall()
+
         return {str(r["slot"]): str(r["ilink_bot_id"]) for r in rows}
 
     async def save_wechat_login(
@@ -363,25 +389,31 @@ class RouteStore:
         now = time.time()
         db = self._conn()
         await db.execute("BEGIN IMMEDIATE")
+
         try:
             async with db.execute(
                 "SELECT ilink_bot_id FROM wechat_accounts WHERE slot = ?", (slot,)
             ) as cur:
                 current_row = await cur.fetchone()
+
             current = (
                 str(current_row["ilink_bot_id"])
                 if current_row and current_row["ilink_bot_id"]
                 else None
             )
+
             async with db.execute(
                 "SELECT slot FROM wechat_accounts WHERE ilink_bot_id = ? AND slot <> ?",
                 (bot_id, slot),
             ) as cur:
                 other = await cur.fetchone()
+
             if other is not None:
                 raise WeChatBindingConflict(str(other["slot"]))
+
             if current is not None and current != bot_id:
                 raise WeChatRebindRequired(current)
+
             await db.execute(
                 "INSERT INTO wechat_accounts("
                 "slot, ilink_bot_id, token, base_url, user_id, bound_at, token_saved_at"
@@ -392,6 +424,7 @@ class RouteStore:
                 "token_saved_at=excluded.token_saved_at",
                 (slot, bot_id, token, base_url, user_id, now, now),
             )
+
             await db.commit()
         except Exception:
             await db.rollback()
@@ -433,11 +466,13 @@ class RouteStore:
         ) as cur:
             row = await cur.fetchone()
         cursor = str(row["cursor"]) if row else ""
+
         async with self._conn().execute(
             "SELECT peer_id, token FROM wechat_context_tokens WHERE slot = ?", (slot,)
         ) as cur:
             rows = await cur.fetchall()
         tokens = {str(r["peer_id"]): str(r["token"]) for r in rows}
+
         return cursor, tokens
 
     async def save_wechat_cursor(self, slot: str, cursor: str) -> None:
@@ -463,6 +498,7 @@ class RouteStore:
     async def unbind_wechat(self, slot: str) -> None:
         db = self._conn()
         await db.execute("BEGIN IMMEDIATE")
+
         try:
             await db.execute("DELETE FROM wechat_accounts WHERE slot = ?", (slot,))
             await db.execute("DELETE FROM wechat_state WHERE slot = ?", (slot,))

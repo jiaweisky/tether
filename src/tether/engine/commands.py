@@ -57,12 +57,14 @@ _SPECS: dict[str, CommandSpec] = {spec.name: spec for spec in COMMANDS}
 def help_text(prefix: str = "/") -> str:
     """Render the command list shown by ``/help``: name, usage and description."""
     lines = [f"📖 Commands (prefix `{prefix}`)"]
+
     for spec in COMMANDS:
         form = f"{prefix}{spec.name}"
         if spec.usage:
             form += f" {spec.usage}"
         lines.append(f"`{form}` — {spec.description}")
     lines.append(f"In a group, mention the bot first (e.g. `@bot {prefix}stop`).")
+
     return "\n".join(lines)
 
 
@@ -83,18 +85,22 @@ def parse_command(text: str, prefix: str = "/") -> Command | None:
     stripped = _strip_leading_mentions(text.strip())
     if not stripped.startswith(prefix):
         return None
+
     body = stripped[len(prefix) :].strip()
     parts = body.split(maxsplit=1)
     spec = _SPECS.get(parts[0].lower()) if parts else None
     if spec is None:
         return None
+
     tail = parts[1].strip() if len(parts) > 1 else ""
     if spec.usage:
         if not tail and not spec.optional:
             return None
         return Command(kind=spec.name, args=tail)
+
     if tail:
         return None
+
     return Command(kind=spec.name)
 
 
@@ -108,12 +114,15 @@ def unescape_command(text: str, prefix: str = "/") -> tuple[str, bool]:
     """
     if not prefix:
         return text, False
+
     stripped = text.strip()
     body = _strip_leading_mentions(stripped)
     if not body.startswith(prefix + prefix):
         return text, False
+
     if parse_command(body[len(prefix) :], prefix) is None:
         return text, False
+
     mentions = stripped[: len(stripped) - len(body)]
     return mentions + body[len(prefix) :], True
 
@@ -129,4 +138,5 @@ def _strip_leading_mentions(text: str) -> str:
     while text.startswith("@"):
         parts = text.split(maxsplit=1)
         text = parts[1].lstrip() if len(parts) > 1 else ""
+
     return text

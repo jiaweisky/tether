@@ -13,8 +13,10 @@ _configured = False
 def configure_logging(level: str = "INFO", json: bool = True) -> None:
     """Configure structlog once; safe to call repeatedly."""
     global _configured
+
     if _configured:
         return
+
     numeric_level = getattr(logging, level.upper(), logging.INFO)
     logging.basicConfig(level=numeric_level, format="%(message)s")
     processors: list[Any] = [
@@ -24,10 +26,12 @@ def configure_logging(level: str = "INFO", json: bool = True) -> None:
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
     ]
+
     if json:
         processors.append(structlog.processors.JSONRenderer())
     else:
         processors.append(structlog.dev.ConsoleRenderer())
+
     structlog.configure(
         processors=processors,
         wrapper_class=structlog.make_filtering_bound_logger(numeric_level),

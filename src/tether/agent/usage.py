@@ -40,6 +40,7 @@ class UsageTokens:
         reasoning = _nested(tokens, "reasoning")
         visible = _nested(tokens, "output")
         new_input = _nested(tokens, "input")
+
         return cls(
             full_input=new_input + read + write,
             output=visible + reasoning,
@@ -57,24 +58,30 @@ def parse_usage(metadata: Any) -> UsageTokens | None:
     """
     if not isinstance(metadata, dict):
         return None
+
     for provider, raw in metadata.items():
         if not isinstance(raw, dict):
             continue
         parsed = _parse_provider(str(provider).lower(), raw)
         if parsed is not None:
             return parsed
+
     return None
 
 
 def _parse_provider(provider: str, raw: dict[str, Any]) -> UsageTokens | None:
     if provider in _OPENAI:
         return _openai(raw)
+
     if provider in _ANTHROPIC:
         return _anthropic(raw)
+
     if provider in _GOOGLE:
         return _google(raw)
+
     if provider in _BEDROCK:
         return _bedrock(raw)
+
     return None
 
 
@@ -92,15 +99,18 @@ def _openai(raw: dict[str, Any]) -> UsageTokens | None:
         full = _nested(raw, "prompt_tokens")
         hit = _nested(raw, "prompt_cache_hit_tokens")
         miss = _nested(raw, "prompt_cache_miss_tokens")
+
         if hit == 0 and miss == 0:
             hit = _nested(raw, "prompt_tokens_details", "cached_tokens")
             miss = full - hit
+
         return UsageTokens(
             full_input=full or (hit + miss),
             output=_nested(raw, "completion_tokens"),
             reasoning=_nested(raw, "completion_tokens_details", "reasoning_tokens"),
             cache_read=hit,
         )
+
     # Responses style (input_tokens/output_tokens).
     if "input_tokens" in raw:
         return UsageTokens(
@@ -109,16 +119,19 @@ def _openai(raw: dict[str, Any]) -> UsageTokens | None:
             reasoning=_nested(raw, "output_tokens_details", "reasoning_tokens"),
             cache_read=_nested(raw, "input_tokens_details", "cached_tokens"),
         )
+
     return None
 
 
 def _anthropic(raw: dict[str, Any]) -> UsageTokens | None:
     if "input_tokens" not in raw and "output_tokens" not in raw:
         return None
+
     cache_read = _nested(raw, "cache_read_input_tokens")
     cache_write = _nested(raw, "cache_creation_input_tokens")
     # Anthropic's input_tokens excludes cache; the full prompt adds both back.
     new_input = _nested(raw, "input_tokens")
+
     return UsageTokens(
         full_input=new_input + cache_read + cache_write,
         output=_nested(raw, "output_tokens"),
@@ -130,6 +143,7 @@ def _anthropic(raw: dict[str, Any]) -> UsageTokens | None:
 def _google(raw: dict[str, Any]) -> UsageTokens | None:
     if "promptTokenCount" not in raw and "candidatesTokenCount" not in raw:
         return None
+
     # Gemini's promptTokenCount is the whole prompt (cached included).
     return UsageTokens(
         full_input=_nested(raw, "promptTokenCount"),
@@ -142,6 +156,7 @@ def _google(raw: dict[str, Any]) -> UsageTokens | None:
 def _bedrock(raw: dict[str, Any]) -> UsageTokens | None:
     if "inputTokens" not in raw and "outputTokens" not in raw:
         return None
+
     # Bedrock's inputTokens is the whole prompt (cache included).
     return UsageTokens(
         full_input=_nested(raw, "inputTokens"),
@@ -156,8 +171,10 @@ def _nested(obj: Any, *keys: str) -> int:
         if not isinstance(obj, dict):
             return 0
         obj = obj.get(key)
+
     if isinstance(obj, bool) or obj is None:
         return 0
+
     try:
         return int(obj)
     except (TypeError, ValueError):

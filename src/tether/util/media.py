@@ -9,13 +9,16 @@ def sniff_mime(data: bytes, name: str | None, declared: str | None) -> str:
     """Best-effort MIME type: trust a specific declaration, else sniff, else guess."""
     if declared and declared != "application/octet-stream":
         return declared
+
     guessed = _guess_by_content(data)
     if guessed:
         return guessed
+
     if name:
         by_extension, _ = mimetypes.guess_type(name)
         if by_extension:
             return by_extension
+
     return declared or "application/octet-stream"
 
 
@@ -56,7 +59,9 @@ def _encode_within_limit(image, fmt: str, max_bytes: int) -> bytes:  # noqa: ANN
         buffer.seek(0)
         buffer.truncate()
         image.save(buffer, format=fmt, quality=quality, optimize=True)
+
         if buffer.tell() <= max_bytes:
             break
         quality -= 15
+
     return buffer.getvalue()

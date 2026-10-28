@@ -33,15 +33,18 @@ class TokenBucket:
         rate = self.rate_per_s
         if rate is None or self.capacity <= 0:
             return
+
         async with self._lock:
             available = self._refill(rate)
             if available < 1:
                 await asyncio.sleep((1 - available) / rate)
                 self._refill(rate)
+
             self._tokens = max(0.0, self._tokens - 1)
 
     def _refill(self, rate: float) -> float:
         now = self._clock()
         self._tokens = min(self.capacity, self._tokens + (now - self._last) * rate)
         self._last = now
+
         return self._tokens

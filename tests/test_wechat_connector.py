@@ -9,7 +9,7 @@ import pytest
 from tether.config import ChannelIdentity, Config, WeChatBotSpec
 from tether.connector import build_connectors
 from tether.connectors.wechat.client import encrypt_ecb
-from tether.connectors.wechat.connector import WeChatConnector
+from tether.connectors.wechat.connector import WeChatConnector, _default_name
 from tether.connectors.wechat.storage import WeChatCredential
 from tether.models import (
     Conversation,
@@ -201,6 +201,16 @@ async def test_inbound_image_is_decrypted_on_download(tmp_path):
     assert media.data == b"image-bytes"
     await connector.stop()
     await store.close()
+
+
+def test_default_name_uses_the_mime_extension():
+    assert _default_name("application/pdf").endswith(".pdf")
+    assert _default_name("video/quicktime").endswith(".mov")
+
+
+def test_default_name_falls_back_to_bin():
+    assert _default_name(None).endswith(".bin")
+    assert _default_name("application/x-unknown").endswith(".bin")
 
 
 @pytest.mark.asyncio

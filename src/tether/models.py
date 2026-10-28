@@ -22,8 +22,10 @@ def normalize_media_kind(kind: str) -> NormalizedMediaKind:
     """
     if kind == "voice":
         return "audio"
+
     if kind in _NORMALIZED_KINDS:
         return kind  # type: ignore[return-value]
+
     return "file"
 
 

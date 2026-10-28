@@ -84,6 +84,7 @@ class FakeConnector(BaseConnector):
         for message in reversed(self.messages):
             if message["kind"] == "text":
                 return message["text"]
+
         return ""
 
     def _next_id(self) -> str:
@@ -96,6 +97,7 @@ class FakeConnector(BaseConnector):
     ) -> str:
         message_id = self._next_id()
         self.messages.append({"id": message_id, "kind": "text", "text": text, "conv": conv.key})
+
         return message_id
 
     async def _update_text(self, ref: SentRef, text: str, *, final: bool = True) -> None:
@@ -103,6 +105,7 @@ class FakeConnector(BaseConnector):
             if message["id"] == ref.id:
                 message["text"] = text
                 return
+
         self.messages.append(
             {"id": ref.id, "kind": "text", "text": text, "conv": ref.conversation.key}
         )
@@ -110,12 +113,14 @@ class FakeConnector(BaseConnector):
     async def _send_media(self, conv: Conversation, media: RichMedia) -> str:
         message_id = self._next_id()
         self.messages.append({"id": message_id, "kind": "media", "media": media, "conv": conv.key})
+
         return message_id
 
     async def _send_card(self, conv: Conversation, card: Card) -> str:
         message_id = self._next_id()
         self.cards.append(card)
         self.messages.append({"id": message_id, "kind": "card", "card": card, "conv": conv.key})
+
         return message_id
 
     async def _typing(self, conv: Conversation) -> None:

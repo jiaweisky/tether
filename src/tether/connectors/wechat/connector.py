@@ -117,8 +117,6 @@ _STATE_LOGIN_REQUIRED = "login_required"
 _STATE_UP = "up"
 _STATE_DISABLED = "disabled"
 
-_DEFAULT_EXTENSIONS = {"image": ".jpg", "video": ".mp4", "file": ".bin"}
-
 ApiFactory = Callable[[WeChatCredential], WeChatClientProtocol]
 QRCallback = Callable[[bytes | None, str], Awaitable[None]]
 
@@ -165,20 +163,24 @@ class WeChatConnector(BaseConnector):
             self._publish_login_state()
             log.info("wechat_bot_disabled", bot=self.spec.slot)
             return
+
         credential = await self._load_credential()
         if credential is None:
             self._state = await self._initial_state()
             self._publish_login_state()
             log.info("wechat_bot_not_logged_in", bot=self.spec.slot, state=self._state)
             return
+
         await self._apply_credential(credential, start_polling=True)
 
     async def _load_credential(self) -> WeChatCredential | None:
         if self.store is None:
             return None
+
         row = await self.store.wechat_account(self.spec.slot)
         if not row or not row.get("token") or not row.get("base_url"):
             return None
+
         return WeChatCredential(
             token=str(row["token"]),
             base_url=str(row["base_url"]),
@@ -191,12 +193,14 @@ class WeChatConnector(BaseConnector):
         self._stop.set()
         task = self._poll_task
         self._poll_task = None
+
         if task is not None:
             task.cancel()
             try:
                 await task
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
+
         if self._api is not None:
             try:
                 await self._api.notify_stop()
@@ -206,6 +210,7 @@ class WeChatConnector(BaseConnector):
                 await self._api.close()
             except Exception:  # noqa: BLE001
                 pass
+
         self._api = None
         if self._state == _STATE_UP:
             self._state = _STATE_DISABLED
@@ -218,6 +223,7 @@ class WeChatConnector(BaseConnector):
         # reported as down and surface in ``/healthz`` and the down alert.
         if self._state == _STATE_DISABLED:
             return None
+
         return self._state == _STATE_UP
 
     @property
@@ -247,6 +253,7 @@ class WeChatConnector(BaseConnector):
                 log.warning(
                     "wechat_binding_lookup_failed", bot=self.spec.slot, exc_info=True
                 )
+
         return _STATE_UNBOUND
 
     async def _apply_credential(
@@ -260,12 +267,15 @@ class WeChatConnector(BaseConnector):
                 await old_task
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
+
         if self._api is not None:
             try:
                 await self._api.close()
             except Exception:  # noqa: BLE001
                 pass
+
         self._credential = credential
+
         if self.store is not None:
             try:
                 cursor, tokens = await self.store.wechat_state(self.spec.slot)
@@ -277,31 +287,39 @@ class WeChatConnector(BaseConnector):
                 self._runtime = WeChatState()
         else:
             self._runtime = WeChatState()
+
         self._stop = asyncio.Event()
         self._typing_tickets.clear()
+
         if not start_polling:
             self._state = _STATE_DISABLED
             self._api = None
             self._publish_login_state()
             return
+
         self._api = self._api_factory(credential)
         self._state = _STATE_UP
         self._publish_login_state()
+
         try:
             await self._api.notify_start()
         except Exception:  # noqa: BLE001 - lifecycle ping is best-effort
             log.debug("wechat_notify_start_failed", account=self.spec.slot, exc_info=True)
+
         self._poll_task = asyncio.create_task(
             self._poll_loop(), name=f"wechat-poll-{self.spec.slot}"
         )
+
         log.info("wechat_bot_started", bot=self.spec.slot, instance=self.instance_id)
 
     async def _poll_loop(self) -> None:
         backoff = _POLL_BACKOFF_START_S
+
         while not self._stop.is_set():
             api = self._api
             if api is None:
                 return
+
             try:
                 response = await api.get_updates(
                     self._runtime.cursor, timeout_s=self._poll_timeout_s
@@ -321,6 +339,7 @@ class WeChatConnector(BaseConnector):
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, _POLL_BACKOFF_MAX_S)
                 continue
+
             backoff = _POLL_BACKOFF_START_S
             await self._apply_poll_response(response)
 
@@ -329,12 +348,15 @@ class WeChatConnector(BaseConnector):
         if isinstance(cursor, str) and cursor:
             self._runtime.cursor = cursor
             await self._save_cursor()
+
         timeout_ms = response.get("longpolling_timeout_ms")
         if isinstance(timeout_ms, (int, float)) and timeout_ms > 0:
             self._poll_timeout_s = float(timeout_ms) / 1000.0
+
         for raw in response.get("msgs") or []:
             if not isinstance(raw, dict):
                 continue
+
             try:
                 await self._handle_message(raw)
             except Exception:  # noqa: BLE001 - one bad message must not stop the poll
@@ -343,6 +365,7 @@ class WeChatConnector(BaseConnector):
     async def _save_cursor(self) -> None:
         if self.store is None:
             return
+
         try:
             await self.store.save_wechat_cursor(
                 self.spec.slot, self._runtime.cursor
@@ -363,12 +386,15 @@ class WeChatConnector(BaseConnector):
     async def _handle_message(self, raw: dict[str, Any]) -> None:
         if raw.get("message_type") == _MESSAGE_TYPE_BOT:
             return
+
         if raw.get("group_id"):  # the protocol is direct-only; never route a group
             log.warning("wechat_group_message_ignored", account=self.spec.slot)
             return
+
         from_user = str(raw.get("from_user_id") or "").strip()
         if not from_user:
             return
+
         context_token = str(raw.get("context_token") or "").strip()
         if context_token:
             self._runtime.context_tokens[from_user] = context_token
@@ -393,6 +419,7 @@ class WeChatConnector(BaseConnector):
         )
         message_id = _message_id(raw)
         timestamp = float(raw.get("create_time_ms") or 0) / 1000.0
+
         await self.emit(
             InboundMessage(
                 channel="wechat",
@@ -418,9 +445,11 @@ class WeChatConnector(BaseConnector):
         api = self._api
         if api is None:
             raise Unsupported("wechat is not connected")
+
         context_token = self._runtime.context_tokens.get(conv.id)
         if not context_token:
             log.warning("wechat_context_token_missing", conversation=conv.key)
+
         client_id = f"tether-{uuid.uuid4().hex}"
         msg: dict[str, Any] = {
             "from_user_id": "",
@@ -430,8 +459,10 @@ class WeChatConnector(BaseConnector):
             "message_state": _MESSAGE_STATE_FINISHED,
             "item_list": [item],
         }
+
         if context_token:
             msg["context_token"] = context_token
+
         try:
             response = await api.send_message(msg)
         except WeChatAuthError:
@@ -443,21 +474,22 @@ class WeChatConnector(BaseConnector):
         kind = normalize_media_kind(media.kind)
         if kind not in _UPLOAD_TYPE:
             raise Unsupported(f"wechat cannot send {media.kind} media")
+
         if media.data is None:
             raise Unsupported("wechat media requires bytes")
+
         api = self._api
         if api is None:
             raise Unsupported("wechat is not connected")
+
         data = media.data
         if len(data) > _MAX_MEDIA_BYTES:
             raise Unsupported("media exceeds the WeChat upload limit")
+
         media_ref, filesize = await self._upload_media(api, conv, data, kind)
-        name = (
-            os.path.basename(media.name)
-            if media.name
-            else _default_name(kind, media.mime)
-        )
+        name = os.path.basename(media.name) if media.name else _default_name(media.mime)
         item = _build_media_item(kind, media_ref, filesize, name, len(data))
+
         return await self._send_item(conv, item)
 
     async def _upload_media(
@@ -470,6 +502,7 @@ class WeChatConnector(BaseConnector):
         filekey = uuid.uuid4().hex
         aeskey = os.urandom(16)
         filesize = padded_size(len(data))
+
         try:
             upload = await api.get_upload_url(
                 {
@@ -486,10 +519,12 @@ class WeChatConnector(BaseConnector):
         except WeChatAuthError:
             self._mark_login_required(reason="upload")
             raise
+
         full_url = str(upload.get("upload_full_url") or "").strip()
         upload_param = str(upload.get("upload_param") or "").strip()
         if not full_url and not upload_param:
             raise WeChatAPIError("getUploadUrl returned no upload URL")
+
         url = full_url or build_upload_url(upload_param, filekey, self._cdn_base_url)
         param = await api.upload_cdn(url, encrypt_ecb(data, aeskey))
         media_ref = {
@@ -497,15 +532,18 @@ class WeChatConnector(BaseConnector):
             "aes_key": base64.b64encode(aeskey).decode(),
             "encrypt_type": _ENCRYPT_TYPE_PACKED,
         }
+
         return media_ref, filesize
 
     async def _typing(self, conv: Conversation) -> None:
         api = self._api
         if api is None:
             return
+
         ticket = await self._typing_ticket(conv.id)
         if not ticket:
             return
+
         try:
             await api.send_typing(conv.id, ticket, status=_TYPING_STATUS_TYPING)
         except WeChatAuthError:
@@ -517,9 +555,11 @@ class WeChatConnector(BaseConnector):
         cached = self._typing_tickets.get(user_id)
         if cached and time.monotonic() - cached[1] < _TYPING_TICKET_TTL_S:
             return cached[0]
+
         api = self._api
         if api is None:
             return None
+
         try:
             response = await api.get_config(
                 user_id, self._runtime.context_tokens.get(user_id)
@@ -529,9 +569,11 @@ class WeChatConnector(BaseConnector):
             return None
         except Exception:  # noqa: BLE001 - typing is best-effort
             return None
+
         ticket = str(response.get("typing_ticket") or "")
         if ticket:
             self._typing_tickets[user_id] = (ticket, time.monotonic())
+
         return ticket or None
 
     # -- media inbound -----------------------------------------------------
@@ -539,12 +581,15 @@ class WeChatConnector(BaseConnector):
         api = self._api
         if api is None:
             raise Unsupported("wechat is not connected")
+
         item = att.handle
         if not isinstance(item, dict):
             raise Unsupported("wechat attachment has no media reference")
+
         ref = _media_ref(item)
         if ref is None:
             raise Unsupported("wechat attachment has no media reference")
+
         media, aes_key = ref
         url = str(media.get("full_url") or "").strip()
         param = str(media.get("encrypt_query_param") or "").strip()
@@ -552,12 +597,15 @@ class WeChatConnector(BaseConnector):
             if not param:
                 raise Unsupported("wechat attachment has no download URL")
             url = build_download_url(param, self._cdn_base_url)
+
         if item.get("type") in (_VOICE, _FILE, _VIDEO) and not aes_key:
             raise Unsupported("wechat media has no aes key")
+
         encrypted = await api.download_cdn(url)
         data = decrypt_ecb(encrypted, parse_aes_key(aes_key)) if aes_key else encrypted
         if len(data) > _MAX_MEDIA_BYTES:
             raise Unsupported("wechat media exceeds the download limit")
+
         return MediaBytes(data=data, mime=att.mime, name=att.name)
 
     # -- facts -------------------------------------------------------------
@@ -565,6 +613,7 @@ class WeChatConnector(BaseConnector):
         name = self._identity.display_name
         if not name:
             name = f"WeChat {self.account}" if self.account else "WeChat"
+
         return BotIdentity(name=name, description=self._identity.description)
 
     # -- login -------------------------------------------------------------
@@ -578,8 +627,10 @@ class WeChatConnector(BaseConnector):
             raise WeChatLoginError(
                 f"a login is already in progress for bot {self.spec.slot!r}"
             )
+
         pending_key = f"wechat_login_pending_{self.spec.slot}"
         metrics.set(pending_key, 1.0)
+
         try:
             async with self._login_lock:
                 return await self._login(
@@ -643,15 +694,18 @@ def _parse_items(raw: dict[str, Any]) -> tuple[str, list[Attachment]]:
     texts: list[str] = []
     attachments: list[Attachment] = []
     quoted: str | None = None
+
     for item in raw.get("item_list") or []:
         if not isinstance(item, dict):
             continue
+
         ref = item.get("ref_msg")
         if isinstance(ref, dict) and quoted is None:
             quoted = _quote_text(ref)
             nested = ref.get("message_item")
             if isinstance(nested, dict):
                 _add_media_attachment(nested, attachments)
+
         kind = item.get("type")
         if kind == _TEXT:
             value = (item.get("text_item") or {}).get("text")
@@ -665,9 +719,11 @@ def _parse_items(raw: dict[str, Any]) -> tuple[str, list[Attachment]]:
                 _add_media_attachment(item, attachments)
         elif kind in (_IMAGE, _FILE, _VIDEO):
             _add_media_attachment(item, attachments)
+
     text = "\n".join(texts).strip()
     if quoted:
         text = f"[quoting] {quoted}\n{text}".strip()
+
     return text, attachments
 
 
@@ -675,9 +731,11 @@ def _add_media_attachment(
     item: dict[str, Any], attachments: list[Attachment]
 ) -> None:
     kind = item.get("type")
+
     media, _ = _media_ref(item) or ({}, None)
     if not media:
         return
+
     sub = _media_sub(item)
     if kind == _IMAGE:
         size = _int_or_none(sub.get("mid_size") or sub.get("hd_size"))
@@ -719,17 +777,21 @@ def _add_media_attachment(
 
 def _media_ref(item: dict[str, Any]) -> tuple[dict[str, Any], str | None] | None:
     sub = _media_sub(item)
+
     media = sub.get("media")
     if not isinstance(media, dict):
         return None
+
     key = media.get("aes_key")
     if item.get("type") == _IMAGE:
         hex_key = sub.get("aeskey")
+
         if isinstance(hex_key, str) and len(hex_key) == 32:
             try:
                 key = base64.b64encode(bytes.fromhex(hex_key)).decode()
             except ValueError:
                 pass
+
     return media, str(key) if key else None
 
 
@@ -746,14 +808,17 @@ def _media_sub(item: dict[str, Any]) -> dict[str, Any]:
         else None
     )
     value = item.get(key) if key else None
+
     return value if isinstance(value, dict) else {}
 
 
 def _quote_text(ref: dict[str, Any]) -> str:
     parts: list[str] = []
+
     title = str(ref.get("title") or "").strip()
     if title:
         parts.append(title)
+
     nested = ref.get("message_item")
     if isinstance(nested, dict):
         kind = nested.get("type")
@@ -767,6 +832,7 @@ def _quote_text(ref: dict[str, Any]) -> str:
                 parts.append(str(text))
         elif isinstance(kind, int) and kind in _MEDIA_LABEL:
             parts.append(_MEDIA_LABEL[kind])
+
     return " | ".join(parts)
 
 
@@ -775,11 +841,13 @@ def _message_id(raw: dict[str, Any]) -> str:
         value = str(raw.get(key) or "").strip()
         if value:
             return value
+
     for item in raw.get("item_list") or []:
         if isinstance(item, dict):
             item_id = str(item.get("msg_id") or "").strip()
             if item_id:
                 return item_id
+
     return uuid.uuid4().hex
 
 
@@ -807,6 +875,7 @@ def _build_media_item(
             "type": _VIDEO,
             "video_item": {"media": media_ref, "video_size": filesize},
         }
+
     return {
         "type": _FILE,
         "file_item": {
@@ -817,8 +886,6 @@ def _build_media_item(
     }
 
 
-def _default_name(kind: str, mime: str | None) -> str:
-    extension = mimetypes.guess_extension(mime or "") or _DEFAULT_EXTENSIONS.get(
-        kind, ".bin"
-    )
+def _default_name(mime: str | None) -> str:
+    extension = mimetypes.guess_extension(mime or "") or ".bin"
     return f"wechat-{uuid.uuid4().hex[:8]}{extension}"

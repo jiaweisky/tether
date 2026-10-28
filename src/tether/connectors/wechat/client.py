@@ -118,6 +118,7 @@ class WeChatClient:
     def _client(self) -> httpx.AsyncClient:
         if self._http is None:
             self._http = httpx.AsyncClient(follow_redirects=True)
+
         return self._http
 
     # -- headers / wire ----------------------------------------------------
@@ -135,10 +136,12 @@ class WeChatClient:
             "AuthorizationType": "ilink_bot_token",
             **self._app_headers(),
         }
+
         if authenticated:
             if not self.token:
                 raise WeChatAuthError("missing bot token")
             headers["Authorization"] = f"Bearer {self.token}"
+
         return headers
 
     def _base_info(self) -> dict[str, str]:
@@ -153,6 +156,7 @@ class WeChatClient:
         timeout_s: float | None = None,
     ) -> dict[str, Any]:
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
+
         try:
             response = await self._client().post(
                 url,
@@ -177,6 +181,7 @@ class WeChatClient:
     ) -> dict[str, Any]:
         base = (base_url or self.base_url).rstrip("/")
         url = f"{base}/{endpoint.lstrip('/')}"
+
         try:
             response = await self._client().get(
                 url,
@@ -197,6 +202,7 @@ class WeChatClient:
         errcode = payload.get("errcode")
         if ret in (None, 0) and errcode in (None, 0):
             return
+
         errmsg = str(payload.get("errmsg") or "")
         if ret == STALE_TOKEN_ERRCODE or errcode == STALE_TOKEN_ERRCODE:
             raise WeChatAuthError(
@@ -205,6 +211,7 @@ class WeChatClient:
                 errcode=errcode,
                 errmsg=errmsg,
             )
+
         raise WeChatAPIError(
             f"{label}: ret={ret} errcode={errcode} {errmsg}".strip(),
             ret=ret,
@@ -221,6 +228,7 @@ class WeChatClient:
         )
         if not payload.get("qrcode") or not payload.get("qrcode_img_content"):
             raise WeChatAPIError("QR response is missing qrcode/qrcode_img_content")
+
         return payload
 
     async def poll_qr(
@@ -234,6 +242,7 @@ class WeChatClient:
         params = {"qrcode": qrcode}
         if verify_code:
             params["verify_code"] = verify_code
+
         try:
             return await self._get(
                 "ilink/bot/get_qrcode_status",
@@ -252,6 +261,7 @@ class WeChatClient:
             "get_updates_buf": cursor,
             "base_info": self._base_info(),
         }
+
         try:
             response = await self._post(
                 "ilink/bot/getupdates", payload, timeout_s=timeout_s
@@ -259,7 +269,9 @@ class WeChatClient:
         except httpx.TimeoutException:
             # A long-poll timeout is normal.
             return {"ret": 0, "msgs": [], "get_updates_buf": cursor}
+
         self._check(response, label="getUpdates")
+
         return response
 
     async def send_message(self, msg: dict[str, Any]) -> dict[str, Any]:
@@ -267,12 +279,14 @@ class WeChatClient:
             "ilink/bot/sendmessage", {"msg": msg, "base_info": self._base_info()}
         )
         self._check(response, label="sendMessage")
+
         return response
 
     async def get_upload_url(self, payload: dict[str, Any]) -> dict[str, Any]:
         body = {**payload, "base_info": self._base_info()}
         response = await self._post("ilink/bot/getuploadurl", body)
         self._check(response, label="getUploadUrl")
+
         return response
 
     async def upload_cdn(self, url: str, ciphertext: bytes) -> str:
@@ -293,6 +307,7 @@ class WeChatClient:
                     raise WeChatAPIError(
                         f"CDN upload client error HTTP {response.status_code}: {message}"
                     )
+
                 if response.status_code == 200:
                     param = response.headers.get("x-encrypted-param")
                     if param:
@@ -304,14 +319,17 @@ class WeChatClient:
                     last_error = WeChatAPIError(
                         f"CDN upload server error HTTP {response.status_code}: {message}"
                     )
+
             if attempt < _CDN_UPLOAD_RETRIES - 1:
                 await asyncio.sleep(_CDN_RETRY_BASE_S * (attempt + 1))
+
         raise last_error or WeChatAPIError("CDN upload failed")
 
     async def download_cdn(self, url: str) -> bytes:
         limit = MAX_CDN_BYTES
         chunks: list[bytes] = []
         total = 0
+
         try:
             async with self._client().stream(
                 "GET", url, timeout=max(self.timeout_s, CDN_TIMEOUT_S)
@@ -326,6 +344,7 @@ class WeChatClient:
                     chunks.append(chunk)
         except httpx.HTTPError as exc:
             raise WeChatAPIError(f"CDN download: {exc}") from exc
+
         return b"".join(chunks)
 
     async def get_config(
@@ -340,6 +359,7 @@ class WeChatClient:
             },
         )
         self._check(response, label="getConfig")
+
         return response
 
     async def send_typing(
@@ -384,6 +404,7 @@ def encrypt_ecb(plaintext: bytes, key: bytes) -> bytes:
     padder = padding.PKCS7(128).padder()
     padded = padder.update(plaintext) + padder.finalize()
     encryptor = Cipher(algorithms.AES(key), modes.ECB()).encryptor()
+
     return encryptor.update(padded) + encryptor.finalize()
 
 
@@ -391,6 +412,7 @@ def decrypt_ecb(ciphertext: bytes, key: bytes) -> bytes:
     decryptor = Cipher(algorithms.AES(key), modes.ECB()).decryptor()
     padded = decryptor.update(ciphertext) + decryptor.finalize()
     unpadder = padding.PKCS7(128).unpadder()
+
     return unpadder.update(padded) + unpadder.finalize()
 
 
@@ -400,13 +422,16 @@ def parse_aes_key(value: str) -> bytes:
         decoded = base64.b64decode(value)
     except (binascii.Error, ValueError) as exc:
         raise WeChatAPIError("aes_key is not valid base64") from exc
+
     if len(decoded) == 16:
         return decoded
+
     if len(decoded) == 32:
         try:
             return bytes.fromhex(decoded.decode("ascii"))
         except (UnicodeDecodeError, ValueError):
             pass
+
     raise WeChatAPIError("aes_key must decode to 16 raw bytes or 32 hex chars")
 
 
@@ -430,6 +455,8 @@ def _json_object(response: httpx.Response) -> dict[str, Any]:
         payload = json.loads(response.text or "{}")
     except ValueError as exc:
         raise WeChatAPIError(f"invalid JSON response: {exc}") from exc
+
     if not isinstance(payload, dict):
         raise WeChatAPIError("response is not a JSON object")
+
     return payload

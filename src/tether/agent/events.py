@@ -43,14 +43,18 @@ class Event:
     @property
     def session_id(self) -> str | None:
         data = self.data or {}
+
         sid = data.get("sessionID")
         if sid:
             return str(sid)
+
         for key in ("session_id", "sessionId"):
             if data.get(key):
                 return str(data[key])
+
         if self.durable and self.durable.get("aggregateID"):
             return str(self.durable["aggregateID"])
+
         return None
 
 
@@ -152,6 +156,7 @@ class PendingQuestion:
                     custom=bool(q.get("custom")),
                 )
             )
+
         return cls(
             id=str(raw.get("id", "")),
             session_id=str(raw.get("sessionID", "")),

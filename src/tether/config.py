@@ -345,6 +345,7 @@ class WeChatBotConfig(BaseModel):
                 "wechat bot id must match [a-z0-9][a-z0-9_-]{0,31} "
                 "(it is a hidden route-key segment)"
             )
+
         return value
 
     def spec(self) -> WeChatBotSpec:
@@ -394,6 +395,7 @@ class WeChatChannelConfig(BaseModel):
         for bot in self.bots:
             if bot.id == bot_id:
                 return bot.spec()
+
         return None
 
     def bot_for_login(self, channel: str, user: str) -> WeChatBotSpec | None:
@@ -402,6 +404,7 @@ class WeChatChannelConfig(BaseModel):
             for via in bot.login_via:
                 if via.channel == channel and via.user == user:
                     return bot.spec()
+
         return None
 
     def account_identity(self, bot_id: str) -> ChannelIdentity:
@@ -420,14 +423,17 @@ class ChannelsConfig(BaseModel):
         """The per-channel identity override, if the channel has one."""
         sub = getattr(self, channel, None)
         override = getattr(sub, "identity", None)
+
         return override if isinstance(override, ChannelIdentity) else ChannelIdentity()
 
     def identity_for_account(self, channel: str, account: str | None) -> ChannelIdentity:
         """The per-bot identity override (currently WeChat)."""
         if not account:
             return ChannelIdentity()
+
         sub = getattr(self, channel, None)
         resolve = getattr(sub, "account_identity", None)
+
         return resolve(account) if callable(resolve) else ChannelIdentity()
 
 
@@ -470,28 +476,34 @@ class Config(BaseModel):
     def admins_for(self, channel: str, account: str | None = None) -> list[str]:
         """Admins for a conversation: account/channel override, else global."""
         admins = self.access.admins
+
         if channel == "wechat":
             key = account or "default"
             if key in admins.wechat:
                 return list(admins.wechat[key])
             return list(self.group.admins)
+
         specific = getattr(admins, channel, None)
         if specific is not None:
             return list(specific)
+
         return list(self.group.admins)
 
     def server_bases(self) -> list[tuple[str, str, str | None]]:
         """(name, base_url, working_directory) tuples for the pool (or single base)."""
         if self.server.pool:
             return [(e.name, e.base_url, e.working_directory) for e in self.server.pool]
+
         return [("default", self.server.base_url, None)]
 
     def server_token(self, base_url: str) -> str | None:
         """Bearer token for a base URL (pool entry, else the top-level token)."""
         base = base_url.rstrip("/")
+
         for entry in self.server.pool:
             if entry.base_url.rstrip("/") == base:
                 return entry.token
+
         return self.server.token
 
 
@@ -499,10 +511,13 @@ def _expand_env(value: Any) -> Any:
     """Recursively resolve ``${VAR}`` references in YAML string values."""
     if isinstance(value, str):
         return _expand_str(value)
+
     if isinstance(value, list):
         return [_expand_env(item) for item in value]
+
     if isinstance(value, dict):
         return {key: _expand_env(item) for key, item in value.items()}
+
     return value
 
 
@@ -510,12 +525,14 @@ def _expand_str(text: str) -> str:
     def replace(match: re.Match[str]) -> str:
         if match.group(0) == "$$":
             return "$"
+
         name, default = match.group(1), match.group(2)
         value = os.environ.get(name)
         if value is None:
             if default is None:
                 raise ValueError(f"environment variable {name} is not set")
             return default
+
         return value
 
     return _ENV_REF.sub(replace, text)
@@ -531,15 +548,18 @@ def default_db_path(config_path: str | Path) -> Path:
     """
     config = Path(config_path).expanduser().resolve()
     instance = re.sub(r"[^A-Za-z0-9._-]+", "_", config.stem).strip("._-") or "instance"
+
     return config.parent / ".tether" / instance / "state.sqlite3"
 
 
 def load_config(path: str | Path | None) -> Config:
     if path is None:
         return Config()
+
     raw = yaml.safe_load(Path(path).read_text()) or {}
     if not isinstance(raw, dict):
         raise ValueError("config root must be a mapping")
+
     return Config.model_validate(_expand_env(raw))
 
 
@@ -551,6 +571,7 @@ def validate_startup(config: Config) -> None:
         raise ValueError(
             "projects.mode=isolated requires projects.control_url and projects.source_directory"
         )
+
     if config.channels.wecom.enabled:
         wecom = config.channels.wecom.identity
         name = wecom.display_name or config.identity.display_name
@@ -561,6 +582,7 @@ def validate_startup(config: Config) -> None:
                 "channels.wecom.identity (or the global identity), since WeCom does "
                 "not expose the bot's name or description"
             )
+
     _validate_wechat(config.channels.wechat)
     _validate_wechat_logins(config)
     _validate_admins(config)
@@ -571,6 +593,7 @@ def _validate_wechat_logins(config: Config) -> None:
     wechat = config.channels.wechat
     if not wechat.enabled:
         return
+
     enabled_channels = {
         "wecom": config.channels.wecom.enabled,
         "feishu": config.channels.feishu.enabled,
@@ -578,6 +601,7 @@ def _validate_wechat_logins(config: Config) -> None:
         "wechat": config.channels.wechat.enabled,
     }
     allowed_users = set(config.access.allow_users)
+
     for bot in wechat.bots:
         reachable = [via for via in bot.login_via if enabled_channels[via.channel]]
         if not reachable:
@@ -585,6 +609,7 @@ def _validate_wechat_logins(config: Config) -> None:
                 f"channels.wechat.bots[{bot.id!r}].login_via has no enabled channel; "
                 "there is no CLI login fallback"
             )
+
         if allowed_users and not any(via.user in allowed_users for via in reachable):
             raise ValueError(
                 f"channels.wechat.bots[{bot.id!r}].login_via has no user permitted by "
@@ -597,6 +622,7 @@ def _validate_admins(config: Config) -> None:
         values = getattr(config.access.admins, name)
         if values is not None and any(not value.strip() for value in values):
             raise ValueError(f"access.admins.{name} must not contain empty ids")
+
     known_slots = {spec.slot for spec in config.channels.wechat.bot_specs()}
     for slot, values in config.access.admins.wechat.items():
         if slot not in known_slots:
@@ -604,6 +630,7 @@ def _validate_admins(config: Config) -> None:
                 f"access.admins.wechat.{slot!r} does not match a configured WeChat "
                 f"account slot ({', '.join(sorted(known_slots))})"
             )
+
         if any(not value.strip() for value in values):
             raise ValueError(
                 f"access.admins.wechat.{slot!r} must not contain empty ids"
@@ -619,6 +646,7 @@ def _validate_wechat(wechat: WeChatChannelConfig) -> None:
     slots = [spec.slot for spec in specs]
     if len(slots) != len(set(slots)):
         raise ValueError("channels.wechat.bots contains duplicate ids")
+
     for spec in specs:
         name = (spec.identity.display_name or "").strip()
         if not name:
@@ -626,6 +654,7 @@ def _validate_wechat(wechat: WeChatChannelConfig) -> None:
                 f"channels.wechat.bots[{spec.slot!r}].identity.display_name is "
                 "required: WeChat exposes no bot name or remark name"
             )
+
         if not spec.login_via:
             raise ValueError(
                 f"channels.wechat.bots[{spec.slot!r}].login_via is required: "
@@ -643,4 +672,5 @@ def _validate_wechat(wechat: WeChatChannelConfig) -> None:
                     f"login_via {via.channel}:{via.user} maps to both "
                     f"{previous!r} and {spec.slot!r}; it must map to one bot"
                 )
+
             seen_logins[key] = spec.slot

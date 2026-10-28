@@ -88,6 +88,7 @@ class PoolProjectProvider:
     ) -> ProjectLease:
         if not self._entries or self._round_robin is None:
             raise RuntimeError("the project pool is empty")
+
         name, base, working_directory = self._entries[next(self._round_robin)]
         return ProjectLease(project_id=name, server_base=base, working_directory=working_directory)
 
@@ -139,20 +140,25 @@ class AgentdControlProvider:
                 "cow": {"mode": self.config.projects.cow.mode},
             },
         }
+
         if self.config.projects.inbound_permissions:
             request["inboundPermissions"] = [
                 rule.model_dump() for rule in self.config.projects.inbound_permissions
             ]
+
         sandbox = self.config.projects.sandbox
         if sandbox is not None and sandbox.process != "none":
             request["sandbox"] = {
                 "process": sandbox.process,
                 "failurePolicy": sandbox.failure_policy,
             }
+
         data = await self._create(request, retry=True)
+
         server_base = data.get("server_base")
         if not server_base:
             raise RuntimeError(f"control API returned no server_base: {data!r}")
+
         return ProjectLease(
             project_id=str(data.get("project_id", name)),
             transport=str(data.get("transport", transport)),
@@ -170,8 +176,10 @@ class AgentdControlProvider:
         # A crash can leave views behind (agentd tears them down only on DELETE);
         # they are ephemeral, so wipe the workspace root on startup.
         await asyncio.to_thread(_wipe_dir, self._base_dir)
+
         if self.config.projects.isolation == "worktree":
             await _run("git", "-C", self._source or ".", "worktree", "prune")
+
         async with self._client() as client:
             resp = await client.get(f"{self._base}/admin/projects", headers=self._headers)
             if resp.status_code != 200:
@@ -182,14 +190,18 @@ class AgentdControlProvider:
             resp = await client.post(
                 f"{self._base}/admin/projects", json=request, headers=self._headers
             )
+
             if resp.status_code == 201:
                 metrics.inc("isolated_leases_created")
                 return dict(resp.json().get("data") or {})
+
             detail = resp.text.strip()
+
         # A same-named project may survive an agentd crash; drop it and retry once.
         if retry and "already exists" in detail:
             await self._delete(request["name"])
             return await self._create(request, retry=False)
+
         metrics.inc("isolated_lease_failures")
         raise RuntimeError(f"control create failed ({resp.status_code}): {detail}")
 
@@ -241,8 +253,10 @@ def _wipe_dir(path: str) -> None:
 def build_provider(config: Config) -> ProjectProvider:
     if config.projects.mode == "isolated":
         return AgentdControlProvider(config)
+
     if config.server.pool:
         return PoolProjectProvider(config.server_bases())
+
     name, base, working_directory = config.server_bases()[0]
     return SharedProjectProvider(base, working_directory=working_directory, project_id=name)
 
@@ -288,13 +302,16 @@ class LeaseManager:
     async def reclaim_idle(self) -> list[str]:
         if self._ttl <= 0:
             return []
+
         now = self._clock()
         reclaimed: list[str] = []
+
         for key, (lease, last_active) in list(self._leases.items()):
             if lease.ephemeral and now - last_active >= self._ttl:
                 del self._leases[key]
                 await self._provider.release(lease)
                 reclaimed.append(key)
+
         return reclaimed
 
     async def release_all(self) -> None:

@@ -22,8 +22,10 @@ def redact_secrets(value: Any) -> Any:
             key: (_MASK if _is_secret(key, item) else redact_secrets(item))
             for key, item in value.items()
         }
+
     if isinstance(value, list):
         return [redact_secrets(item) for item in value]
+
     return value
 
 

@@ -161,19 +161,23 @@ class QQClient:
             now = time.monotonic()
             if self._token and now < self._token_expiry - _TOKEN_REFRESH_MARGIN_S:
                 return self._token
+
             resp = httpx.post(
                 self._token_url,
                 json={"appId": self._appid, "clientSecret": self._secret},
                 timeout=10,
             )
             data = _json(resp)
+
             token = data.get("access_token")
             if not token:
                 # Token failures report a business code in the body while the
                 # HTTP status stays 200, so read the body rather than the status.
                 raise QQAuthError(f"access token failed: code={data.get('code')}")
+
             self._token = str(token)
             self._token_expiry = now + float(data.get("expires_in") or 7200)
+
             return self._token
 
     def _headers(self) -> dict[str, str]:
@@ -217,21 +221,25 @@ class QQClient:
     ) -> str:
         resource = "groups" if scope == "group" else "users"
         body: dict[str, Any] = {"file_type": file_type, "srv_send_msg": False}
+
         if data is not None:
             if len(data) > _BINARY_UPLOAD_MAX:
                 raise QQUnsupported(
                     "qq media larger than 5 MiB needs the multipart upload flow"
                 )
+
             body["file_data"] = base64.b64encode(data).decode()
             body["file_name"] = filename or f"file.{file_type}"
         elif url:
             body["url"] = url
         else:
             raise QQUnsupported("qq upload needs file data or a url")
+
         result = self._post(f"/v2/{resource}/{target_id}/files", body)
         file_info = result.get("file_info")
         if not file_info:
             raise QQAPIError(0, "upload returned no file_info")
+
         return str(file_info)
 
     def put_interaction(self, interaction_id: str, code: int = 0) -> None:
@@ -241,8 +249,10 @@ class QQClient:
         host = urlparse(url).hostname or ""
         if not is_public_host(host):
             raise QQError(f"refusing to fetch non-public media url: {host}")
+
         resp = httpx.get(url, timeout=60, follow_redirects=True)
         resp.raise_for_status()
+
         return resp.content
 
     # -- gateway URL -------------------------------------------------------
@@ -284,6 +294,7 @@ class QQClient:
         asyncio.set_event_loop(loop)
         self._loop = loop
         self._stop_event.clear()
+
         try:
             loop.run_until_complete(self._serve(on_event))
         except Exception:  # noqa: BLE001 - a dead thread must not crash Tether
@@ -297,12 +308,14 @@ class QQClient:
     async def _serve(self, on_event: Callable[[str, dict[str, Any]], None]) -> None:
         backoff = _BACKOFF_MIN_S
         first = True
+
         while not self._stopped.is_set():
             # A raised transport error (e.g. DNS) leaves an existing session
             # intact, so keep it and resume on the next attempt; only a fresh
             # start needs an Identify.
             action = "resume" if self._session_id is not None else "identify"
             started = time.monotonic()
+
             try:
                 action = await self._connect(on_event)
                 # Only a connection that lived a while proves the endpoint is
@@ -320,16 +333,20 @@ class QQClient:
                 if first:
                     self._ready.set()
                     first = False
+
             if self._stopped.is_set():
                 break
+
             if action == "identify":
                 self._reset_session()
+
             await self._sleep(backoff)
             backoff = min(backoff * 2, _BACKOFF_MAX_S)
 
     async def _connect(self, on_event: Callable[[str, dict[str, Any]], None]) -> str:
         uri = await asyncio.to_thread(self._gateway_url)
         log.info("qq_gateway_connecting")
+
         async with websockets.connect(uri, max_size=None) as ws:
             self._ws = ws
             code: int | None = None
@@ -344,13 +361,16 @@ class QQClient:
                 self._ws = None
                 await self._cancel_heartbeat()
                 code = ws.close_code
+
         return self._close_action(code)
 
     def _close_action(self, code: int | None) -> str:
         if code in _CLOSE_FATAL:
             raise _FatalGatewayError(code)
+
         if code in _CLOSE_IDENTIFY:
             return "identify"
+
         # 4009 ("connection expired") and any normal/abnormal drop (no code,
         # 1000/1006, …): resume when a session exists so the gateway replays
         # missed events, else identify.
@@ -360,10 +380,12 @@ class QQClient:
         self, ws: Any, on_event: Callable[[str, dict[str, Any]], None]
     ) -> None:
         interval_ms = await self._wait_hello(ws)
+
         if self._session_id is not None:
             await self._resume(ws)
         else:
             await self._identify(ws)
+
         self._missed_acks = 0
         self._connected = True
         self._ready.set()
@@ -378,6 +400,7 @@ class QQClient:
                 data = payload.get("d")
                 interval = data.get("heartbeat_interval") if isinstance(data, dict) else None
                 return int(interval or 45000)
+
         raise QQError("qq gateway did not send a hello")
 
     async def _identify(self, ws: Any) -> None:
@@ -434,11 +457,14 @@ class QQClient:
         self, raw: Any, on_event: Callable[[str, dict[str, Any]], None]
     ) -> None:
         payload = _decode(raw)
+
         # Any frame proves the gateway is alive; clear the heartbeat-miss count.
         self._missed_acks = 0
+
         seq = payload.get("s")
         if isinstance(seq, int):
             self._seq = seq
+
         op = payload.get("op")
         if op == OP_DISPATCH:
             event = str(payload.get("t") or "")
@@ -446,6 +472,7 @@ class QQClient:
             record = data if isinstance(data, dict) else {}
             if event == "READY":
                 self._session_id = str(record.get("session_id") or "") or None
+
             _notify(on_event, event, record)
         elif op == OP_INVALID_SESSION:
             # The session is gone: drop it and reconnect with a fresh Identify.
@@ -485,28 +512,35 @@ def _json(resp: httpx.Response, *, check_error: bool = False) -> dict[str, Any]:
         if check_error:
             resp.raise_for_status()
         return {}
+
     if not isinstance(data, dict):
         return {}
+
     if check_error and data.get("err_code") not in (None, 0):
         raise QQAPIError(data.get("err_code"), str(data.get("message") or ""))
+
     if check_error:
         resp.raise_for_status()
+
     return data
 
 
 def _decode(raw: Any) -> dict[str, Any]:
     if isinstance(raw, bytes):
         raw = raw.decode("utf-8", "replace")
+
     try:
         data = json.loads(raw)
     except (ValueError, TypeError):
         return {}
+
     return data if isinstance(data, dict) else {}
 
 
 def _notify(on_event: Callable[[str, dict[str, Any]], None], event: str, data: dict) -> None:
     if not event:
         return
+
     try:
         on_event(event, data)
     except Exception:  # noqa: BLE001 - one bad event must not kill the read loop

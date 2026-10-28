@@ -40,6 +40,7 @@ class MediaIngest:
         result = IngestResult()
         for attachment in attachments:
             await self._ingest_one(attachment, result)
+
         return result
 
     async def _ingest_one(self, attachment: Attachment, result: IngestResult) -> None:
@@ -52,9 +53,11 @@ class MediaIngest:
                 f"⚠️ Attachment `{label}` is too large to download (limit {limit} bytes)."
             )
             return
+
         media = await self._download(attachment, label, result)
         if media is None:
             return
+
         # Some platforms only reveal the file name on download (e.g. via a
         # Content-Disposition header), so prefer it over the message's name.
         name = media.name or attachment.name
@@ -66,6 +69,7 @@ class MediaIngest:
             bytes=len(media.data),
             kind=attachment.kind,
         )
+
         result.files.append(_inline_file(media.data, mime, name))
 
     async def _download(

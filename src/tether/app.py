@@ -133,73 +133,101 @@ class TetherApp:
     # -- lifecycle ---------------------------------------------------------
     async def start(self) -> None:
         validate_startup(self.config)
+
         await self.provider.preflight()
         await self.store.connect()
         await migrate_legacy_wechat_files(self.config, self.store)
+
         built = self._connectors_override
         if built is None:
             built = build_connectors(self.config, store=self.store)
+
         for connector in built:
             key = getattr(connector, "instance_id", None) or connector.name
             self.connectors[key] = connector
+
         if not self.connectors:
             log.warning("no_connectors_enabled")
+
         for connector in self.connectors.values():
             await connector.start(self._on_item)
+
         self._running = True
+
         for base_url in self._base_urls():
             try:
                 await self.router.warm_base(base_url)
             except Exception as exc:  # noqa: BLE001 - discovery retries on first message
                 log.warning("agent_discovery_failed", base=base_url, error=str(exc))
+
         for base_url in self._base_urls():
             await self._ensure_sse(base_url)
+
         self._janitor_task = asyncio.ensure_future(self._janitor())
         self._watchdog_task = asyncio.ensure_future(self._watchdog_loop())
+
         if self.config.reload and self._config_path:
             self._config_mtime = _mtime(self._config_path)
             self._config_task = asyncio.ensure_future(self._watch_config())
+
         await self._start_metrics()
         self._connector_health_task = asyncio.ensure_future(self._connector_health_loop())
+
         log.info("tether_started", connectors=list(self.connectors))
 
     async def stop(self) -> None:
         if self._stopped:
             return
+
         self._stopped = True
         self._running = False
         self._accepting = False  # stop admitting new inbound messages
+
         if self._stop_event is not None:
             self._stop_event.set()
+
         started = time.monotonic()
+
         for task in self._sse_tasks.values():
             task.cancel()
+
         if self._janitor_task is not None:
             self._janitor_task.cancel()
+
         if self._watchdog_task is not None:
             self._watchdog_task.cancel()
+
         if self._config_task is not None:
             self._config_task.cancel()
+
         if self._connector_health_task is not None:
             self._connector_health_task.cancel()
+
         with contextlib.suppress(Exception):
             await self._stop_metrics()
+
         for task in self._sse_tasks.values():
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
+
         if self._janitor_task is not None:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._janitor_task
+
         if self._watchdog_task is not None:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._watchdog_task
+
         if self._config_task is not None:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._config_task
+
         if self._connector_health_task is not None:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._connector_health_task
+
         log.info("stop_streams_closed", elapsed_ms=_ms_since(started))
+
         for engine in list(self._turns.values()):
             # Default: just stop streaming and leave the turn on agentd so a
             # restart can resume it. `interrupt_on_shutdown` opts into stopping
@@ -209,27 +237,37 @@ class TetherApp:
                     await asyncio.wait_for(engine.shutdown(), timeout=2)
                 else:
                     await engine.pause()
+
         log.info("stop_turns_closed", elapsed_ms=_ms_since(started))
+
         login_tasks = list(self._login_tasks)
         for task in login_tasks:
             task.cancel()
+
         for task in login_tasks:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
+
         for connector in self.connectors.values():
             with contextlib.suppress(Exception):
                 await connector.stop()
+
         log.info("stop_connectors_closed", elapsed_ms=_ms_since(started))
+
         with contextlib.suppress(Exception):
             await self.store.flush()
+
         with contextlib.suppress(Exception):
             await self.router.close()
+
         with contextlib.suppress(Exception):
             await self.store.close()
+
         log.info("tether_stopped", elapsed_ms=_ms_since(started))
 
     async def serve_forever(self) -> None:
         await self.start()
+
         self._stop_event = asyncio.Event()
         try:
             await self._stop_event.wait()
@@ -240,6 +278,7 @@ class TetherApp:
         pool = self.config.server.pool
         if pool:
             return [entry.base_url for entry in pool]
+
         return [self.config.server.base_url]
 
     async def _ensure_sse(self, base_url: str) -> None:
@@ -251,6 +290,7 @@ class TetherApp:
         base = base_url.rstrip("/")
         if base in self._sse_tasks:
             return
+
         client = self.router.client_for_base(base)
         self._clients[base] = client
         self._sse_tasks[base] = asyncio.ensure_future(self._consume_events(base, client))
@@ -258,6 +298,7 @@ class TetherApp:
     async def _stop_sse(self, base: str) -> None:
         task = self._sse_tasks.pop(base, None)
         self._clients.pop(base, None)
+
         if task is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -266,6 +307,7 @@ class TetherApp:
     async def _sync_sse(self) -> None:
         """Keep the consumer set equal to the configured bases + active leases."""
         desired = {base.rstrip("/") for base in self._base_urls()} | self.router.leases.bases()
+
         for base in list(self._sse_tasks):
             if base not in desired:
                 await self._stop_sse(base)
@@ -279,6 +321,7 @@ class TetherApp:
     async def _on_item(self, item: IncomingItem) -> None:
         if not self._accepting:
             return
+
         try:
             if isinstance(item, InboundMessage):
                 await self._on_message(item)
@@ -293,31 +336,38 @@ class TetherApp:
         if not self._access_allowed(msg):
             log.info("access_denied", conversation=msg.conversation.key, sender=msg.sender.id)
             return
+
         key = f"{msg.conversation.key}:{msg.message_id}"
         if self.dedup.is_duplicate(key):
             log.info("duplicate_message", key=key)
             return
+
         metrics.inc("inbound_messages")
         connector = self._connector_for(msg.channel, msg.conversation.account)
         if connector is None:
             return
+
         text, escaped = unescape_command(msg.text, self.config.commands.prefix)
         if escaped:
             msg = replace(msg, text=text)
         elif await self._handle_command(msg, connector):
             return
+
         try:
             route = await self.router.get_or_create(msg.conversation, title=_title(msg))
         except Exception as exc:  # noqa: BLE001 - e.g. an isolated lease could not be allocated
             log.warning("route_unavailable", conversation=msg.conversation.key, error=str(exc))
+
             await self._notice(
                 connector,
                 msg.conversation,
                 "⚠️ Could not allocate a project for this message; please retry.",
             )
             return
+
         if await self._maybe_answer_pending(route, msg, connector):
             return
+
         await self._start_turn(route, msg, connector)
 
     async def _handle_command(self, msg: InboundMessage, connector: IMConnector) -> bool:
@@ -325,6 +375,7 @@ class TetherApp:
         command = parse_command(msg.text, self.config.commands.prefix)
         if command is None:
             return False
+
         try:
             await self._run_command(command, msg, connector)
         except Exception:  # noqa: BLE001 - a command must never fail silently
@@ -370,13 +421,15 @@ class TetherApp:
         project or server details) and shortens the session id.
         """
         conv = msg.conversation
-        group = conv.is_group
         route = await self.router.get(conv)
+
+        group = conv.is_group
         lines = [f"📊 Status · {connector.name}{' · group' if group else ''}"]
         if route is None:
             lines.append("session: (none yet)")
         else:
             engine = self._turns.get(route.session_id)
+
             sid = _short_id(route.session_id) if group else route.session_id
             lines.append(f"session: {sid}   agent={route.agent}   model={route.model or '?'}")
             if group:
@@ -385,15 +438,19 @@ class TetherApp:
                 lines.append(f"conversation: {conv.key}")
                 info = await self._agentd_info(route.server_base)
                 lines.extend(self._direct_status_lines(route, engine, info))
+
             state = "parked" if route.pending_interactions else ("running" if engine else "idle")
             lines.append(f"turn: {state}   waiting: {self._waiting(route)}")
+
             pending = _pending_summary(route.pending_interactions)
             if pending:
                 lines.append(f"waiting on: {pending}")
+
         lines.append(
             f"uptime: {_human_duration(metrics.uptime_s())}"
             f"   active_turns={int(metrics.gauges.get('active_turns', 0))}"
         )
+
         await self._notice(connector, conv, "\n".join(lines))
 
     async def _agentd_info(self, base_url: str) -> dict[str, Any] | None:
@@ -414,6 +471,7 @@ class TetherApp:
         limit = route.context_limit or self.config.model.context_limit
         used = engine.usage.context_tokens if engine is not None else None
         context = f"context: {_human_tokens(used)} / {_human_tokens(limit)}"
+
         if engine is not None and (engine.usage.input_tokens or engine.usage.output_tokens):
             usage = engine.usage
             context += (
@@ -421,50 +479,62 @@ class TetherApp:
                 f" {_human_tokens(usage.output_tokens)} out /"
                 f" {_human_tokens(usage.cached_tokens)} cached"
             )
+
         lines = [context]
         workdir = self.router.working_directory(route)
         if workdir:
             lines.append(f"workdir: {workdir}")
+
         if self.config.projects.mode == "isolated":
             lines.append(
                 f"project: {route.project_id or '?'} (isolated/{self.config.projects.isolation})"
             )
+
         lines.append(_agentd_line(route.server_base, info))
         if route.bot_name:
             lines.append(f"identity: {route.bot_name}")
+
         lines.append(_connectors_line(self.connectors))
+
         return lines
 
     def _waiting(self, route: Route) -> int:
         """Turns queued behind the one currently running, if any."""
         queue = self._turn_queue.get(route.session_id) or []
         running = 1 if self._turns.get(route.session_id) is not None else 0
+
         return max(0, len(queue) - running)
 
     async def _on_interaction(self, item: IncomingInteraction) -> None:
         connector = self._connector_for(item.conversation.channel, item.conversation.account)
         if connector is None:
             return
+
         value = hitl.decode_value(item.value)
         if value is None:
             log.info("interaction_unparsed", value=item.value)
             return
+
         if value.get("specs") is not None:
             # A question form submit: turn the widgets into one answer per question.
             value["answers"] = _form_answers(value["specs"], item.form)
             if not any(value["answers"]):
                 value["reject"] = True
+
         sid = str(value.get("sid", ""))
         rid = str(value.get("rid", ""))
         engine = self._turns.get(sid)
+
         route = engine.route if engine is not None else await self.router.get_by_session(sid)
         if route is None:
             log.info("interaction_no_route", rid=rid, session=sid)
             return
+
         pending = route.pending_interactions.get(rid)
         if pending is None:
             log.info("interaction_stale", rid=rid)
             return
+
         if not hitl.is_authorized(
             pending,
             item.sender,
@@ -476,13 +546,17 @@ class TetherApp:
                 connector, route.conversation, "Only the requester may answer this interaction."
             )
             return
+
         client = self.router.client_for(route)
+
         if engine is None:
             # The turn is running on agentd but this process has no engine for it
             # (e.g. the bridge restarted mid-turn). Attach one so the resumed turn
             # renders; answering the interaction resumes it.
             self._attach_resumed_engine(sid, route)
+
         label = _interaction_label(value)
+
         try:
             await self._reply_interaction(client, sid, rid, value)
         except AgentError as exc:
@@ -492,8 +566,10 @@ class TetherApp:
             else:
                 log.warning("interaction_reply_failed", rid=rid, error=exc.code)
                 label = "⚠️ Could not process"
+
         route.pending_interactions.pop(rid, None)
         await self.router.save(route)
+
         with contextlib.suppress(Exception):
             await connector.acknowledge(item, label)
 
@@ -515,6 +591,7 @@ class TetherApp:
         connector = self._connector_for(route.conversation.channel, route.conversation.account)
         if connector is None:
             return
+
         inbound = InboundMessage(
             channel=route.conversation.channel,
             message_id="",
@@ -522,6 +599,7 @@ class TetherApp:
             sender=Sender(id=route.active_turn_sender or "unknown"),
             text="",
         )
+
         engine = TurnEngine(
             route=route,
             inbound=inbound,
@@ -533,8 +611,10 @@ class TetherApp:
             on_finish=self._on_turn_finished,
             working_dir=self.router.working_directory(route),
         )
+
         self._turns[sid] = engine
         self._turn_queue[sid] = [engine]
+
         log.info("turn_resumed", session=sid, conversation=route.key)
 
     async def _on_event(self, event: ConnectorEvent) -> None:
@@ -544,6 +624,7 @@ class TetherApp:
     async def _start_turn(self, route: Route, msg: InboundMessage, connector: IMConnector) -> None:
         working_dir = self.router.working_directory(route)
         identity = await self.router.refresh_identity(route, connector)
+
         ingest = MediaIngest(self.config, connector)
         result = await ingest.ingest(msg.attachments)
         prompt = self.composer.compose(
@@ -569,15 +650,19 @@ class TetherApp:
                 on_finish=self._on_turn_finished,
                 working_dir=working_dir,
             )
+
             sid = route.session_id
             had_active = sid in self._turns
             self._turn_queue.setdefault(sid, []).append(engine)
+
             route.queue_depth += 1
             route.participants[msg.sender.id] = msg.sender.name or msg.sender.id
             route.context_dirty = False
             route.identity_injected = True
+
             if not had_active:
                 await self._activate(engine)
+
             await self.router.save(route)
 
             try:
@@ -589,6 +674,7 @@ class TetherApp:
                     delivery=self._delivery_for(route, msg, had_active=had_active),
                 )
                 self._bump("prompts")
+
                 return
             except AgentError as exc:
                 if exc.code == "not_found" and attempt == 0:
@@ -596,20 +682,25 @@ class TetherApp:
                     await self._discard(engine)
                     await self.router.recreate_session(route)
                     continue
+
                 log.warning("prompt_failed", error=exc.code)
+
                 await self._notice(
                     connector,
                     route.conversation,
                     user_message(exc.code, detail=exc.detail, status=exc.status),
                 )
                 await self._discard(engine)
+
                 return
 
     async def _activate(self, engine: TurnEngine) -> None:
         sid = engine.route.session_id
         self._turns[sid] = engine
+
         engine.route.active_turn_sender = engine.inbound.sender.id
         engine.activated_at = time.monotonic()
+
         # An isolated project lives on its own dynamic base; subscribe before the
         # prompt so none of this turn's events are missed.
         await self._ensure_sse(engine.route.server_base)
@@ -628,6 +719,7 @@ class TetherApp:
         queue = self._remove_engine(engine)
         if queue and engine.route.session_id not in self._turns:
             await self._activate(queue[0])
+
         await self.router.save(engine.route)
         self._bump("turns")
 
@@ -637,13 +729,15 @@ class TetherApp:
         queue = self._turn_queue.get(sid) or []
         if engine in queue:
             queue.remove(engine)
+
         engine.route.queue_depth = max(0, engine.route.queue_depth - 1)
         if self._turns.get(sid) is engine:
             self._turns.pop(sid, None)
+
         if not queue:
             self._turn_queue.pop(sid, None)
+
         return queue
-        self._bump("turns")
 
     async def _handle_stop(self, msg: InboundMessage, connector: IMConnector) -> None:
         conv = msg.conversation
@@ -651,6 +745,7 @@ class TetherApp:
         if route is None:
             await self._notice(connector, conv, "ℹ️ Nothing to stop — this conversation is idle.")
             return
+
         if not hitl.command_authorized(
             msg.sender,
             route.conversation,
@@ -663,12 +758,14 @@ class TetherApp:
                 "🔒 Only the person who started this turn, or an admin, can stop it.",
             )
             return
+
         engine = self._turns.get(route.session_id)
         if engine is None:
             await self._notice(
                 connector, route.conversation, "ℹ️ Nothing to stop — this turn already finished."
             )
             return
+
         await engine.cancel()
         await self._notice(connector, route.conversation, "🛑 Stopped the current turn.")
 
@@ -683,22 +780,27 @@ class TetherApp:
                 connector, conv, "🔒 Only admins can start a new conversation."
             )
             return
+
         route = await self.router.get(conv)
         if route is None:
             await self._notice(
                 connector, conv, "ℹ️ Nothing to reset yet — just send a message to start."
             )
             return
+
         old = route.session_id
         engine = self._turns.get(old)
         if engine is not None:
             await engine.cancel()
+
         self._turns.pop(old, None)
         self._turn_queue.pop(old, None)
+
         try:
             await self.router.client_for(route).delete_session(old)
         except AgentError as exc:
             log.warning("session_delete_failed", session=old, error=exc.code)
+
         try:
             await self.router.recreate_session(route)
         except Exception as exc:  # noqa: BLE001 - surface a failed reset to the user
@@ -709,6 +811,7 @@ class TetherApp:
                 "⚠️ Could not start a new conversation; please try again.",
             )
             return
+
         await self._notice(connector, route.conversation, "🆕 Started a new conversation.")
 
     async def _handle_login(
@@ -719,6 +822,7 @@ class TetherApp:
         if conv.is_group:
             await self._notice(connector, conv, "🔒 `/login` is available in a direct chat only.")
             return
+
         if args.split() != ["wechat"]:
             await self._notice(
                 connector,
@@ -726,6 +830,7 @@ class TetherApp:
                 f"Usage: `{self.config.commands.prefix}login wechat`",
             )
             return
+
         bot = self.config.channels.wechat.bot_for_login(conv.channel, msg.sender.id)
         if bot is None:
             await self._notice(
@@ -734,14 +839,17 @@ class TetherApp:
                 "🔒 You are not allowed to log in a WeChat bot from this channel.",
             )
             return
+
         target = self.connectors.get(bot.instance_id)
         if target is None:
             await self._notice(connector, conv, "ℹ️ That WeChat bot is not configured.")
             return
+
         login = getattr(target, "login", None)
         if not callable(login):
             await self._notice(connector, conv, "⚠️ This connector cannot log in.")
             return
+
         task = asyncio.create_task(
             self._run_wechat_login(target, login, connector, conv)
         )
@@ -776,6 +884,7 @@ class TetherApp:
                     return
                 except Exception:  # noqa: BLE001 - fall back to the raw QR content
                     log.warning("wechat_login_qr_image_failed", exc_info=True)
+
             await self._notice(
                 connector, conv, "Scan this QR content with WeChat:\n" + content
             )
@@ -823,11 +932,13 @@ class TetherApp:
         if route is None:
             await self._notice(connector, conv, "ℹ️ No project here yet — send a message first.")
             return
+
         workdir = self.router.working_directory(route)
         result = _resolve_outbound_file(args, workdir, self.config)
         if isinstance(result, str):
             await self._notice(connector, conv, result)
             return
+
         await MediaEgress(self.config, connector).send(conv, result)
 
     async def _handle_config(self, msg: InboundMessage, connector: IMConnector, args: str) -> None:
@@ -840,20 +951,25 @@ class TetherApp:
         if conv.is_group:
             await self._notice(connector, conv, "🔒 `/config` is available in a direct chat only.")
             return
+
         if msg.sender.id not in self.config.admins_for(conv.channel, conv.account):
             await self._notice(connector, conv, "🔒 Only admins can view the configuration.")
             return
+
         option = args.strip()
         if option not in ("", "--all"):
             await self._notice(connector, conv, f"⚠️ Unknown option: `{option}` (use `--all`).")
             return
+
         route = await self.router.get(conv)
         base = route.server_base if route is not None else self.config.server.base_url
         payload: dict[str, Any] = {
             "agentd": await self._agentd_config(base, all_=(option == "--all"))
         }
+
         if option == "--all":
             payload = {"tether": redact_secrets(self.config.model_dump(mode="json")), **payload}
+
         await self._send_config(connector, conv, payload)
 
     async def _send_config(
@@ -871,16 +987,19 @@ class TetherApp:
         Bounded by a timeout so a hung agentd cannot stall the reply.
         """
         client = self.router.client_for_base(base_url)
+
         try:
             info = await asyncio.wait_for(client.get_info(), timeout=5.0)
             if all_:
                 config = await asyncio.wait_for(client.get_config(), timeout=5.0)
                 return {"base_url": base_url, "info": info, "config": config}
+
             name = _current_server_name(info)
             config = await asyncio.wait_for(
                 client.get_config(section="servers", server=name), timeout=5.0
             )
             servers = config.get("config", {}).get("servers") or []
+
             return {"base_url": base_url, "info": info, "servers": servers}
         except (AgentError, TimeoutError) as exc:
             code = exc.code if isinstance(exc, AgentError) else "timeout"
@@ -892,8 +1011,10 @@ class TetherApp:
         path = self._config_path
         if path is None:
             return
+
         while self._running:
             await asyncio.sleep(2.0)
+
             mtime = _mtime(path)
             if mtime > self._config_mtime:
                 self._config_mtime = mtime
@@ -903,18 +1024,22 @@ class TetherApp:
         path = self._config_path
         if path is None:
             return
+
         try:
             updated = load_config(path)
         except Exception:  # noqa: BLE001 - keep running on a broken file
             log.warning("config_reload_failed", exc_info=True)
             return
+
         for name in _RUNTIME_SECTIONS:
             setattr(self.config, name, getattr(updated, name))
+
         # WeChat bot identity and login_via are safe to hot-apply;
         # the bot list / enabled still needs a restart.
         for connector in self.connectors.values():
             if connector.name != "wechat":
                 continue
+
             account = getattr(connector, "account", None)
             spec = (
                 updated.channels.wechat.spec_for(account)
@@ -932,12 +1057,14 @@ class TetherApp:
                     ),
                     None,
                 )
+
                 if updated_bot is not None:
                     for current in self.config.channels.wechat.bots:
                         if current.id == account:
                             current.identity = updated_bot.identity
                             current.login_via = updated_bot.login_via
                             break
+
         log.info("config_reloaded")
 
     async def _maybe_answer_pending(
@@ -945,11 +1072,14 @@ class TetherApp:
     ) -> bool:
         if not route.pending_interactions:
             return False
+
         text = msg.text.strip()
         if not text.isdigit():
             return False
+
         index = int(text) - 1
         client = self.router.client_for(route)
+
         for rid, pending in list(route.pending_interactions.items()):
             if not hitl.is_authorized(
                 pending,
@@ -959,19 +1089,23 @@ class TetherApp:
                 active_turn_sender=route.active_turn_sender,
             ):
                 continue
+
             if pending.kind == "permission":
                 replies = ["once", "always", "reject"]
                 if 0 <= index < len(replies):
                     reply = client.reply_permission(route.session_id, rid, reply=replies[index])
                     if await self._answer_pending(route, rid, reply):
                         return True
+
                     continue
             else:
                 if 0 <= index < len(pending.options):
                     reply = client.reply_question(route.session_id, rid, [[pending.options[index]]])
                     if await self._answer_pending(route, rid, reply):
                         return True
+
                     continue
+
         return False
 
     async def _answer_pending(self, route: Route, rid: str, reply: Awaitable[None]) -> bool:
@@ -987,16 +1121,20 @@ class TetherApp:
         except AgentError as exc:  # already answered/expired on agentd
             log.warning("stale_interaction_dropped", request=rid, error=exc.code)
             accepted = False
+
         route.pending_interactions.pop(rid, None)
         await self.router.save(route)
+
         return accepted
 
     # -- SSE consumption + reconciliation ----------------------------------
     async def _consume_events(self, base_url: str, client: HttpAgentClient) -> None:
         backoff = self.config.server.sse_reconnect_ms / 1000.0
         failures = 0
+
         while self._running:
             received = False
+
             try:
                 async for event in client.events():
                     received = True
@@ -1006,8 +1144,10 @@ class TetherApp:
                 raise
             except Exception as exc:  # noqa: BLE001
                 log.warning("sse_disconnected", base=base_url, error=str(exc))
+
             if not self._running:
                 break
+
             if received:
                 failures = 0
                 metrics.set("sse_disconnected", 0.0)
@@ -1017,8 +1157,10 @@ class TetherApp:
                     metrics.inc("sse_prolonged_disconnects")
                     metrics.set("sse_disconnected", 1.0)
                     log.error("sse_disconnected_prolonged", base=base_url, reconnects=failures)
+
             metrics.inc("sse_reconnects")
             await asyncio.sleep(backoff)
+
             backoff = min(backoff * 2, 30.0)
             await self._reconcile(base_url, client)
 
@@ -1026,9 +1168,11 @@ class TetherApp:
         sid = event.session_id
         if not sid:
             return
+
         engine = self._turns.get(sid)
         if engine is not None:
             await engine.handle_event(event)
+
             if event.type in (
                 PERMISSION_ASKED,
                 PERMISSION_REPLIED,
@@ -1037,7 +1181,9 @@ class TetherApp:
                 QUESTION_REJECTED,
             ):
                 await self.router.save(engine.route)
+
             return
+
         if event.type == SESSION_STATUS:
             status = (event.data or {}).get("status") or {}
             log.debug("status_without_turn", session=sid, status=status)
@@ -1046,8 +1192,10 @@ class TetherApp:
         interval = self.config.sessions.turn_watchdog_s
         if interval <= 0:
             return
+
         while self._running:
             await asyncio.sleep(interval)
+
             try:
                 await self._recover_stale_turns()
             except asyncio.CancelledError:
@@ -1067,25 +1215,31 @@ class TetherApp:
         """
         now = time.monotonic()
         by_base: dict[str, list[TurnEngine]] = {}
+
         for engine in self._turns.values():
             # Too new to judge: the prompt may not have started on agentd yet.
             if not engine.activated_at or now - engine.activated_at < _WATCHDOG_GRACE_S:
                 continue
+
             by_base.setdefault(engine.route.server_base, []).append(engine)
+
         for base, engines in by_base.items():
             try:
                 active = await self.router.client_for_base(base).active_sessions()
             except AgentError as exc:
                 log.warning("turn_watchdog_probe_failed", base=base, error=exc.code)
                 continue
+
             for engine in engines:
                 if engine.route.session_id in active:
                     continue
+
                 log.warning(
                     "stale_turn_recovered",
                     session=engine.route.session_id,
                     conversation=engine.route.key,
                 )
+
                 try:
                     await engine.finish()
                 except Exception:  # noqa: BLE001 - one bad turn must not kill the watchdog
@@ -1098,11 +1252,14 @@ class TetherApp:
         except AgentError as exc:
             log.warning("reconcile_active_failed", error=exc.code)
             return
+
         for sid in active:
             route = await self.router.get_by_session(sid)
             if route is None:
                 continue
+
             await self._recover_active(client, sid, route)
+
         await self._restore_hitl(client)
 
     async def _recover_active(self, client: HttpAgentClient, sid: str, route: Route) -> None:
@@ -1112,6 +1269,7 @@ class TetherApp:
         except AgentError as exc:
             log.warning("reconcile_message_failed", session=sid, error=exc.code)
             return
+
         text = assistant_text(messages)
         media = tool_media(messages)
         engine = self._turns.get(sid)
@@ -1120,13 +1278,16 @@ class TetherApp:
             # the final flush is complete.
             if text:
                 engine.controller.text = text
+
             known = {_media_key(item) for item in engine.media}
             for item in media:
                 if _media_key(item) not in known:
                     engine.media.append(item)
                     known.add(_media_key(item))
+
             log.info("reconcile_turn_seeded", session=sid, chars=len(text or ""))
             return
+
         # No live engine (e.g. bridge restarted mid-turn): surface what we have.
         connector = self._connector_for(route.conversation.channel, route.conversation.account)
         if connector is not None and text:
@@ -1135,22 +1296,26 @@ class TetherApp:
     async def _restore_hitl(self, client: HttpAgentClient) -> None:
         """Restore pending interactions and surface any we never saw."""
         perms, questions = [], []
+
         try:
             perms = await client.list_permissions()
             questions = await client.list_questions()
         except AgentError as exc:
             log.warning("reconcile_hitl_failed", error=exc.code)
             return
+
         for perm in perms:
             route = await self.router.get_by_session(perm.session_id)
             if route is None or perm.id in route.pending_interactions:
                 continue
+
             await self._register_pending(
                 route,
                 "permission",
                 perm.id,
                 options=["once", "always", "reject"],
             )
+
             connector = self._connector_for(route.conversation.channel, route.conversation.account)
             if connector is not None:
                 card = hitl.permission_card(perm)
@@ -1161,12 +1326,15 @@ class TetherApp:
                         f"{i + 1}. {b.text}" for i, b in enumerate(card.buttons)
                     ]
                     await self._notice(connector, route.conversation, "\n".join(lines))
+
         for question in questions:
             route = await self.router.get_by_session(question.session_id)
             if route is None or question.id in route.pending_interactions:
                 continue
+
             text, options = hitl.question_numbered_text(question)
             await self._register_pending(route, "question", question.id, options=options)
+
             connector = self._connector_for(route.conversation.channel, route.conversation.account)
             if connector is not None:
                 qcard = hitl.question_card(question)
@@ -1190,20 +1358,24 @@ class TetherApp:
     async def _janitor(self) -> None:
         """Periodically restore pending interactions and reclaim idle leases."""
         interval = max(5, min(self.config.permissions.poll_interval_s, 30))
+
         try:
             while self._running:
                 await asyncio.sleep(interval)
+
                 for _base, client in self._clients.items():
                     try:
                         await self._restore_hitl(client)
                     except Exception:  # noqa: BLE001
                         log.exception("hitl_poll_failed")
+
                 try:
                     reclaimed = await self.router.reclaim_idle()
                     if reclaimed:
                         log.info("leases_reclaimed", count=len(reclaimed))
                 except Exception:  # noqa: BLE001
                     log.exception("lease_reclaim_failed")
+
                 with contextlib.suppress(Exception):
                     await self._sync_sse()
         except asyncio.CancelledError:  # pragma: no cover - shutdown
@@ -1213,20 +1385,25 @@ class TetherApp:
     def _delivery_for(self, route: Route, msg: InboundMessage, *, had_active: bool) -> str:
         if not had_active:
             return "queue"
+
         if not route.conversation.is_group:
             return "steer" if self.config.sessions.busy_delivery == "steer" else "queue"
+
         if self.config.group.cross_user_delivery == "steer_same_user":
             if route.active_turn_sender == msg.sender.id:
                 return "steer"
+
         return "queue"
 
     def _access_allowed(self, msg: InboundMessage) -> bool:
         access = self.config.access
         if access.allow_users and msg.sender.id not in access.allow_users:
             return False
+
         if msg.conversation.is_group:
             if access.allow_groups and msg.conversation.id not in access.allow_groups:
                 return False
+
         return True
 
     async def _notice(self, connector: IMConnector, conv: Conversation, text: str) -> None:
@@ -1241,13 +1418,16 @@ class TetherApp:
         cfg = self.config.metrics
         if cfg.log_interval_s > 0:
             self._metrics_task = asyncio.ensure_future(self._metrics_log_loop())
+
         if cfg.listen:
             host, _, port = cfg.listen.rpartition(":")
             server = await asyncio.start_server(
                 self._handle_http, host or "127.0.0.1", int(port or "0")
             )
+
             self._metrics_server = server
             self.metrics_port = server.sockets[0].getsockname()[1]
+
             log.info("metrics_listening", address=cfg.listen)
 
     async def _stop_metrics(self) -> None:
@@ -1255,6 +1435,7 @@ class TetherApp:
             self._metrics_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._metrics_task
+
         if self._metrics_server is not None:
             self._metrics_server.close()
             with contextlib.suppress(Exception):
@@ -1269,6 +1450,7 @@ class TetherApp:
     async def _metrics_log_loop(self) -> None:
         while self._running:
             await asyncio.sleep(self.config.metrics.log_interval_s)
+
             try:
                 self._refresh_gauges()
                 log.info("metrics", **metrics.snapshot())
@@ -1280,6 +1462,7 @@ class TetherApp:
     async def _connector_health_loop(self) -> None:
         while self._running:
             await asyncio.sleep(_CONNECTOR_HEALTH_INTERVAL_S)
+
             try:
                 self._check_connectors()
             except asyncio.CancelledError:
@@ -1290,15 +1473,19 @@ class TetherApp:
     def _check_connectors(self) -> None:
         """Publish each connector's transport state and alert on a prolonged outage."""
         now = time.monotonic()
+
         for name, connector in self.connectors.items():
             state = connector.connected
             if state is None:
                 continue
+
             metric_name = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in name)
             metrics.set(f"connector_connected_{metric_name}", 1.0 if state else 0.0)
+
             if state:
                 self._connector_down_since.pop(name, None)
                 continue
+
             since = self._connector_down_since.setdefault(name, now)
             if now - since >= _CONNECTOR_DOWN_ALERT_S:
                 log.error("connector_down", channel=name, for_s=int(now - since))
@@ -1310,11 +1497,14 @@ class TetherApp:
         try:
             request = (await asyncio.wait_for(reader.readline(), timeout=5)).decode("latin-1")
             path = request.split(" ")[1] if len(request.split(" ")) >= 2 else "/"
+
             while True:  # drain headers
                 header = await asyncio.wait_for(reader.readline(), timeout=5)
                 if header in (b"\r\n", b"\n", b""):
                     break
+
             self._refresh_gauges()
+
             if path == "/healthz":
                 body = await self._health_payload()
                 ok = body["status"] == "ok"
@@ -1324,12 +1514,14 @@ class TetherApp:
                 status, content, ctype = "200 OK", metrics.prometheus(), "text/plain; version=0.0.4"
             else:
                 status, content, ctype = "404 Not Found", "not found", "text/plain"
+
             payload = content.encode()
             writer.write(
                 f"HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\n"
                 f"Content-Length: {len(payload)}\r\nConnection: close\r\n\r\n".encode()
                 + payload
             )
+
             await writer.drain()
         except Exception:  # noqa: BLE001 - a probe must never crash the bridge
             log.debug("metrics_probe_failed", exc_info=True)
@@ -1345,12 +1537,14 @@ class TetherApp:
                 agentd[base] = await self.router.client_for_base(base).health()
             except Exception:  # noqa: BLE001
                 agentd[base] = False
+
         connectors = {name: c.connected for name, c in self.connectors.items()}
         ok = (
             bool(self.connectors)
             and all(agentd.values())
             and all(state is not False for state in connectors.values())
         )
+
         return {
             "status": "ok" if ok else "degraded",
             "uptime_s": round(metrics.uptime_s(), 1),
@@ -1374,14 +1568,18 @@ def _interaction_label(value: dict[str, Any]) -> str:
             "always": "✅ Always allow",
             "reject": "⛔ Deny",
         }.get(str(value.get("reply")), "✅ Handled")
+
     if kind == "question":
         if value.get("reject"):
             return "⛔ Cancelled"
+
         if value.get("answers") is not None:
             picked = ["，".join(answer) for answer in value["answers"] if answer]
             return "✅ " + ("；".join(picked) if picked else "Answered")
+
         answer = value.get("answer") or []
         return "✅ " + (", ".join(str(a) for a in answer) if answer else "Answered")
+
     return "✅ Handled"
 
 
@@ -1392,20 +1590,26 @@ def _short_id(sid: str) -> str:
 def _human_tokens(count: int | None) -> str:
     if not count:
         return "-"
+
     if count >= 1_000_000:
         return f"{count / 1_000_000:.1f}M"
+
     if count >= 1000:
         return f"{count / 1000:.1f}k"
+
     return str(count)
 
 
 def _human_duration(seconds: float) -> str:
     hours, rem = divmod(int(seconds), 3600)
     minutes, secs = divmod(rem, 60)
+
     if hours:
         return f"{hours}h{minutes}m"
+
     if minutes:
         return f"{minutes}m{secs}s"
+
     return f"{secs}s"
 
 
@@ -1414,6 +1618,7 @@ def _pending_summary(pending: dict[str, Any]) -> str:
     for item in pending.values():
         kind = getattr(item, "kind", "?")
         counts[kind] = counts.get(kind, 0) + 1
+
     return ", ".join(kind if n == 1 else f"{kind} ×{n}" for kind, n in counts.items())
 
 
@@ -1424,8 +1629,10 @@ def _form_answers(specs: list[dict[str, Any]], form: dict[str, Any]) -> list[lis
     multi-choice question is one ``checker`` named ``q{i}_{j}`` per option.
     """
     answers: list[list[str]] = []
+
     for q_index, spec in enumerate(specs):
         options = spec.get("options") or []
+
         if spec.get("multiple"):
             answers.append(
                 [
@@ -1437,6 +1644,7 @@ def _form_answers(specs: list[dict[str, Any]], form: dict[str, Any]) -> list[lis
         else:
             chosen = form.get(f"q{q_index}")
             answers.append([str(chosen)] if chosen else [])
+
     return answers
 
 
@@ -1474,23 +1682,29 @@ def _config_chunks(dump: str, limit: int) -> list[str]:
     """
     if limit <= 0:  # the channel imposes no length limit
         return [f"```json\n{dump}\n```"]
+
     body_limit = max(1, limit - len("```json\n") - len("\n```"))
     pieces: list[str] = []
     current = ""
+
     for line in dump.splitlines(keepends=True):
         while len(line) > body_limit:
             if current:
                 pieces.append(current)
                 current = ""
+
             pieces.append(line[:body_limit])
             line = line[body_limit:]
+
         if len(current) + len(line) > body_limit:
             pieces.append(current)
             current = line
         else:
             current += line
+
     if current or not pieces:
         pieces.append(current)
+
     return [f"```json\n{piece}\n```" for piece in pieces]
 
 
@@ -1500,14 +1714,17 @@ def _connectors_line(connectors: dict[str, Any]) -> str:
         f"{name}={_conn_state(getattr(c, 'state', None) or c.connected)}"
         for name, c in sorted(connectors.items())
     ]
+
     return "connectors: " + " ".join(parts)
 
 
 def _conn_state(state: bool | str | None) -> str:
     if isinstance(state, str):
         return state
+
     if state is None:
         return "?"
+
     return "up" if state else "down"
 
 
@@ -1515,12 +1732,16 @@ def _agentd_line(base: str, info: dict[str, Any] | None) -> str:
     """The `/status` ``agentd:`` line, with version/pid when reachable."""
     if info is None:
         return f"agentd: {base} (unreachable)"
+
     bits: list[str] = []
     if info.get("version"):
         bits.append(f"v{info['version']}")
+
     if info.get("pid"):
         bits.append(f"pid {info['pid']}")
+
     suffix = f" · {' · '.join(bits)}" if bits else ""
+
     return f"agentd: {base}{suffix}"
 
 
@@ -1539,14 +1760,18 @@ def _resolve_outbound_file(args: str, workdir: str | None, config: Config) -> Ri
     """
     path = resolve_under(_strip_quotes(args), workdir)
     name = path.name
+
     if not path.is_file():
         return f"⚠️ No such file: `{name}`."
+
     if not PathPolicy(config.media.outbound.patterns).allowed(path, working_dir=workdir):
         record_blocked(str(path))
         return f"⚠️ Not sent: `{name}` — outside the allowed send paths."
+
     media = read_path_media(path, config.media.max_bytes)
     if media is None:
         return f"⚠️ `{name}` is too large or could not be read."
+
     return media
 
 
@@ -1567,14 +1792,17 @@ def assistant_text(messages: list[dict]) -> str | None:
     for message in reversed(messages):
         if message.get("type") != "assistant":
             continue
+
         parts = [
             str(part.get("text", ""))
             for part in (message.get("content") or [])
             if part.get("type") == "text"
         ]
+
         text = "".join(parts)
         if text:
             return text
+
     return None
 
 
@@ -1586,12 +1814,14 @@ def tool_media(messages: list[dict]) -> list[RichMedia]:
     for message in messages:
         if message.get("type") != "assistant":
             continue
+
         for part in message.get("content") or []:
             if part.get("type") != "tool":
                 continue
             state = part.get("state") or {}
             out.extend(extract_file_parts(state.get("content")))
             out.extend(extract_file_parts(state.get("attachments")))
+
     return out
 
 

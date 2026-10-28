@@ -63,8 +63,10 @@ class HttpAgentClient:
             )
         except httpx.HTTPError as exc:
             raise AgentError("unavailable", str(exc)) from exc
+
         if resp.status_code >= 400:
             raise _error_from_response(resp)
+
         return _data_from_response(resp)
 
     # -- discovery ---------------------------------------------------------
@@ -78,6 +80,7 @@ class HttpAgentClient:
         """agentd's redacted effective configuration (`GET /api/config`)."""
         params = {k: v for k, v in (("section", section), ("server", server)) if v}
         data = await self._request("GET", "/api/config", params=params)
+
         return data if isinstance(data, dict) else {}
 
     async def get_info(self) -> dict[str, Any]:
@@ -102,14 +105,17 @@ class HttpAgentClient:
     async def list_models(self) -> list[ModelInfo]:
         data = await self._request("GET", "/api/model") or []
         out: list[ModelInfo] = []
+
         for m in data:
             raw_input = m.get("input")
+
             if isinstance(raw_input, list):
                 inputs = [str(x) for x in raw_input]
             elif isinstance(raw_input, str):
                 inputs = [raw_input]
             else:
                 inputs = []
+
             out.append(
                 ModelInfo(
                     id=str(m.get("id", "")),
@@ -120,6 +126,7 @@ class HttpAgentClient:
                     output_limit=_as_int(m.get("outputLimit")),
                 )
             )
+
         return out
 
     async def agent_tools(self, agent: str) -> list[ToolInfo]:
@@ -137,11 +144,15 @@ class HttpAgentClient:
         self, *, agent: str, model: str | None = None, title: str | None = None
     ) -> SessionInfo:
         payload: dict[str, Any] = {"agent": agent}
+
         if model:
             payload["model"] = model
+
         if title:
             payload["title"] = title
+
         data = await self._request("POST", "/api/session", json=payload) or {}
+
         return _session_info(data)
 
     async def get_session(self, sid: str) -> SessionInfo:
@@ -171,11 +182,15 @@ class HttpAgentClient:
         delivery: str = "queue",
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"prompt": prompt, "delivery": delivery}
+
         if id:
             payload["id"] = id
+
         if files:
             payload["files"] = files
+
         data = await self._request("POST", f"/api/session/{sid}/prompt", json=payload)
+
         return data if isinstance(data, dict) else {}
 
     async def interrupt(self, sid: str) -> None:
@@ -192,6 +207,7 @@ class HttpAgentClient:
             )
             or {}
         )
+
         return bool(data.get("idle")) if isinstance(data, dict) else False
 
     # -- read --------------------------------------------------------------
@@ -199,18 +215,23 @@ class HttpAgentClient:
         data = await self._request("GET", f"/api/session/{sid}/message", params={"limit": limit})
         if isinstance(data, list):
             return data
+
         if isinstance(data, dict):
             return list(data.get("messages") or data.get("data") or [])
+
         return []
 
     async def history(self, sid: str, *, after: int = 0, limit: int = 200) -> list[dict[str, Any]]:
         data = await self._request(
             "GET", f"/api/session/{sid}/history", params={"after": after, "limit": limit}
         )
+
         if isinstance(data, list):
             return data
+
         if isinstance(data, dict):
             return list(data.get("events") or data.get("data") or [])
+
         return []
 
     # -- interaction -------------------------------------------------------
@@ -220,6 +241,7 @@ class HttpAgentClient:
         payload: dict[str, Any] = {"reply": reply}
         if message:
             payload["message"] = message
+
         await self._request("POST", f"/api/session/{sid}/permission/{rid}/reply", json=payload)
 
     async def reply_question(self, sid: str, rid: str, answers: list[list[str]]) -> None:
@@ -263,9 +285,11 @@ class HttpAgentClient:
             ) as source:
                 if source.response.status_code >= 400:
                     raise AgentError("unavailable", status=source.response.status_code)
+
                 async for sse in source.aiter_sse():
                     if sse.event == "error":
                         raise AgentError("unavailable", sse.data)
+
                     event = _event_from_sse(sse.data)
                     if event is not None:
                         yield event
@@ -277,6 +301,7 @@ def _event_from_sse(payload: str | None) -> Event | None:
     data = _parse_json(payload)
     if data is None:
         return None
+
     return Event(
         id=str(data.get("id", "")),
         type=str(data.get("type", "")),
@@ -287,6 +312,7 @@ def _event_from_sse(payload: str | None) -> Event | None:
 
 def _error_from_response(resp: httpx.Response) -> AgentError:
     code, message, ref = "internal", "", None
+
     body = _json_or_empty(resp)
     if isinstance(body, dict):
         error = body.get("error")
@@ -297,16 +323,20 @@ def _error_from_response(resp: httpx.Response) -> AgentError:
         elif isinstance(error, str):
             code = error
             message = str(body.get("message", ""))
+
         ref = ref or body.get("ref")
+
     return AgentError(code, message, status=resp.status_code, ref=ref)
 
 
 def _data_from_response(resp: httpx.Response) -> Any:
     if resp.status_code == 204 or not resp.content:
         return {}
+
     body = _json_or_empty(resp)
     if isinstance(body, dict) and "data" in body:
         return body["data"]
+
     return body
 
 
@@ -331,8 +361,10 @@ def _model_id(model: Any) -> str | None:
     if isinstance(model, dict):
         value = model.get("id")
         return str(value) if value is not None else None
+
     if model is None:
         return None
+
     return str(model)
 
 
@@ -346,10 +378,12 @@ def _as_int(value: Any) -> int | None:
 def _parse_json(text: str | None) -> dict[str, Any] | None:
     if not text:
         return None
+
     try:
         value = json.loads(text)
     except ValueError:
         return None
+
     return value if isinstance(value, dict) else None
 
 

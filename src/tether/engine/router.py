@@ -60,6 +60,7 @@ class Router:
         for entry in self.config.server.pool:
             if entry.base_url.rstrip("/") == base:
                 return entry
+
         return None
 
     async def resolve_agent(self, base_url: str) -> str:
@@ -70,13 +71,16 @@ class Router:
         default agent.
         """
         base = base_url.rstrip("/")
+
         cached = self._agent_cache.get(base)
         if cached is not None:
             return cached
+
         entry = self._pool_entry(base)
         override = (entry.default_agent if entry else None) or self.config.agent.default_agent
         agents = await self.client_for_base(base).list_agents()
         ids = [agent.id for agent in agents if not agent.hidden]
+
         if override:
             if ids and override not in ids:
                 raise ValueError(f"agent {override!r} is not exposed by {base}")
@@ -85,6 +89,7 @@ class Router:
             chosen = ids[0]
         else:
             raise ValueError(f"no agents are exposed by {base}")
+
         self._agent_cache[base] = chosen
         return chosen
 
@@ -100,17 +105,20 @@ class Router:
             models = await self.client_for_base(base).list_models()
             cached = {model.id: model for model in models}
             self._models_cache[base] = cached
+
         return cached
 
     async def resolve_context_limit(self, base_url: str, model_id: str | None) -> int | None:
         """The model's context window as reported by agentd, for the usage line."""
         if not model_id:
             return None
+
         try:
             model = (await self._model_map(base_url)).get(model_id)
         except Exception as exc:  # noqa: BLE001 - the limit is optional
             log.warning("model_lookup_failed", model=model_id, error=str(exc))
             return None
+
         return model.context_limit if model is not None else None
 
     async def warm_base(self, base_url: str) -> None:
@@ -126,9 +134,11 @@ class Router:
         lease = self.leases.get(route.key)
         if lease is not None and lease.working_directory:
             return lease.working_directory
+
         for entry in self.config.server.pool:
             if entry.base_url.rstrip("/") == route.server_base.rstrip("/"):
                 return entry.working_directory
+
         return self.config.server.working_directory
 
     # -- clients -----------------------------------------------------------
@@ -139,6 +149,7 @@ class Router:
             token = self.config.server_token(base)
             client = self._client_factory(base, token)
             self._clients[base] = client
+
         return client
 
     def client_for(self, route: Route) -> HttpAgentClient:
@@ -155,18 +166,22 @@ class Router:
         cached = self._by_session.get(session_id)
         if cached is not None:
             return cached
+
         route = await self.store.get_by_session(session_id)
         if route is not None:
             self._remember(route)
+
         return route
 
     async def get(self, conv: Conversation) -> Route | None:
         cached = self._routes.get(conv.key)
         if cached is not None:
             return cached
+
         route = await self.store.get(conv.key)
         if route is not None:
             self._remember(route)
+
         return route
 
     def _remember(self, route: Route) -> Route:
@@ -185,24 +200,31 @@ class Router:
         if existing is not None:
             await self._ensure_lease(existing, agent=agent)
             await self._validate_session(existing)
+
             if existing.context_limit is None:
                 # Backfill routes persisted before the limit was discovered, so
                 # the usage line can show "context used / max".
                 existing.context_limit = await self.resolve_context_limit(
                     existing.server_base, existing.model
                 )
+
                 if existing.context_limit is not None:
                     await self.store.put(existing)
+
             return existing
+
         primary = self._primary_base()
         agent_id = agent or await self.resolve_agent(primary)
         lease = await self.provider.acquire(conv, agent=agent_id)
         await self.leases.register(conv.key, lease)
+
         # Re-resolve against the leased base: pool entries may differ.
         agent_id = agent or await self.resolve_agent(lease.server_base)
         model = self.resolve_model(lease.server_base)
+
         client = self.client_for_base(lease.server_base)
         info = await client.create_session(agent=agent_id, model=model, title=title)
+
         now = time.time()
         route = Route(
             conversation=conv,
@@ -215,10 +237,12 @@ class Router:
             last_active=now,
             context_dirty=True,
         )
+
         self._remember(route)
         route.context_limit = await self.resolve_context_limit(lease.server_base, route.model)
         self._validated.add(route.session_id)
         await self.store.put(route)
+
         log.info("route_created", conversation=conv.key, session=info.id, project=lease.project_id)
         return route
 
@@ -231,6 +255,7 @@ class Router:
         """
         if route.session_id in self._validated or not self.config.sessions.validate_session:
             return
+
         try:
             await self.client_for(route).get_session(route.session_id)
         except AgentError as exc:
@@ -238,6 +263,7 @@ class Router:
                 return  # e.g. unreachable: let the prompt surface it
             log.warning("session_missing", session=route.session_id, conversation=route.key)
             await self.recreate_session(route)
+
         self._validated.add(route.session_id)
 
     def _primary_base(self) -> str:
@@ -253,11 +279,15 @@ class Router:
         """
         if self.config.projects.mode != "isolated" or self.leases.get(route.key) is not None:
             return
+
         lease = await self.provider.acquire(route.conversation, agent=agent or route.agent)
         await self.leases.register(route.key, lease)
+
         route.server_base = lease.server_base
         route.project_id = lease.project_id
+
         log.info("lease_reacquired", conversation=route.key, project=lease.project_id)
+
         await self.recreate_session(route)
 
     async def recreate_session(self, route: Route) -> None:
@@ -270,7 +300,9 @@ class Router:
         client = self.client_for(route)
         model = self.resolve_model(route.server_base)
         info = await client.create_session(agent=route.agent, model=model)
+
         self._by_session.pop(route.session_id, None)
+
         route.session_id = info.id
         route.model = info.model or model
         route.context_limit = await self.resolve_context_limit(route.server_base, route.model)
@@ -279,9 +311,11 @@ class Router:
         route.pending_interactions.clear()
         route.active_turn_sender = None
         route.queue_depth = 0
+
         self._remember(route)
         self._validated.add(route.session_id)
         await self.store.put(route)
+
         log.info("session_recreated", conversation=route.key, session=info.id)
 
     async def save(self, route: Route) -> None:
@@ -297,6 +331,7 @@ class Router:
                 await self.store.delete(key)
                 self._routes.pop(key, None)
                 self._by_session.pop(route.session_id, None)
+
         return reclaimed
 
     # -- identity sync -----------------------------------------------------
@@ -307,12 +342,15 @@ class Router:
         except Exception as exc:  # noqa: BLE001 - fall back to configured identity
             log.warning("identity_unavailable", conversation=route.key, error=str(exc))
             identity = BotIdentity(name=self.config.identity.display_name or "Assistant")
+
         # Name/description resolve channel override > global config > platform.
         cfg = self.config.identity
         channel = self.config.channels.identity_for(route.conversation.channel)
+
         account = self.config.channels.identity_for_account(
             route.conversation.channel, route.conversation.account
         )
+
         name = account.display_name or channel.display_name or cfg.display_name or identity.name
         description = (
             account.description
@@ -320,10 +358,13 @@ class Router:
             or cfg.description
             or identity.description
         )
+
         if name != identity.name or description != identity.description:
             identity = BotIdentity(name=name, description=description, aliases=identity.aliases)
+
         if route.bot_name != identity.name or route.bot_description != identity.description:
             route.bot_name = identity.name
             route.bot_description = identity.description
             route.context_dirty = True
+
         return identity

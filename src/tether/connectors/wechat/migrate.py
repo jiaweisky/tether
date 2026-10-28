@@ -33,6 +33,7 @@ async def _migrate_one(bot: WeChatBotConfig, store: RouteStore) -> None:
     path = Path(_LEGACY_DIR).expanduser() / f"{bot.id}.json"  # noqa: ASYNC240
     if not path.is_file():
         return
+
     state_path = Path(str(path) + ".state.json")
     existing = await store.wechat_account(bot.id)
     if existing is not None and existing.get("token"):
@@ -41,9 +42,11 @@ async def _migrate_one(bot: WeChatBotConfig, store: RouteStore) -> None:
         _remove_legacy_files(bot.id, path, state_path)
         log.info("wechat_legacy_skipped_existing", bot=bot.id, path=str(path))
         return
+
     credential = _read_credential(bot, path)
     if credential is None:
         return
+
     try:
         await _save_credential(store, bot.id, credential)
         await _import_state(store, bot.id, state_path)
@@ -58,6 +61,7 @@ async def _migrate_one(bot: WeChatBotConfig, store: RouteStore) -> None:
     except Exception:  # noqa: BLE001 - never block startup on a migration
         log.exception("wechat_legacy_import_failed", bot=bot.id, path=str(path))
         return
+
     _remove_legacy_files(bot.id, path, state_path)
     log.info("wechat_legacy_imported", bot=bot.id, path=str(path))
 
@@ -71,8 +75,10 @@ def _read_credential(bot: WeChatBotConfig, path: Path) -> WeChatCredential | Non
     except (OSError, ValueError):
         log.warning("wechat_legacy_import_failed", bot=bot.id, path=str(path))
         return None
+
     if credential is None:
         log.warning("wechat_legacy_import_invalid", bot=bot.id, path=str(path))
+
     return credential
 
 
@@ -104,8 +110,10 @@ async def _import_state(store: RouteStore, slot: str, state_path: Path) -> None:
         state = WeChatState.from_dict(raw) if isinstance(raw, dict) else WeChatState()
     except (OSError, ValueError):
         return
+
     if state.cursor:
         await store.save_wechat_cursor(slot, state.cursor)
+
     for peer, token in state.context_tokens.items():
         await store.save_wechat_context_token(slot, peer, token)
 

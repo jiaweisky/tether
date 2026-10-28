@@ -34,6 +34,7 @@ def compile_glob(pattern: str) -> re.Pattern[str]:
     """
     if pattern.endswith("/"):
         pattern += "**"
+
     out: list[str] = ["^"]
     i, n = 0, len(pattern)
     while i < n:
@@ -63,6 +64,7 @@ def compile_glob(pattern: str) -> re.Pattern[str]:
         else:
             out.append(re.escape(char))
             i += 1
+
     out.append("$")
     return re.compile("".join(out))
 
@@ -77,12 +79,15 @@ def compile_rules(
     """
     root = str(Path(working_dir or ".").resolve())
     rules: list[tuple[bool, re.Pattern[str]]] = []
+
     for raw in patterns:
         if not raw:
             continue
+
         negate = raw.startswith("!")
         body = raw[1:] if negate else raw
         rules.append((negate, compile_glob(body.replace(_WORKING_DIR, root))))
+
     return rules
 
 
@@ -97,9 +102,11 @@ class PathPolicy:
         """Whether ``path`` is allowed; default-deny, last matching rule wins."""
         real = str(Path(path).resolve())
         allowed = False
+
         for negate, regex in self._rules(working_dir):
             if regex.match(real):
                 allowed = not negate
+
         return allowed
 
     def _rules(self, working_dir: str | None) -> list[tuple[bool, re.Pattern[str]]]:
@@ -107,4 +114,5 @@ class PathPolicy:
         if rules is None:
             rules = compile_rules(self._patterns, working_dir)
             self._cache[working_dir] = rules
+
         return rules

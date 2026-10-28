@@ -49,13 +49,16 @@ def files_from_paths(paths: Any, *, base_dir: str | None, max_bytes: int) -> lis
     project directory). Missing, non-file or oversized entries are skipped.
     """
     out: list[RichMedia] = []
+
     for raw in paths or []:
         if not isinstance(raw, str) or not raw:
             continue
+
         path = Path(raw) if os.path.isabs(raw) else Path(base_dir or ".").joinpath(raw)
         media = read_path_media(path, max_bytes)
         if media is not None:
             out.append(media)
+
     return out
 
 
@@ -74,7 +77,9 @@ def read_path_media(path: Path, max_bytes: int) -> RichMedia | None:
     except OSError:
         log.warning("output_file_unreadable", path=str(path))
         return None
+
     mime = sniff_mime(data, path.name, None)
+
     return RichMedia(
         kind=normalize_media_kind(media_kind(mime, path.name)),
         data=data,
@@ -95,18 +100,22 @@ def structured_file_paths(structured: Any) -> list[str]:
     """
     if not isinstance(structured, dict):
         return []
+
     out: list[str] = []
+
     files = structured.get("files")
     if isinstance(files, list):
         for item in files:
             path = item.get("file") if isinstance(item, dict) else None
             if isinstance(path, str) and path:
                 out.append(path)
+
     if structured.get("operation") in _STRUCTURED_FILE_OPERATIONS:
         for key in ("resource", "target"):
             value = structured.get(key)
             if isinstance(value, str) and value:
                 out.append(value)
+
     return out
 
 
@@ -145,6 +154,7 @@ def _file_part_to_media(node: dict[str, Any]) -> RichMedia:
     mime = node.get("mime")
     name = node.get("name")
     decoded = _decode_data_url(uri)
+
     return RichMedia(
         kind=normalize_media_kind(media_kind(mime, name)),
         url=None if uri.startswith("data:") else uri or None,
@@ -157,8 +167,10 @@ def _file_part_to_media(node: dict[str, Any]) -> RichMedia:
 def _decode_data_url(uri: str) -> tuple[bytes, str | None] | None:
     if not uri.startswith("data:") or ";base64," not in uri:
         return None
+
     header, payload = uri.split(";base64,", 1)
     mime = header[len("data:") :] or None
+
     try:
         return base64.b64decode(payload), mime
     except (binascii.Error, ValueError):
@@ -167,14 +179,17 @@ def _decode_data_url(uri: str) -> tuple[bytes, str | None] | None:
 
 def media_kind(mime: Any, name: Any) -> str:
     value = str(mime or "")
+
     for prefix in ("image", "audio", "video"):
         if value.startswith(f"{prefix}/"):
             return prefix
+
     if isinstance(name, str):
         lower = name.lower()
         for extensions, kind in _EXTENSION_KINDS:
             if lower.endswith(extensions):
                 return kind
+
     return "file"
 
 
@@ -188,9 +203,11 @@ class MediaEgress:
         if not self.connector.capabilities.supports_media_out(kind):
             await self._send_link(conv, media, reason="this channel cannot receive this media type")
             return
+
         data = await self._resolve_bytes(conv, media)
         if data is None:
             return
+
         mime = media.mime
         if kind == "image" and len(data) > self.config.media.outbound.image_max_bytes:
             data = compress_image(
@@ -198,20 +215,25 @@ class MediaEgress:
                 max_bytes=self.config.media.outbound.image_max_bytes,
                 mime=mime or "image/png",
             )
+
         mime = sniff_mime(data, media.name, mime)
         await self._deliver(conv, media, kind, data, mime)
 
     async def _resolve_bytes(self, conv: Conversation, media: RichMedia) -> bytes | None:
         if media.data is not None:
             return media.data
+
         if not media.url:
             return None
+
         if not self.config.media.fetch_url_outbound:
             await self._send_link(conv, media, reason="remote media (proxied fetch disabled)")
             return None
+
         data = await self._fetch(media.url)
         if data is None:
             await self._send_link(conv, media, reason="fetch failed")
+
         return data
 
     async def _deliver(
@@ -224,8 +246,10 @@ class MediaEgress:
     ) -> None:
         segment = MediaSegment(media=RichMedia(kind=kind, data=data, mime=mime, name=media.name))
         plan = OutboundPlan(segments=[segment])
+
         if media.caption:
             plan.segments.insert(0, TextSegment(text=media.caption))
+
         try:
             await self.connector.send(conv, plan)
             metrics.inc("media_bytes_out", len(data))
@@ -236,16 +260,19 @@ class MediaEgress:
 
     async def _send_link(self, conv: Conversation, media: RichMedia, *, reason: str) -> None:
         label = media.name or media.kind
+
         if media.url:
             text = f"📎 {label}: {media.url} ({reason})"
         else:
             text = f"📎 {label} could not be sent ({reason})."
+
         await self.connector.send(conv, OutboundPlan(segments=[TextSegment(text=text)]))
 
     async def _fetch(self, url: str) -> bytes | None:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https") or not is_public_host(parsed.hostname or ""):
             return None
+
         try:
             async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
                 resp = await client.get(url)

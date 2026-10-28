@@ -87,14 +87,17 @@ class StreamingController:
     def push_text(self, delta: str) -> None:
         if not delta:
             return
+
         self.text += delta
         self._invalidate()
+
         if self._boundary_flush and any(boundary in delta for boundary in _BOUNDARIES):
             self._force = True
 
     def push_reasoning(self, delta: str) -> None:
         if not delta:
             return
+
         self.reasoning += delta
         self._invalidate()
 
@@ -105,6 +108,7 @@ class StreamingController:
     def clear_tool(self) -> None:
         if self._tool_line is None:
             return
+
         self._tool_line = None
         self._invalidate()
 
@@ -130,6 +134,7 @@ class StreamingController:
         """
         if self._closed or self._live_disabled:
             return
+
         self._status = self._idle_status
         self._dirty = True
         self._idle.clear()
@@ -140,6 +145,7 @@ class StreamingController:
         self._status = None
         if len(self.text) >= self._max_live_chars:
             self._live_disabled = True
+
         self._dirty = True
         self._idle.clear()
         self._ensure_worker()
@@ -155,9 +161,11 @@ class StreamingController:
             while not self._closed:
                 await self._wake.wait()
                 self._wake.clear()
+
                 while self._should_emit():
                     await self._pace()
                     await self._emit_interim()
+
                 self._idle.set()
                 await self._maybe_idle_progress()
         except asyncio.CancelledError:  # pragma: no cover - shutdown
@@ -169,15 +177,20 @@ class StreamingController:
         """When the turn is quiet, show a "working" hint so it doesn't look stalled."""
         if self._closed or self._idle_progress_s <= 0 or not self.snapshot():
             return
+
         waiter = asyncio.ensure_future(self._wake.wait())
+
         try:
             await asyncio.wait({waiter}, timeout=self._idle_progress_s)
         finally:
             if not waiter.done():
                 waiter.cancel()
+
         if self._closed or self._wake.is_set() or not self.snapshot():
             return
+
         self._status = self._idle_status
+
         try:
             await self._emit(False, self.snapshot())
             self._last = self._clock.now()
@@ -194,14 +207,18 @@ class StreamingController:
         if not self._force:
             elapsed = self._clock.now() - self._last
             delay = max(0.0, self._interval - elapsed)
+
             if delay:
                 await self._clock.sleep(delay)
+
         self._force = False
 
     async def _emit_interim(self) -> None:
         if not self._dirty:
             return
+
         self._dirty = False
+
         try:
             await self._emit(False, self.snapshot())
             self._last = self._clock.now()
@@ -235,6 +252,7 @@ class StreamingController:
         self._closed = True
         self._wake.set()
         await self._cancel_worker()
+
         self._idle.set()
         await self._emit(True, self.snapshot())
 

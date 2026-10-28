@@ -78,9 +78,11 @@ class BaseConnector:
     async def send(self, conv: Conversation, plan: OutboundPlan) -> SentRef:
         await self._rate_limit(conv)
         first_ref: str | None = None
+
         for segment in plan.segments:
             ref = await self._dispatch_segment(conv, segment, plan.reply_to, final=plan.final)
             first_ref = first_ref or ref
+
         return SentRef(id=first_ref or "", conversation=conv)
 
     async def _dispatch_segment(
@@ -88,10 +90,13 @@ class BaseConnector:
     ) -> str | None:
         if isinstance(segment, TextSegment):
             return await self._send_text_chunks(conv, segment.text, reply_to, final=final)
+
         if isinstance(segment, MediaSegment) and segment.media is not None:
             return await self._send_media(conv, segment.media)
+
         if isinstance(segment, CardSegment) and segment.card is not None:
             return await self._send_card(conv, segment.card)
+
         return None
 
     async def _send_text_chunks(
@@ -101,13 +106,16 @@ class BaseConnector:
         for chunk in self._chunk(text):
             ref = await self._send_text(conv, chunk, reply_to, final=final)
             first_ref = first_ref or ref
+
         return first_ref
 
     async def update(self, ref: SentRef, plan: OutboundPlan) -> None:
         await self._rate_limit(ref.conversation)
+
         if len(plan.segments) == 1 and isinstance(plan.segments[0], TextSegment):
             await self._update_text(ref, plan.segments[0].text, final=plan.final)
             return
+
         raise Unsupported("this plan cannot be patched in place")
 
     async def reply(self, in_reply_to: InboundMessage, plan: OutboundPlan) -> SentRef:
@@ -115,6 +123,7 @@ class BaseConnector:
         # use send/update directly.
         plan.reply_to = plan.reply_to or in_reply_to.message_id
         plan.final = True
+
         return await self.send(in_reply_to.conversation, plan)
 
     async def send_typing(self, conv: Conversation) -> None:
@@ -191,14 +200,17 @@ class BaseConnector:
         rate = self.capabilities.rate_limit_per_min
         if not rate:
             return
+
         bucket = self._buckets.get(conv.key)
         if bucket is None:
             bucket = TokenBucket(rate)
             self._buckets[conv.key] = bucket
+
         await bucket.acquire()
 
     def _chunk(self, text: str) -> list[str]:
         limit = self.capabilities.max_text_chars
         if limit <= 0 or len(text) <= limit:
             return [text]
+
         return [text[i : i + limit] for i in range(0, len(text), limit)]

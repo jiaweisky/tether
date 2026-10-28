@@ -34,6 +34,7 @@ def decode_value(value: str) -> dict[str, Any] | None:
         data = json.loads(value)
     except ValueError:
         return None
+
     return data if isinstance(data, dict) and "kind" in data else None
 
 
@@ -56,6 +57,7 @@ def permission_card(perm: PendingPermission) -> Card:
             style="danger",
         ),
     ]
+
     return Card(title="⚠️ Permission required", body=body, buttons=buttons)
 
 
@@ -68,6 +70,7 @@ def question_card(question: PendingQuestion) -> Card | None:
     """
     if not question.questions:
         return None
+
     first = question.questions[0]
     if len(question.questions) == 1 and not first.multiple:
         body = first.question or first.header or "Please choose an option."
@@ -80,6 +83,7 @@ def question_card(question: PendingQuestion) -> Card | None:
             )
             for i, option in enumerate(first.options)
         ]
+
         buttons.append(
             Button(
                 text="Cancel",
@@ -87,7 +91,9 @@ def question_card(question: PendingQuestion) -> Card | None:
                 style="danger",
             )
         )
+
         return Card(title=first.header or "Question", body=body, buttons=buttons)
+
     return _question_form_card(question)
 
 
@@ -102,6 +108,7 @@ def _question_form_card(question: PendingQuestion) -> Card:
         for item in question.questions
     ]
     specs = [{"multiple": item.multiple, "options": item.options} for item in items]
+
     return Card(
         title="Questions",
         body="",
@@ -114,11 +121,13 @@ def question_numbered_text(question: PendingQuestion) -> tuple[str, list[str]]:
     """Render a question as numbered options and return the ordered labels."""
     lines: list[str] = []
     labels: list[str] = []
+
     for item in question.questions:
         lines.append(item.question or item.header)
         for index, option in enumerate(item.options):
             lines.append(f"{index + 1}. {option.label}")
             labels.append(option.label)
+
     return "\n".join(lines), labels
 
 
@@ -146,11 +155,15 @@ def is_authorized(
     """Whether ``sender`` may answer a pending interaction in this conversation."""
     if not conv.is_group:
         return True
+
     if pending.scope == "participants":
         return True
+
     if pending.scope == "admins":
         return sender.id in config.admins_for(conv.channel, conv.account)
+
     owner = pending.owner or active_turn_sender
+
     return owner is None or sender.id == owner
 
 
@@ -164,11 +177,15 @@ def command_authorized(
     """Whether ``sender`` may run the stop command against the current turn."""
     if not conv.is_group:
         return True
+
     if sender.id in config.admins_for(conv.channel, conv.account):
         # Admins are a superset for commands.
         return True
+
     if config.group.command_scope == "admins":
         return False
+
     if active_turn_sender is None:
         return True
+
     return sender.id == active_turn_sender
