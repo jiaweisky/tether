@@ -2,47 +2,85 @@
 # Values shown are the defaults unless noted otherwise.
 
 server:
+  backend: agentd             # agentd | opencode (default backend for pool entries)
   base_url: http://127.0.0.1:8787
   token: ${AGENTSERVE_TOKEN:-}   # bearer token; ${VAR} / ${VAR:-default} are expanded from env
+  auth: null                  # optional: {type: bearer|basic, token|username/password}; overrides token
   request_timeout_s: 30
   sse_reconnect_ms: 1000
   working_directory: null     # the base's working dir (for the media spool path); pool entries carry their own
-  pool: []                    # [{name, base_url, token, working_directory, default_agent, default_model}]
+  # A pool replaces base_url/token above with one entry per backend connection.
+  # One agentd endpoint = one project/working directory; several OpenCode
+  # locations may share one base_url (they must have distinct ids).
+  # pool:
+  #   - id: local-agentd
+  #     name: local-agentd
+  #     backend: agentd
+  #     base_url: http://127.0.0.1:8787
+  #     auth:
+  #       type: bearer
+  #       token: ${AGENTSERVE_TOKEN:-}
+  #     working_directory: /workspace/project   # optional, absolute
+  #   - id: local-opencode
+  #     name: local-opencode
+  #     backend: opencode
+  #     base_url: http://127.0.0.1:4096
+  #     auth:
+  #       type: basic
+  #       username: opencode
+  #       password: ${OPENCODE_PASSWORD:-}
+  #     working_directory: /workspace/project   # OpenCode location; must be absolute
+  #     default_agent: build
+  #     default_model: anthropic/claude-sonnet-4-5
+  pool: []
 
-# Optional overrides only: the agent and model are discovered from agentd
-# (GET /api/agent; the model is left to agentd's default), so agentd's own
+# Optional overrides only: by default the agent and model are discovered from the
+# backend (agentd: GET /api/agent; OpenCode: per location), so its own
 # configuration is not restated here.
 agent:
-  default_agent: null         # override; unset = first agent exposed by GET /api/agent
-  default_model: null         # override; unset = agentd defaultModel
+  default_agent: null         # override; unset = backend default (OpenCode synth: build)
+  default_model: null         # override; unset = backend default model
 
 model:
-  context_limit: null         # optional override; by default the window comes from GET /api/model (contextLimit)
+  context_limit: null         # optional override; by default the window is discovered from the backend
 
 # Project sharing: either everyone shares one project, or each conversation
 # leases its own isolated view of the source project.
 projects:
   mode: shared                # shared | isolated
-  isolation: worktree         # mode=isolated only: none | copy | worktree | overlay
-  base_dir: /var/lib/tether/workspaces   # mode=isolated: views + per-instance roots
-  ttl_s: 3600                 # idle lease reclamation (mode=isolated)
+  backend: agentd             # isolated backend: agentd | opencode
+  endpoint: null              # isolated + opencode: ServerEndpoint.id to lease worktrees on
+  isolation: worktree         # isolated: agentd none | copy | worktree | overlay; opencode only worktree
+  base_dir: /var/lib/tether/workspaces   # isolated: views/worktrees + per-instance roots
+  ttl_s: 3600                 # idle lease reclamation (isolated)
   max_leases: 32
   git_base_ref: HEAD          # worktree starting point
   cow:
-    mode: auto                # auto | reflink | clonefile (overlay)
+    mode: auto                # auto | reflink | clonefile (agentd overlay)
     base_readonly: true
-  # mode=isolated (agentd control API)
+  # isolated + agentd control API:
   control_url: null           # e.g. http://127.0.0.1:9090
   control_token: null         # bearer (optional on loopback)
-  source_directory: null      # the project to derive views from (absolute)
+  source_directory: null      # the project to derive views/worktrees from (absolute)
+  # isolated: tool policy passed to the backend (empty = backend's default).
+  # Same shape as agentd's inboundPermissions / OpenCode session permissions.
+  inbound_permissions: []
+  # - action: bash
+  #   resource: "*"
+  #   effect: ask             # allow | deny | ask
+  # isolated + agentd only: OS command sandbox for the leased instance.
+  sandbox: null
+  # sandbox:
+  #   process: none           # none | bwrap | seatbelt
+  #   failure_policy: fail-closed  # fail-closed | fail-open
 
 sessions:
   idle_reset_s: 0
   busy_delivery: queue        # queue | steer
   max_active_routes: 1000
   validate_session: true      # on the first message after a restart, verify the session still exists (and recreate it if not)
-  interrupt_on_shutdown: false  # false = leave in-progress turns/parked interactions to agentd so a restart can resume them
-  turn_watchdog_s: 30         # finish an active turn whose agentd session is gone (lost idle); 0 disables
+  interrupt_on_shutdown: false  # false = leave in-progress turns/parked interactions to the backend so a restart can resume them
+  turn_watchdog_s: 30         # finish an active turn whose backend session is gone (lost idle); 0 disables
 
 dedup:
   ttl_s: 600
@@ -56,7 +94,6 @@ group:
   admins: []
   hitl_scope: initiator       # initiator | participants | admins
   command_scope: initiator    # initiator | admins
-  queue_backup_hint: true
 
 identity:
   inject: on_change           # once | always | on_change
@@ -87,11 +124,13 @@ media:
   outbound:
     sources: [tool_media]     # tool_media | changed_files
     image_max_bytes: 10485760
+    auto_files: false         # auto-forward files the agent writes/edits
+    patterns: []              # ordered globs; default-deny, last match wins (empty = /send only)
 
 permissions:
-  # Tether is not the security policy: agentd's sandbox and inboundPermissions
-  # decides what may run. Tether auto-answers the agent's asks so normal turns
-  # do not park on HITL cards:
+  # Tether is not the security policy: the backend's sandbox and permission
+  # rules decide what may run. Tether auto-answers the agent's asks so normal
+  # turns do not park on HITL cards:
   #   ask    -> forward the ask to the user (opt-in HITL)
   #   once   -> answer "allow once" (the default; effectively auto-approve)
   #   always -> answer "always allow"
@@ -111,6 +150,9 @@ permissions:
   timeout_s: 300
   fallback: reject            # reject | allow
   poll_interval_s: 30
+  # Non-question OpenCode forms (provider auth, MCP elicitation, ...):
+  # off | admins (direct chats started by an admin) | all.
+  rich_forms: "off"           # off | admins | all (quoted: YAML reads bare off as false)
 
 commands:
   prefix: "/"
@@ -130,14 +172,24 @@ channels:
     bot_id: ${WECOM_BOT_ID:-}
     secret: ${WECOM_BOT_SECRET:-}
     welcome_text: null
+    reconnect_max_ms: 30000     # long-connection reconnect backoff ceiling
+    identity:                   # required when enabled (WeCom exposes no bot name/description)
+      display_name: null
+      description: null
   feishu:
     enabled: false
     app_id: ${FEISHU_APP_ID:-}
     app_secret: ${FEISHU_APP_SECRET:-}
+    identity:                   # optional; falls back to global identity / platform info
+      display_name: null
+      description: null
   qq:
     enabled: false
     appid: ${QQ_BOT_APPID:-}
     secret: ${QQ_BOT_SECRET:-}
+    identity:                   # optional; falls back to global identity / platform info
+      display_name: null
+      description: null
   wechat:
     enabled: false
     qr_timeout_s: 480
@@ -161,3 +213,7 @@ metrics:
 logging:
   level: INFO
   json: true
+
+# Watch config.yaml and hot-apply a safe subset (group/access/permissions/
+# commands/identity/sessions/media) without a restart.
+reload: false
