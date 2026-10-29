@@ -77,15 +77,18 @@ class OpenCodeV1Protocol(OpenCodeProtocol):
         prompt_input: dict[str, Any] = {"text": prompt}
         if files:
             prompt_input["files"] = [prompt_file(item) for item in files]
+
         payload: dict[str, Any] = {"prompt": prompt_input, "delivery": delivery}
         if id and id.startswith("msg_"):
             payload["id"] = id
+
         return payload
 
     def permission_payload(self, reply: str, message: str | None) -> dict[str, Any]:
         payload: dict[str, Any] = {"reply": reply}
         if message:
             payload["message"] = message
+
         return payload
 
     def parse_questions(self, data: Any) -> list[PendingQuestion]:
@@ -135,14 +138,17 @@ class OpenCodeV2Protocol(OpenCodeProtocol):
         payload: dict[str, Any] = {"text": prompt, "delivery": delivery}
         if files:
             payload["files"] = [prompt_file(item) for item in files]
+
         if id and id.startswith("msg_"):
             payload["id"] = id
+
         return payload
 
     def permission_payload(self, reply: str, message: str | None) -> dict[str, Any]:
         payload: dict[str, Any] = {"decision": reply}
         if message:
             payload["message"] = message
+
         return payload
 
     def parse_questions(self, data: Any) -> list[PendingQuestion]:
@@ -152,6 +158,7 @@ class OpenCodeV2Protocol(OpenCodeProtocol):
                 question = form_to_question(item)
                 if question is not None:
                     out.append(question)
+
         return out
 
     def parse_forms(self, data: Any) -> list[FormSpec]:
@@ -168,11 +175,13 @@ class OpenCodeV2Protocol(OpenCodeProtocol):
         fields: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         fields = fields or {}
+
         if isinstance(answer, QuestionAnswer):
             values = answer_payload(answer, fields)
         else:
             keys = list(fields) or [f"q{index}" for index in range(len(answer))]
             values = {}
+
             for index, answers in enumerate(answer):
                 key = keys[index] if index < len(keys) else f"q{index}"
                 field = fields.get(key) or {}
@@ -182,6 +191,7 @@ class OpenCodeV2Protocol(OpenCodeProtocol):
                     if field.get("type") == "multiselect"
                     else (mapped[0] if mapped else "")
                 )
+
         return {"answer": values}
 
     def reject_question_request(
@@ -197,10 +207,13 @@ class OpenCodeV2Protocol(OpenCodeProtocol):
 def prompt_file(item: PromptFile | dict[str, Any]) -> dict[str, Any]:
     if isinstance(item, PromptFile):
         payload: dict[str, Any] = {"uri": item.uri}
+
         if item.name is not None:
             payload["name"] = item.name
+
         if item.description is not None:
             payload["description"] = item.description
+
         return payload
     return {
         key: value

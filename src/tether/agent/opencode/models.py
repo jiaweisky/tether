@@ -22,14 +22,17 @@ def parse_model_ref(value: str | dict[str, Any]) -> dict[str, Any]:
     ref: dict[str, Any] = {"providerID": value[:provider_end], "id": model_id}
     if variant:
         ref["variant"] = variant
+
     return ref
 
 
 def format_model_ref(value: Any) -> str | None:
     if value is None:
         return None
+
     if isinstance(value, str):
         return value
+
     if not isinstance(value, dict):
         return str(value)
 
@@ -39,6 +42,7 @@ def format_model_ref(value: Any) -> str | None:
         return str(model or provider or "") or None
 
     variant = value.get("variant")
+
     return f"{provider}/{model}" + (f"#{variant}" if variant else "")
 
 

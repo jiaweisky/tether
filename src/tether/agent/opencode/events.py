@@ -138,6 +138,7 @@ class OpenCodeEventMapper:
         events = [event]
         data = raw.get("data") if isinstance(raw, dict) else None
         data = data if isinstance(data, dict) else {}
+
         if self.synthesize_idle_on_step_end and event.type == STEP_FAILED:
             events.append(_idle_event(event, raw))
         elif self.synthesize_idle_on_step_end and event.type == STEP_ENDED:
@@ -145,6 +146,7 @@ class OpenCodeEventMapper:
             # ending with tool calls continues the turn; any other finish ends it.
             if str(data.get("finish") or "") != "tool-calls":
                 events.append(_idle_event(event, raw))
+
         return events
 
     def map(self, raw: dict[str, Any]) -> Event | None:
@@ -221,8 +223,10 @@ class OpenCodeEventMapper:
         if native_type in _TURN_END:
             self._clear_turn(session_id)
             return {"status": {"type": "idle"}}
+
         if native_type == "session.execution.started":
             return {"status": {"type": "busy"}}
+
         if native_type in ("session.retry.scheduled", "session.next.retried"):
             return {
                 "status": {
@@ -232,11 +236,13 @@ class OpenCodeEventMapper:
                     "message": _error_text(data.get("error")),
                 }
             }
+
         if native_type == "session.status":
             status = data.get("status") or data
             if isinstance(status, dict) and status.get("type") == "idle":
                 self._clear_turn(session_id)
             return {"status": status}
+
         return {"status": data.get("status") or data}
 
     def _question_asked(
@@ -245,12 +251,16 @@ class OpenCodeEventMapper:
         if native_type.startswith("form."):
             form_value = data.get("form")
             form: dict[str, Any] = form_value if isinstance(form_value, dict) else {}
+
             request = form_to_question(form)
             if request is None:
                 if not self.supports_forms:
                     return None
+
                 return FORM_ASKED, {"form": form_to_spec(form)}
+
             return {"request": request}
+
         return dict(data)
 
     def _text_payload(
@@ -266,12 +276,14 @@ class OpenCodeEventMapper:
 
         if event_type in (TEXT_STARTED, REASONING_STARTED):
             return {"ordinal": _int_or_none(part_id)}
+
         if event_type in (TEXT_DELTA, REASONING_DELTA):
             return {"delta": str(data.get("delta") or ""), "ordinal": _int_or_none(part_id)}
 
         parts = store.setdefault(sid, {})
         parts[(message_id, part_id)] = str(data.get("text") or "")
         complete = "".join(value for _, value in sorted(parts.items()))
+
         return {"text": complete, "ordinal": _int_or_none(part_id)}
 
     def _tool_called(self, session_id: str | None, data: dict[str, Any]) -> dict[str, Any]:
@@ -280,17 +292,20 @@ class OpenCodeEventMapper:
             str(data.get("assistantMessageID") or ""),
             str(data.get("callID") or data.get("id") or ""),
         )
+
         name = str(data.get("name") or "")
         if name:
             self._tool_names[key] = name
         else:
             name = self._tool_names.get(key, "")
+
         return {"name": name, "toolID": key[2]}
 
     def _clear_turn(self, session_id: str | None) -> None:
         sid = session_id or ""
         self._text.pop(sid, None)
         self._reasoning.pop(sid, None)
+
         for key in [key for key in self._tool_names if key[0] == sid]:
             self._tool_names.pop(key, None)
 
@@ -302,6 +317,7 @@ class OpenCodeEventMapper:
             sid = form.get("sessionID") or data.get("sessionID")
         else:
             sid = data.get("sessionID")
+
         return str(sid) if sid else None
 
 
@@ -330,6 +346,7 @@ def _idle_event(event: Event, raw: dict[str, Any]) -> Event:
 def _int_or_none(value: Any) -> int | None:
     if isinstance(value, bool) or not isinstance(value, (int, str)):
         return None
+
     try:
         return int(value)
     except ValueError:
@@ -339,8 +356,10 @@ def _int_or_none(value: Any) -> int | None:
 def _error_text(value: Any) -> str | None:
     if value is None:
         return None
+
     if isinstance(value, dict):
         return str(value.get("message") or value.get("type") or value)
+
     return str(value)
 
 

@@ -71,6 +71,7 @@ def from_agentd_event(data: dict[str, Any]) -> Event | None:
     payload = dict(data.get("data") or {})
     durable = data.get("durable")
     session_id = _session_id(payload, durable)
+
     return Event(
         id=str(data.get("id", "")),
         type=event_type,
@@ -84,8 +85,10 @@ def _session_id(payload: dict[str, Any], durable: Any) -> str | None:
     for key in ("sessionID", "session_id", "sessionId"):
         if payload.get(key):
             return str(payload[key])
+
     if isinstance(durable, dict) and durable.get("aggregateID"):
         return str(durable["aggregateID"])
+
     return None
 
 

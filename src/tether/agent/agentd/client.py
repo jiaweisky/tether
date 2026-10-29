@@ -139,6 +139,7 @@ class AgentdBackend:
         models = config.get("models") if isinstance(config, dict) else None
         servers = config.get("servers") if isinstance(config, dict) else None
         providers = []
+
         if isinstance(models, list):
             providers = sorted(
                 {
@@ -455,6 +456,7 @@ def _prompt_file_dict(item: PromptFile | dict[str, Any]) -> dict[str, Any]:
             "mime": item.mime,
             "description": item.description,
         }
+
     return item
 
 

@@ -24,9 +24,11 @@ def describe(
 def summary(entries: Any) -> ConfigSummary:
     documents = entries if isinstance(entries, list) else []
     merged: dict[str, Any] = {}
+
     for entry in documents:
         if not isinstance(entry, dict) or entry.get("type") != "document":
             continue
+
         info = entry.get("info")
         if isinstance(info, dict):
             merged.update(info)

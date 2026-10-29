@@ -108,8 +108,10 @@ class OpenCodeBackend:
             return self._protocol
 
         protocol: OpenCodeProtocol = OpenCodeV2Protocol()
+
         try:
             doc = await self._request_body("GET", "/doc")
+
             props = (
                 doc.get("paths", {})
                 .get("/api/session/{sessionID}/prompt", {})
@@ -122,6 +124,7 @@ class OpenCodeBackend:
                 if isinstance(doc, dict)
                 else {}
             )
+
             if isinstance(props, dict) and "prompt" in props:
                 protocol = OpenCodeV1Protocol()
         except (AgentError, AttributeError, TypeError) as exc:
@@ -134,11 +137,13 @@ class OpenCodeBackend:
             supports_rich_forms=protocol.supports_forms,
             event_protocol=f"opencode.{protocol.version}",
         )
+
         log.info(
             "opencode_protocol_detected",
             endpoint=self.endpoint_id,
             version=protocol.version,
         )
+
         return protocol
 
     def _location_params(self, location: str | None) -> dict[str, str]:
@@ -168,6 +173,7 @@ class OpenCodeBackend:
     ) -> Any:
         params = dict(kwargs.pop("params", {}) or {})
         params.update(self._location_params(location))
+
         try:
             resp = await self._client.request(
                 method,
@@ -186,6 +192,7 @@ class OpenCodeBackend:
 
         if resp.status_code == 204 or not resp.content:
             return {}
+
         return _json_or_empty(resp)
 
     # -- discovery ---------------------------------------------------------
@@ -194,6 +201,7 @@ class OpenCodeBackend:
             health = await self._request("GET", "/api/health", location=self.location)
         except AgentError:
             health = None
+
         if isinstance(health, dict) and health.get("healthy") is not None:
             return bool(health["healthy"])
 
@@ -201,6 +209,7 @@ class OpenCodeBackend:
             info = await self._request("GET", "/api/info", location=self.location)
         except AgentError:
             info = None
+
         if isinstance(info, dict) and (info.get("version") or info.get("pid") is not None):
             return True
 
@@ -208,10 +217,12 @@ class OpenCodeBackend:
             models = await self._request("GET", "/api/model", location=self.location)
         except AgentError:
             return False
+
         return isinstance(models, list)
 
     async def describe(self) -> BackendDescription:
         info = await self._request("GET", "/api/info", location=self.location)
+
         return config_module.describe(
             info if isinstance(info, dict) else {},
             endpoint_id=self.endpoint_id,
@@ -225,6 +236,7 @@ class OpenCodeBackend:
     async def list_agents(self, *, location: str | None = None) -> list[AgentInfo]:
         data = await self._request("GET", "/api/agent", location=location)
         agents: list[AgentInfo] = []
+
         for item in data if isinstance(data, list) else []:
             if not isinstance(item, dict):
                 continue
@@ -249,25 +261,32 @@ class OpenCodeBackend:
                     backend="opencode",
                 )
             )
+
         return agents
 
     async def list_models(self, *, location: str | None = None) -> list[ModelInfo]:
         data = await self._request("GET", "/api/model", location=location)
         models: list[ModelInfo] = []
+
         for item in data if isinstance(data, list) else []:
             if not isinstance(item, dict):
                 continue
+
             provider = str(item.get("providerID") or "")
             model_id = str(item.get("modelID") or item.get("id") or "")
             if not provider or not model_id:
                 continue
+
             capabilities = item.get("capabilities")
             capabilities = capabilities if isinstance(capabilities, dict) else {}
+
             limit = item.get("limit")
             limit = limit if isinstance(limit, dict) else {}
+
             inputs = [str(value) for value in (capabilities.get("input") or [])]
             context_limit = _int_or_none(limit.get("context"))
             output_limit = _int_or_none(limit.get("output"))
+
             models.append(
                 ModelInfo(
                     id=f"{provider}/{model_id}",
@@ -278,9 +297,11 @@ class OpenCodeBackend:
                     output_limit=output_limit,
                 )
             )
+
             for variant in item.get("variants") or []:
                 if not isinstance(variant, dict) or not variant.get("id"):
                     continue
+
                 models.append(
                     ModelInfo(
                         id=f"{provider}/{model_id}#{variant['id']}",
@@ -291,6 +312,7 @@ class OpenCodeBackend:
                         output_limit=output_limit,
                     )
                 )
+
         return models
 
     async def agent_tools(
@@ -300,10 +322,13 @@ class OpenCodeBackend:
 
     async def active_sessions(self) -> set[str]:
         data = await self._request("GET", "/api/session/active")
+
         if isinstance(data, dict):
             return {str(key) for key in data}
+
         if isinstance(data, list):
             return {str(item.get("id")) for item in data if isinstance(item, dict)}
+
         return set()
 
     # -- session -----------------------------------------------------------
@@ -317,16 +342,20 @@ class OpenCodeBackend:
         permissions: list[PermissionRule] | None = None,
     ) -> SessionInfo:
         payload: dict[str, Any] = {}
+
         if agent:
             payload["agent"] = agent
+
         if title:
             payload["title"] = title
+
         if model:
             payload["model"] = await self._model_ref(model, location)
 
         directory = location or self.location
         if directory:
             payload["location"] = {"directory": directory}
+
         if permissions is not None:
             payload["permissions"] = [
                 {"action": item.action, "resource": item.resource, "effect": item.effect}
@@ -334,6 +363,7 @@ class OpenCodeBackend:
             ]
 
         data = await self._request("POST", "/api/session", json=payload)
+
         return _session_info(data if isinstance(data, dict) else {})
 
     async def get_session(self, sid: str) -> SessionInfo:
@@ -410,24 +440,29 @@ class OpenCodeBackend:
     async def messages(self, sid: str, *, limit: int = 200) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = []
         cursor: str | None = None
+
         while len(messages) < 4000:
             params: dict[str, Any] = {"limit": limit}
             if cursor:
                 params["cursor"] = cursor
             else:
                 params["order"] = "asc"
+
             body = await self._request_body(
                 "GET", f"/api/session/{sid}/message", params=params
             )
             if not isinstance(body, dict):
                 break
+
             page = body.get("data")
             if isinstance(page, list):
                 messages.extend(item for item in page if isinstance(item, dict))
+
             cursor_data = body.get("cursor")
             cursor = cursor_data.get("next") if isinstance(cursor_data, dict) else None
             if not cursor:
                 break
+
         return messages
 
     async def turn_snapshot(
@@ -458,6 +493,7 @@ class OpenCodeBackend:
     ) -> None:
         protocol = await self._ensure_protocol()
         fields = await self._form_fields(sid, rid) if protocol.supports_forms else None
+
         path = (
             f"/api/session/{sid}/form/{rid}/reply"
             if protocol.supports_forms
@@ -473,6 +509,7 @@ class OpenCodeBackend:
         protocol = await self._ensure_protocol()
         if not protocol.supports_forms:
             raise AgentError("bad_request", "this OpenCode version does not support forms")
+
         await self._request(
             "POST",
             f"/api/session/{sid}/form/{rid}/reply",
@@ -498,15 +535,19 @@ class OpenCodeBackend:
     ) -> list[PendingPermission]:
         selected = self._selected_locations(locations)
         out: dict[str, PendingPermission] = {}
+
         for location in selected:
             data = await self._request(
                 "GET", "/api/permission/request", location=location
             )
+
             for item in data if isinstance(data, list) else []:
                 if not isinstance(item, dict):
                     continue
+
                 request = PendingPermission.from_json(item)
                 out[request.id] = request
+
         return list(out.values())
 
     async def list_questions(
@@ -515,16 +556,20 @@ class OpenCodeBackend:
         protocol = await self._ensure_protocol()
         selected = self._selected_locations(locations)
         out: dict[str, PendingQuestion] = {}
+
         for location in selected:
             data = await self._request(
                 "GET", protocol.questions_path, location=location
             )
+
             for question in protocol.parse_questions(data):
                 out[question.id] = question
+
         return list(out.values())
 
     async def session_permissions(self, sid: str) -> list[PendingPermission]:
         data = await self._request("GET", f"/api/session/{sid}/permission")
+
         return [
             PendingPermission.from_json(item)
             for item in (data if isinstance(data, list) else [])
@@ -537,20 +582,25 @@ class OpenCodeBackend:
         protocol = await self._ensure_protocol()
         if not protocol.supports_forms:
             return []
+
         selected = self._selected_locations(locations)
         out: dict[str, FormSpec] = {}
+
         for location in selected:
             data = await self._request("GET", "/api/form", location=location)
             for spec in protocol.parse_forms(data):
                 if spec.id:
                     out[spec.id] = spec
+
         return list(out.values())
 
     async def session_forms(self, sid: str) -> list[FormSpec]:
         protocol = await self._ensure_protocol()
         if not protocol.supports_forms:
             return []
+
         data = await self._request("GET", f"/api/session/{sid}/form")
+
         return protocol.parse_forms(data)
 
     async def session_questions(self, sid: str) -> list[PendingQuestion]:
@@ -560,6 +610,7 @@ class OpenCodeBackend:
             if protocol.supports_forms
             else f"/api/session/{sid}/question"
         )
+
         return protocol.parse_questions(await self._request("GET", path))
 
     async def _model_ref(self, value: str, location: str | None) -> dict[str, Any]:
@@ -575,6 +626,7 @@ class OpenCodeBackend:
         ]
         if len(matches) != 1:
             raise AgentError("bad_request", f"unknown or ambiguous model: {value!r}")
+
         return parse_model_ref(matches[0])
 
     async def _form_fields(self, sid: str, rid: str) -> dict[str, dict[str, Any]]:
@@ -582,7 +634,9 @@ class OpenCodeBackend:
             data = await self._request("GET", f"/api/session/{sid}/form/{rid}")
         except AgentError:
             return {}
+
         form = data if isinstance(data, dict) else {}
+
         return {
             str(field.get("key")): field
             for field in (form.get("fields") or [])
@@ -592,6 +646,7 @@ class OpenCodeBackend:
     # -- events ------------------------------------------------------------
     async def events(self) -> AsyncIterator[Event]:
         await self._ensure_protocol()
+
         try:
             async with aconnect_sse(
                 self._client,
@@ -606,9 +661,11 @@ class OpenCodeBackend:
                 async for sse in source.aiter_sse():
                     if sse.event == "error":
                         raise AgentError("unavailable", sse.data)
+
                     raw = _parse_json(sse.data)
                     if raw is None:
                         continue
+
                     if self._events is not None:
                         for event in self._events.map_many(raw):
                             yield event
@@ -618,6 +675,7 @@ class OpenCodeBackend:
 
 def _session_info(data: dict[str, Any]) -> SessionInfo:
     location = data.get("location")
+
     return SessionInfo(
         id=str(data.get("id") or ""),
         agent=_string_or_none(data.get("agent")),
@@ -644,6 +702,7 @@ def _error_from_response(resp: httpx.Response) -> AgentError:
         "SchemaError": "bad_request",
         "ServiceUnavailableError": "unavailable",
     }.get(tag, "internal")
+
     return AgentError(code, message or tag, status=resp.status_code)
 
 
@@ -657,10 +716,12 @@ def _json_or_empty(resp: httpx.Response) -> Any:
 def _parse_json(text: str | None) -> dict[str, Any] | None:
     if not text:
         return None
+
     try:
         value = json.loads(text)
     except ValueError:
         return None
+
     return value if isinstance(value, dict) else None
 
 

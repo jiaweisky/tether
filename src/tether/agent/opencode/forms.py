@@ -19,6 +19,7 @@ def form_to_spec(form: dict[str, Any]) -> FormSpec:
     for field in form.get("fields") or []:
         if not isinstance(field, dict):
             continue
+
         fields.append(
             FormField(
                 key=str(field.get("key") or f"field{len(fields)}"),
@@ -64,6 +65,7 @@ def form_to_question(form: dict[str, Any]) -> PendingQuestion | None:
     for field in form.get("fields") or []:
         if not isinstance(field, dict):
             continue
+
         field_type = str(field.get("type") or "")
         if field_type not in ("string", "multiselect"):
             continue
@@ -108,12 +110,14 @@ def answer_payload(
     answer: QuestionAnswer, fields_by_key: dict[str, dict[str, Any]]
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {}
+
     for key, values in answer.values.items():
         field = fields_by_key.get(key) or {}
         if field.get("type") == "multiselect":
             payload[key] = list(values)
         else:
             payload[key] = values[0] if values else ""
+
     return payload
 
 

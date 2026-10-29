@@ -46,6 +46,7 @@ def tool_media(messages: list[dict]) -> list[RichMedia]:
         for part in message.get("content") or []:
             if part.get("type") != "tool":
                 continue
+
             state = part.get("state") or {}
             out.extend(extract_file_parts(state.get("content")))
             out.extend(extract_file_parts(state.get("attachments")))

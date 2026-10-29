@@ -59,15 +59,18 @@ def _turn_start(messages: list[dict[str, Any]], after_message_id: str | None) ->
     for index in range(len(messages) - 1, -1, -1):
         if messages[index].get("type") == "user":
             return index + 1
+
     return 0
 
 
 def _assistant_parts(message: dict[str, Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     content = message.get("content")
+
     for item in content if isinstance(content, list) else []:
         if not isinstance(item, dict):
             continue
+
         if item.get("type") == "tool":
             state = item.get("state")
             if isinstance(state, dict):
@@ -76,6 +79,7 @@ def _assistant_parts(message: dict[str, Any]) -> list[dict[str, Any]]:
                         out.append(part)
         elif item.get("type") == "file":
             out.append(item)
+
     return out
 
 
@@ -99,7 +103,9 @@ def _file_media(part: dict[str, Any]) -> RichMedia:
 def _decode_data_url(uri: str) -> bytes | None:
     if ";base64," not in uri:
         return None
+
     _, payload = uri.split(";base64,", 1)
+
     try:
         return base64.b64decode(payload)
     except (binascii.Error, ValueError):
@@ -120,10 +126,13 @@ def _kind(mime: str | None, name: str | None) -> str:
     lowered = (name or "").lower()
     if lowered.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
         return "image"
+
     if lowered.endswith((".mp3", ".wav", ".ogg", ".amr", ".silk")):
         return "audio"
+
     if lowered.endswith((".mp4", ".mov", ".webm")):
         return "video"
+
     return "file"
 
 
