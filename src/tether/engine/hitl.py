@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any, Literal
 
+from tether.agent.base import FormSpec
 from tether.agent.events import PendingPermission, PendingQuestion
 from tether.config import Config
 from tether.models import (
@@ -131,16 +132,54 @@ def question_numbered_text(question: PendingQuestion) -> tuple[str, list[str]]:
     return "\n".join(lines), labels
 
 
+def form_text(form: FormSpec) -> str:
+    if len(form.fields) == 1 and form.fields[0].options:
+        field = form.fields[0]
+        lines = [f"📝 {form.title or form.id}"]
+        if field.description or field.title:
+            lines.append(field.description or field.title or "")
+        lines.append("")
+        for index, option in enumerate(field.options, start=1):
+            lines.append(f"{index}. {option.label}")
+        lines.append("")
+        lines.append("Reply with the option number.")
+        return "\n".join(lines)
+
+    lines = [f"📝 Form: {form.title or form.id}"]
+    for field in form.fields:
+        label = field.title or field.description or field.key
+        required = " (required)" if field.required else ""
+        lines.append(f"- `{field.key}`: {label} [{field.type}]{required}")
+        if field.options:
+            choices = ", ".join(
+                f"{option.label}={option.value}" for option in field.options
+            )
+            lines.append(f"  options: {choices}")
+        if field.default is not None:
+            lines.append(f"  default: {field.default}")
+
+    lines.append(
+        'Reply with a JSON object, e.g. {"key": "value"} or {"multi": ["a", "b"]}.'
+    )
+    return "\n".join(lines)
+
+
 def make_pending(
-    kind: Literal["permission", "question"],
+    kind: Literal["permission", "question", "form"],
     *,
     owner: str | None,
     scope: str,
     request_id: str,
     options: list[str] | None = None,
+    form: dict[str, Any] | None = None,
 ) -> PendingInteraction:
     return PendingInteraction(
-        kind=kind, owner=owner, scope=scope, request_id=request_id, options=options or []
+        kind=kind,
+        owner=owner,
+        scope=scope,
+        request_id=request_id,
+        options=options or [],
+        form=form,
     )
 
 

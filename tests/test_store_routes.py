@@ -28,6 +28,9 @@ async def test_route_round_trips_all_persisted_fields(tmp_path):
         conversation=conv,
         session_id="ses_1",
         server_base="http://agentd",
+        endpoint="main",
+        backend="opencode",
+        location="/work",
         agent="build",
         model={"id": "m1", "providerID": "p"},
         context_limit=4096,
@@ -69,6 +72,9 @@ async def test_route_round_trips_all_persisted_fields(tmp_path):
     assert loaded.conversation == conv
     assert loaded.session_id == "ses_1"
     assert loaded.server_base == "http://agentd"
+    assert loaded.endpoint == "main"
+    assert loaded.backend == "opencode"
+    assert loaded.location == "/work"
     assert loaded.agent == "build"
     assert loaded.model == "m1"
     assert loaded.context_limit == 4096

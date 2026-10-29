@@ -20,7 +20,7 @@ async def make_app(tmp_path, config: Config | None = None):
         config,
         db_path=str(tmp_path / "t.db"),
         connectors=[conn],
-        client_factory=lambda base, token: client,
+        client_factory=lambda _endpoint: client,
     )
     await app.store.connect()
     app.connectors[conn.name] = conn

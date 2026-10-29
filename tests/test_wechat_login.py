@@ -8,6 +8,7 @@ from tether.connectors.wechat.login import (
     WeChatLoginError,
     WeChatLoginRejected,
     WeChatLoginService,
+    WeChatQRExpired,
 )
 from tether.store.sqlite import (
     RouteStore,
@@ -148,12 +149,13 @@ async def test_wait_confirms_and_persists(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_wait_refreshes_an_expired_qr(tmp_path):
+async def test_wait_stops_when_the_qr_expires(tmp_path):
     store = await _store(tmp_path)
     service = WeChatLoginService(store=store, channel_enabled=True)
     spec = _spec()
     client = FakeLoginClient(
         [
+            {"status": "wait"},
             {"status": "expired"},
             {
                 "status": "confirmed",
@@ -164,12 +166,9 @@ async def test_wait_refreshes_an_expired_qr(tmp_path):
         ]
     )
     session = LoginSession(client=client, bot=spec, qrcode="q1", content="content-1")
-    seen: list[str] = []
 
-    async def on_refresh(content):
-        seen.append(content)
-
-    await service.wait(session, timeout_s=3, on_refresh=on_refresh)
-    assert seen == ["content-2"]
-    assert session.qrcode == "q2"
+    with pytest.raises(WeChatQRExpired):
+        await service.wait(session, timeout_s=3)
+    assert client.closed
+    assert client.statuses
     await store.close()

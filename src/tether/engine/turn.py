@@ -11,7 +11,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
-from tether.agent.client import HttpAgentClient
+from tether.agent.base import AgentBackend
 from tether.agent.errors import AgentError
 from tether.agent.events import (
     ATTACHMENT_OMITTED,
@@ -36,9 +36,21 @@ from tether.agent.events import (
     TOOL_FAILED,
     TOOL_PROGRESS,
     TOOL_SUCCESS,
+    AttachmentOmittedData,
+    EmptyData,
+    ErrorData,
     Event,
+    FilePart,
     PendingPermission,
-    PendingQuestion,
+    PermissionAskedData,
+    PermissionRepliedData,
+    QuestionAskedData,
+    QuestionClosedData,
+    StepEndedData,
+    TextData,
+    ToolCalledData,
+    ToolData,
+    TurnStatusData,
 )
 from tether.agent.usage import UsageTokens, parse_usage
 from tether.config import Config
@@ -46,10 +58,9 @@ from tether.connector import IMConnector
 from tether.engine import hitl
 from tether.engine.media_egress import (
     MediaEgress,
-    extract_file_parts,
+    file_part_to_media,
     files_from_paths,
     record_blocked,
-    structured_file_paths,
 )
 from tether.engine.streaming import RateLimited, StreamingController
 from tether.metrics import metrics
@@ -94,7 +105,7 @@ _OMIT_REASONS = {
 }
 
 FinishCb = Callable[["TurnEngine"], Awaitable[None]]
-EventHandler = Callable[[dict[str, Any]], Awaitable[None]]
+EventHandler = Callable[[Any], Awaitable[None]]
 
 
 class TurnEngine:
@@ -104,7 +115,7 @@ class TurnEngine:
         route: Route,
         inbound: InboundMessage,
         connector: IMConnector,
-        client: HttpAgentClient,
+        client: AgentBackend,
         config: Config,
         renderer: DefaultRenderer,
         media_egress: MediaEgress,
@@ -204,7 +215,7 @@ class TurnEngine:
     async def handle_event(self, event: Event) -> None:
         handler = self._handlers.get(event.type)
         if handler is not None:
-            await handler(event.data or {})
+            await handler(event.data)
 
     async def finish(self) -> None:
         if self._ended:
@@ -324,47 +335,48 @@ class TurnEngine:
                 pass
 
     # -- event handlers ----------------------------------------------------
-    async def _on_activity(self, data: dict[str, Any]) -> None:
+    async def _on_activity(self, data: EmptyData) -> None:
         """A step or message part started: the agent is actively working."""
         self.controller.mark_working()
 
-    async def _on_text_delta(self, data: dict[str, Any]) -> None:
-        self.controller.push_text(str(data.get("delta", "")))
+    async def _on_text_delta(self, data: TextData) -> None:
+        self.controller.push_text(data.delta)
 
-    async def _on_text_ended(self, data: dict[str, Any]) -> None:
-        if data.get("text") is not None:
-            self.controller.text = str(data["text"])
+    async def _on_text_ended(self, data: TextData) -> None:
+        if data.text is not None:
+            self.controller.text = data.text
 
-    async def _on_reasoning_delta(self, data: dict[str, Any]) -> None:
+    async def _on_reasoning_delta(self, data: TextData) -> None:
         if self.config.streaming.show_reasoning:
-            self.controller.push_reasoning(str(data.get("delta", "")))
+            self.controller.push_reasoning(data.delta)
 
-    async def _on_reasoning_ended(self, data: dict[str, Any]) -> None:
-        if self.config.streaming.show_reasoning and data.get("text"):
-            self.controller.reasoning = str(data["text"])
+    async def _on_reasoning_ended(self, data: TextData) -> None:
+        if self.config.streaming.show_reasoning and data.text:
+            self.controller.reasoning = data.text
 
-    async def _on_tool_called(self, data: dict[str, Any]) -> None:
-        name = _tool_name(data)
-        if name and self.config.streaming.show_tools:
-            self.controller.note_tool(name)
+    async def _on_tool_called(self, data: ToolCalledData) -> None:
+        if data.name and self.config.streaming.show_tools:
+            self.controller.note_tool(data.name)
 
-    async def _on_tool_progress(self, data: dict[str, Any]) -> None:
+    async def _on_tool_progress(self, data: ToolData) -> None:
         self._collect_media(data)
 
-    async def _on_tool_success(self, data: dict[str, Any]) -> None:
+    async def _on_tool_success(self, data: ToolData) -> None:
         self._collect_media(data)
         if self.config.streaming.show_tools:
             self.controller.clear_tool()
 
-    def _collect_media(self, data: dict[str, Any]) -> None:
+    def _collect_media(self, data: ToolData) -> None:
         """Collect media a tool produced.
 
-        Inline file parts (``content``) are snapshotted now; files named on disk
-        (``outputPaths`` / ``structured``) are only *recorded* and read at drain
-        time, so a file edited several times in one turn is sent once, with its
-        final content.
+        Inline file parts are snapshotted now; files named on disk are only
+        *recorded* and read at drain time, so a file edited several times in one
+        turn is sent once, with its final content.
         """
-        for media in extract_file_parts(data.get("content")):
+        for part in data.content:
+            if not isinstance(part, FilePart):
+                continue
+            media = file_part_to_media(part)
             key = media.name or media.url or ""
             if key and key in self._media_seen:
                 continue
@@ -374,12 +386,11 @@ class TurnEngine:
 
             self.media.append(media)
 
-        paths = list(data.get("outputPaths") or []) + structured_file_paths(data.get("structured"))
-        for path in paths:
+        for path in data.structured.files:
             self._media_paths[path] = None
 
-    async def _on_tool_failed(self, data: dict[str, Any]) -> None:
-        message = _short(data.get("error"))
+    async def _on_tool_failed(self, data: ErrorData) -> None:
+        message = data.error
         if any(hint in message.lower() for hint in _DENIED_HINTS):
             if not self._denied_notice_sent:
                 self._denied_notice_sent = True
@@ -388,44 +399,40 @@ class TurnEngine:
 
         self.controller.push_text(f"\n\n⚠️ A tool failed: {message}\n")
 
-    async def _on_step_ended(self, data: dict[str, Any]) -> None:
+    async def _on_step_ended(self, data: StepEndedData) -> None:
         self._record_usage(data)
-        self._collect_media({"outputPaths": data.get("files")})
+        for path in data.files:
+            self._media_paths[path] = None
 
-    async def _on_step_failed(self, data: dict[str, Any]) -> None:
-        error = data.get("error") or {}
-        message = error.get("message") if isinstance(error, dict) else str(error)
-        self.controller.push_text(f"\n\n⚠️ {message or 'The step failed.'}\n")
+    async def _on_step_failed(self, data: ErrorData) -> None:
+        self.controller.push_text(f"\n\n⚠️ {data.error or 'The step failed.'}\n")
 
-    async def _on_attachment_omitted(self, data: dict[str, Any]) -> None:
-        name = data.get("name", "attachment")
-        reason = str(data.get("reason", "unsupported"))
-        note = _OMIT_REASONS.get(reason, f"not accepted ({reason})")
-        detail = data.get("detail")
-        suffix = f" — {detail}" if detail else ""
-        await self._send_notice(f"⚠️ `{name}` was not sent to the model: {note}{suffix}.")
+    async def _on_attachment_omitted(self, data: AttachmentOmittedData) -> None:
+        note = _OMIT_REASONS.get(data.reason, f"not accepted ({data.reason})")
+        suffix = f" — {data.detail}" if data.detail else ""
+        await self._send_notice(
+            f"⚠️ `{data.name}` was not sent to the model: {note}{suffix}."
+        )
 
-    async def _on_compaction_started(self, data: dict[str, Any]) -> None:
+    async def _on_compaction_started(self, data: EmptyData) -> None:
         await self._send_notice("🧹 Organizing context…")
 
-    async def _on_compaction_ended(self, data: dict[str, Any]) -> None:
+    async def _on_compaction_ended(self, data: EmptyData) -> None:
         # A summary can drop the identity preamble, so refresh it next turn.
         self.route.context_dirty = True
 
-    async def _on_status(self, data: dict[str, Any]) -> None:
-        status = data.get("status") or {}
-        stype = status.get("type") if isinstance(status, dict) else None
-
-        if stype == "idle":
+    async def _on_status(self, data: TurnStatusData) -> None:
+        status = data.status
+        if status.type == "idle":
             await self.finish()
-        elif stype == "busy":
+        elif status.type == "busy":
             self.controller.mark_working()
-        elif stype == "retry":
-            attempt = status.get("attempt") or status.get("next") or 1
+        elif status.type == "retry":
+            attempt = status.attempt or status.next or 1
             await self._send_notice(f"⏳ Model busy, retrying (#{attempt})…")
 
-    async def _on_permission(self, data: dict[str, Any]) -> None:
-        perm = PendingPermission.from_json(data)
+    async def _on_permission(self, data: PermissionAskedData) -> None:
+        perm = data.request
         metrics.inc("hitl_asks")
         action = self.config.permissions.action_for(perm.action)
         log.info("permission_asked", action=perm.action, auto=action)
@@ -450,8 +457,8 @@ class TurnEngine:
         await self._send_notice(_numbered_text(card.body, options))
         await self._start_new_message()
 
-    async def _on_question(self, data: dict[str, Any]) -> None:
-        question = PendingQuestion.from_json(data)
+    async def _on_question(self, data: QuestionAskedData) -> None:
+        question = data.request
         metrics.inc("hitl_asks")
         first = question.questions[0] if question.questions else None
         log.info(
@@ -584,8 +591,10 @@ class TurnEngine:
             task.cancel()
         self._timers.clear()
 
-    async def _on_interaction_closed(self, data: dict[str, Any]) -> None:
-        request_id = str(data.get("requestID", ""))
+    async def _on_interaction_closed(
+        self, data: PermissionRepliedData | QuestionClosedData
+    ) -> None:
+        request_id = data.request_id
         self.route.pending_interactions.pop(request_id, None)
 
         task = self._timers.pop(request_id, None)
@@ -707,17 +716,12 @@ class TurnEngine:
         )
 
     # -- usage -------------------------------------------------------------
-    def _record_usage(self, data: dict[str, Any]) -> None:
-        tokens = data.get("tokens")
-        if isinstance(tokens, dict):
-            self._record_tokens(tokens)
+    def _record_usage(self, data: StepEndedData) -> None:
+        if data.tokens is not None:
+            self._record_tokens(data.tokens)
 
-        cost = data.get("cost")
-        if cost is not None:
-            try:
-                self.usage.cost = float(cost)
-            except (TypeError, ValueError):
-                pass
+        if data.cost is not None:
+            self.usage.cost = data.cost
 
     def _record_tokens(self, tokens: dict[str, Any]) -> None:
         # agentd forwards the provider's usage verbatim, so interpret the
@@ -739,21 +743,6 @@ def _numbered_text(body: str, options: list[str]) -> str:
     lines.extend(f"{index + 1}. {text}" for index, text in enumerate(options))
 
     return "\n".join(lines)
-
-
-def _tool_name(data: dict[str, Any]) -> str | None:
-    for key in ("tool", "name"):
-        if data.get(key):
-            return str(data[key])
-
-    return None
-
-
-def _short(err: Any) -> str:
-    if isinstance(err, dict):
-        return str(err.get("message") or err.get("type") or "error")
-
-    return str(err)
 
 
 __all__ = ["TurnEngine"]

@@ -17,6 +17,7 @@ from tether.agent.events import (
     TEXT_DELTA,
     TEXT_ENDED,
     TOOL_CALLED,
+    TOOL_FAILED,
     TOOL_SUCCESS,
     Event,
 )
@@ -48,7 +49,7 @@ async def make_app(tmp_path, config: Config | None = None, connector=None):
         config,
         db_path=str(tmp_path / "t.db"),
         connectors=[conn],
-        client_factory=lambda base, token: client,
+        client_factory=lambda _endpoint: client,
     )
     await app.store.connect()
     app.connectors[conn.name] = conn
@@ -185,8 +186,8 @@ async def test_inline_attachment_becomes_prompt_file(tmp_path):
     await app._on_message(inbound("look", attachments=[att]))
     files = client.prompts[0]["files"]
     assert len(files) == 1
-    assert files[0]["name"] == "x.png"
-    assert files[0]["uri"].startswith("data:image/png;base64,")
+    assert files[0].name == "x.png"
+    assert files[0].uri.startswith("data:image/png;base64,")
 
 
 @pytest.mark.asyncio
@@ -879,6 +880,7 @@ async def test_config_command_is_admin_only_and_direct_only(tmp_path):
     await app._on_message(inbound("/config", sender_id="u1", message_id="m3"))
     default = "\n".join(m["text"] for m in conn.messages if m["kind"] == "text")
     assert '"agentd"' in default and '"tether"' not in default
+    assert '"info": {' in default and "BackendDescription(" not in default
 
     # --all: bridge + full agentd, with the bridge secret redacted
     await app._on_message(inbound("/config --all", sender_id="u1", message_id="m4"))
@@ -1051,7 +1053,7 @@ async def test_status_shows_agentd_unreachable(tmp_path, monkeypatch):
     async def boom():
         raise AgentError("unavailable", "down")
 
-    monkeypatch.setattr(client, "get_info", boom)
+    monkeypatch.setattr(client, "describe", boom)
     await app._on_message(inbound("/status", message_id="m2"))
     assert "(unreachable)" in conn.last_text()
 
@@ -1065,7 +1067,7 @@ async def test_policy_tool_denial_is_friendly_and_reported_once(tmp_path):
         await app._route_event(
             Event(
                 event_id,
-                "session.next.tool.failed",
+                TOOL_FAILED,
                 {
                     "sessionID": sid,
                     "error": {"message": "permission blocked"},
@@ -1116,3 +1118,89 @@ async def test_connector_health_publishes_the_transport_state(tmp_path):
     app._check_connectors()
     assert metrics.gauges.get("connector_connected_fake") == 1.0
     assert "fake" not in app._connector_down_since  # cleared on recovery
+
+
+@pytest.mark.asyncio
+async def test_title_event_updates_route_conversation(tmp_path):
+    from tether.agent.events import TITLE_UPDATED
+
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+
+    await app._route_event(Event("t1", TITLE_UPDATED, {"sessionID": sid, "title": "Renamed"}))
+
+    route = await app.router.get_by_session(sid)
+    assert route is not None
+    assert route.conversation.name == "Renamed"
+    persisted = await app.router.store.get(route.key)
+    assert persisted is not None and persisted.conversation.name == "Renamed"
+
+
+@pytest.mark.asyncio
+async def test_rich_form_event_and_json_answer(tmp_path):
+    from tether.agent.base import FormField, FormSpec
+    from tether.agent.events import FORM_ASKED
+
+    config = Config.model_validate({"permissions": {"rich_forms": "all"}})
+    app, conn, client = await make_app(tmp_path, config=config)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+    form = FormSpec(
+        id="frm_1",
+        session_id=sid,
+        title="Authorize",
+        fields=[FormField(key="password", type="string", required=True)],
+    )
+
+    await app._route_event(Event("f1", FORM_ASKED, {"form": form}, session_id=sid))
+
+    route = await app.router.get_by_session(sid)
+    assert route is not None
+    assert route.pending_interactions["frm_1"].kind == "form"
+    assert "Form: Authorize" in conn.last_text()
+
+    await app._on_message(inbound('{"password": "secret"}', message_id="m2"))
+
+    assert client.form_replies == [(sid, "frm_1", {"password": "secret"})]
+    route = await app.router.get_by_session(sid)
+    assert route is not None
+    assert "frm_1" not in route.pending_interactions
+
+
+@pytest.mark.asyncio
+async def test_choice_form_uses_numbered_reply(tmp_path):
+    from tether.agent.base import FormField, FormOption, FormSpec
+    from tether.agent.events import FORM_ASKED
+
+    config = Config.model_validate({"permissions": {"rich_forms": "all"}})
+    app, conn, client = await make_app(tmp_path, config=config)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+    form = FormSpec(
+        id="frm_1",
+        session_id=sid,
+        title="Web Search",
+        fields=[
+            FormField(
+                key="choice",
+                type="string",
+                description="Allow web search?",
+                options=[
+                    FormOption(value="allow", label="Allow search"),
+                    FormOption(value="disable", label="Disable search"),
+                ],
+            )
+        ],
+    )
+
+    await app._route_event(Event("f1", FORM_ASKED, {"form": form}, session_id=sid))
+    text = conn.last_text()
+    assert "1. Allow search" in text
+    assert "2. Disable search" in text
+    assert "Reply with the option number." in text
+    assert '{"key": "value"}' not in text
+
+    await app._on_message(inbound("2", message_id="m2"))
+
+    assert client.form_replies == [(sid, "frm_1", {"choice": "disable"})]

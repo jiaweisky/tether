@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 
 log = get_logger("tether.wechat.login")
 
-_QR_REFRESH_LIMIT = 3
 _POLL_INTERVAL_S = 1.0
 
 
@@ -44,6 +43,10 @@ class WeChatLoginRejected(WeChatLoginError):
 
 class WeChatVerifyCodeRequired(WeChatLoginError):
     """The server asked for the verification code shown by the phone."""
+
+
+class WeChatQRExpired(WeChatLoginError):
+    """The QR code is no longer valid; the user must start a new login."""
 
 
 @dataclass
@@ -94,13 +97,11 @@ class WeChatLoginService:
         session: LoginSession,
         *,
         timeout_s: int | None = None,
-        on_refresh: Callable[[str], Awaitable[None]] | None = None,
         request_verify_code: Callable[[], Awaitable[str]] | None = None,
     ) -> WeChatCredential:
         timeout = timeout_s if timeout_s is not None else self.qr_timeout_s
         deadline = time.monotonic() + timeout
         pending_verify: str | None = None
-        refreshes = 0
 
         try:
             while time.monotonic() < deadline:
@@ -127,11 +128,7 @@ class WeChatLoginService:
                     if host:
                         session.base_url = f"https://{host}"
                 elif state in ("expired", "verify_code_blocked"):
-                    refreshes += 1
-                    if refreshes > _QR_REFRESH_LIMIT:
-                        raise WeChatLoginError("the QR code expired too many times")
-                    pending_verify = None
-                    await self._refresh_qr(session, on_refresh)
+                    raise WeChatQRExpired("the QR code has expired")
                 elif state == "binded_redirect":
                     raise WeChatLoginRejected(
                         None, "this WeChat account is already bound to another instance"
@@ -195,19 +192,6 @@ class WeChatLoginService:
         )
 
         return credential
-
-    async def _refresh_qr(
-        self,
-        session: LoginSession,
-        on_refresh: Callable[[str], Awaitable[None]] | None,
-    ) -> None:
-        payload = await session.client.get_qr()
-        session.qrcode = str(payload["qrcode"])
-        session.content = str(payload["qrcode_img_content"])
-        session.base_url = DEFAULT_API_BASE
-
-        if on_refresh is not None:
-            await on_refresh(session.content)
 
     def _ensure_channel_enabled(self) -> None:
         if not self.channel_enabled:

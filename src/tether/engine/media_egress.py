@@ -149,6 +149,17 @@ def _is_file_part(node: dict[str, Any]) -> bool:
     return "uri" in node and ("mime" in node or "mediaSource" in node)
 
 
+def file_part_to_media(part: Any) -> RichMedia:
+    """Convert a typed neutral ``FilePart`` into :class:`RichMedia`."""
+    return _file_part_to_media(
+        {
+            "uri": part.uri,
+            "mime": part.mime,
+            "name": part.name,
+        }
+    )
+
+
 def _file_part_to_media(node: dict[str, Any]) -> RichMedia:
     uri = str(node.get("uri") or "")
     mime = node.get("mime")

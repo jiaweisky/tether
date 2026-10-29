@@ -70,3 +70,19 @@ async def test_bases_returns_distinct_lease_bases():
     await leases.register("k2", ProjectLease("p2", server_base="http://a"))
     await leases.register("k3", ProjectLease("p3", server_base="http://b"))
     assert leases.bases() == {"http://a", "http://b"}
+
+
+@pytest.mark.asyncio
+async def test_reclaim_oldest_evicts_least_recently_used_ephemeral_lease():
+    provider = FakeProvider()
+    clock = Clock()
+    leases = LeaseManager(provider, ttl_s=100, clock=clock)
+    await leases.register("old", ProjectLease("p1", ephemeral=True))
+    clock.t = 5
+    await leases.register("new", ProjectLease("p2", ephemeral=True))
+    clock.t = 6
+    leases.touch("old")
+    clock.t = 7
+
+    assert await leases.reclaim_oldest() == ["new"]
+    assert provider.released == ["p2"]

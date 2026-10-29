@@ -256,11 +256,12 @@ class PendingInteraction:
     buttons.
     """
 
-    kind: Literal["permission", "question"]
+    kind: Literal["permission", "question", "form"]
     owner: str | None = None
     scope: str = "initiator"
     options: list[str] = field(default_factory=list)
     request_id: str | None = None
+    form: dict[str, Any] | None = None
 
 
 @dataclass
@@ -272,6 +273,9 @@ class Route:
     session_id: str
     server_base: str
     agent: str
+    endpoint: str | None = None
+    backend: str | None = None
+    location: str | None = None
     model: str | None = None
     context_limit: int | None = None
     project_id: str | None = None

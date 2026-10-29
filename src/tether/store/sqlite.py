@@ -135,6 +135,9 @@ def _route_to_json(route: Route) -> str:
         },
         "session_id": route.session_id,
         "server_base": route.server_base,
+        "endpoint": route.endpoint,
+        "backend": route.backend,
+        "location": route.location,
         "agent": route.agent,
         "model": route.model,
         "context_limit": route.context_limit,
@@ -156,6 +159,7 @@ def _route_to_json(route: Route) -> str:
                 "scope": p.scope,
                 "options": p.options,
                 "request_id": p.request_id,
+                "form": p.form,
             }
             for rid, p in route.pending_interactions.items()
         },
@@ -176,6 +180,9 @@ def _route_from_json(raw: str) -> Route:
         conversation=conv,
         session_id=d["session_id"],
         server_base=d["server_base"],
+        endpoint=d.get("endpoint"),
+        backend=d.get("backend"),
+        location=d.get("location"),
         agent=d["agent"],
         model=d.get("model"),
         context_limit=d.get("context_limit"),

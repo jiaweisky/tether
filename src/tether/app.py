@@ -15,26 +15,32 @@ import json
 import os
 import time
 from collections.abc import Awaitable
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Literal
 
-from tether.agent.client import HttpAgentClient
+from tether.agent.base import AgentBackend, BackendDescription, FormAnswer, FormSpec
 from tether.agent.errors import AgentError, user_message
 from tether.agent.events import (
+    FORM_ASKED,
     PERMISSION_ASKED,
     PERMISSION_REPLIED,
     QUESTION_ASKED,
     QUESTION_REJECTED,
     QUESTION_REPLIED,
     SESSION_STATUS,
+    TITLE_UPDATED,
     Event,
+)
+from tether.agent.events import (
+    event_seq as _durable_seq,
 )
 from tether.config import Config, load_config, validate_startup
 from tether.connector import IMConnector, build_connectors
 from tether.connectors.wechat.login import (
     WeChatLoginError,
     WeChatLoginRejected,
+    WeChatQRExpired,
     WeChatVerifyCodeRequired,
 )
 from tether.connectors.wechat.migrate import migrate_legacy_wechat_files
@@ -114,7 +120,7 @@ class TetherApp:
         self._turns: dict[str, TurnEngine] = {}
         self._turn_queue: dict[str, list[TurnEngine]] = {}
         self._sse_tasks: dict[str, asyncio.Task[None]] = {}
-        self._clients: dict[str, HttpAgentClient] = {}
+        self._clients: dict[str, AgentBackend] = {}
         self._janitor_task: asyncio.Task[None] | None = None
         self._watchdog_task: asyncio.Task[None] | None = None
         self._metrics_task: asyncio.Task[None] | None = None
@@ -136,6 +142,10 @@ class TetherApp:
 
         await self.provider.preflight()
         await self.store.connect()
+        try:
+            await self.router.cleanup_orphans()
+        except Exception:  # noqa: BLE001 - orphan cleanup must not block startup
+            log.exception("isolated_orphan_cleanup_failed")
         await migrate_legacy_wechat_files(self.config, self.store)
 
         built = self._connectors_override
@@ -169,7 +179,11 @@ class TetherApp:
         for base_url in self._base_urls():
             client = self.router.client_for_base(base_url)
             try:
-                await self._restore_hitl(client, clear_stale=True)
+                await self._restore_hitl(
+                    client,
+                    locations=self.router.locations_for_base(base_url),
+                    clear_stale=True,
+                )
             except Exception:  # noqa: BLE001 - startup must not fail on HITL recovery
                 log.exception("startup_hitl_reconcile_failed", base=base_url)
 
@@ -386,6 +400,9 @@ class TetherApp:
         if await self._maybe_answer_pending(route, msg, connector):
             return
 
+        if await self._maybe_answer_form(route, msg, connector):
+            return
+
         await self._start_turn(route, msg, connector)
 
     async def _handle_command(self, msg: InboundMessage, connector: IMConnector) -> bool:
@@ -471,19 +488,19 @@ class TetherApp:
 
         await self._notice(connector, conv, "\n".join(lines))
 
-    async def _agentd_info(self, base_url: str) -> dict[str, Any] | None:
-        """agentd `GET /api/info` (version/pid), or ``None`` when unreachable.
+    async def _agentd_info(self, base_url: str) -> BackendDescription | None:
+        """Backend description, or ``None`` when unreachable.
 
-        Bounded by a short timeout so a hung agentd never stalls `/status`.
+        Bounded by a short timeout so a hung backend never stalls `/status`.
         """
         try:
-            call = self.router.client_for_base(base_url).get_info()
+            call = self.router.client_for_base(base_url).describe()
             return await asyncio.wait_for(call, timeout=2.0)
         except (AgentError, TimeoutError):
             return None
 
     def _direct_status_lines(
-        self, route: Route, engine: TurnEngine | None, info: dict[str, Any] | None
+        self, route: Route, engine: TurnEngine | None, info: BackendDescription | None
     ) -> list[str]:
         """Detail shown only in a direct chat (never visible to a group)."""
         limit = route.context_limit or self.config.model.context_limit
@@ -592,7 +609,7 @@ class TetherApp:
             await connector.acknowledge(item, label)
 
     async def _reply_interaction(
-        self, client: HttpAgentClient, sid: str, rid: str, value: dict[str, Any]
+        self, client: AgentBackend, sid: str, rid: str, value: dict[str, Any]
     ) -> None:
         kind = value.get("kind")
         if kind == "permission":
@@ -639,7 +656,7 @@ class TetherApp:
         log.info("connector_event", kind=event.kind, conversation=event.conversation.key)
 
     # -- turn lifecycle ----------------------------------------------------
-    async def _prime_route_cursor(self, client: HttpAgentClient, route: Route) -> None:
+    async def _prime_route_cursor(self, client: AgentBackend, route: Route) -> None:
         """Advance a route to the latest durable sequence without replaying it.
 
         Used before a new turn when no engine is active. Events from a previous
@@ -647,7 +664,7 @@ class TetherApp:
         """
         try:
             events = await client.session_replay(
-                route.session_id, after=route.last_seq
+                route.session_id, after_seq=route.last_seq
             )
         except AgentError as exc:
             log.warning(
@@ -945,8 +962,25 @@ class TetherApp:
             await self._notice(connector, conv, "⚠️ This connector cannot log in.")
             return
 
+        already_connected = getattr(target, "connected", None) is True
+        if already_connected:
+            label = getattr(target, "account", None) or bot.id
+            await self._notice(
+                connector,
+                conv,
+                f"✅ WeChat bot `{label}` is already logged in. "
+                "The QR code below reopens the existing WeChat conversation; "
+                "it does not create a new login.",
+            )
+
         task = asyncio.create_task(
-            self._run_wechat_login(target, login, connector, conv)
+            self._run_wechat_login(
+                target,
+                login,
+                connector,
+                conv,
+                already_connected=already_connected,
+            )
         )
         self._login_tasks.add(task)
         task.add_done_callback(self._login_tasks.discard)
@@ -957,6 +991,8 @@ class TetherApp:
         login: Any,
         connector: IMConnector,
         conv: Conversation,
+        *,
+        already_connected: bool = False,
     ) -> None:
         async def on_qr(png: bytes | None, content: str) -> None:
             if png:
@@ -992,6 +1028,22 @@ class TetherApp:
                 conv,
                 f"❌ Login rejected: {exc.reason}\nplatform id: `{exc.bot_id or '?'}`",
             )
+        except WeChatQRExpired:
+            if already_connected or getattr(target, "connected", None) is True:
+                # This QR was only a shortcut back to the existing chat. The
+                # API does not report whether the user scanned it, so expiry is
+                # normal and must not produce a login-expired warning.
+                log.info(
+                    "wechat_existing_chat_qr_expired",
+                    bot=getattr(target, "account", None) or "default",
+                )
+            else:
+                await self._notice(
+                    connector,
+                    conv,
+                    "⌛ The QR code has expired. Please run `/login wechat` "
+                    "again to get a new one.",
+                )
         except WeChatVerifyCodeRequired:
             await self._notice(
                 connector,
@@ -1077,25 +1129,18 @@ class TetherApp:
             await self._notice(connector, conv, body)
 
     async def _agentd_config(self, base_url: str, *, all_: bool) -> dict[str, Any]:
-        """The agentd server this conversation uses, or its full config with ``all_``.
-
-        Bounded by a timeout so a hung agentd cannot stall the reply.
-        """
+        """Safe backend description/config summary for this conversation."""
         client = self.router.client_for_base(base_url)
 
         try:
-            info = await asyncio.wait_for(client.get_info(), timeout=5.0)
-            if all_:
-                config = await asyncio.wait_for(client.get_config(), timeout=5.0)
-                return {"base_url": base_url, "info": info, "config": config}
+            description = await asyncio.wait_for(client.describe(), timeout=5.0)
+            summary = await asyncio.wait_for(client.config_summary(), timeout=5.0)
 
-            name = _current_server_name(info)
-            config = await asyncio.wait_for(
-                client.get_config(section="servers", server=name), timeout=5.0
-            )
-            servers = config.get("config", {}).get("servers") or []
-
-            return {"base_url": base_url, "info": info, "servers": servers}
+            return {
+                "base_url": base_url,
+                "info": asdict(description),
+                "config": asdict(summary),
+            }
         except (AgentError, TimeoutError) as exc:
             code = exc.code if isinstance(exc, AgentError) else "timeout"
             return {"base_url": base_url, "error": str(code)}
@@ -1162,6 +1207,101 @@ class TetherApp:
 
         log.info("config_reloaded")
 
+    def _rich_form_allowed(self, route: Route) -> bool:
+        mode = self.config.permissions.rich_forms
+        if mode == "off":
+            return False
+        if mode == "all":
+            return True
+        if route.conversation.is_group or not route.active_turn_sender:
+            return False
+        return route.active_turn_sender in self.config.admins_for(
+            route.conversation.channel, route.conversation.account
+        )
+
+    async def _handle_form_event(self, event: Event) -> None:
+        sid = event.session_id
+        form = getattr(event.data, "form", None)
+        if not sid or not isinstance(form, FormSpec):
+            return
+        route = await self.router.get_by_session(sid)
+        if route is None or not self._rich_form_allowed(route):
+            log.info("rich_form_ignored", session=sid, form=form.id)
+            return
+        await self._register_form(route, form)
+
+    async def _register_form(self, route: Route, form: FormSpec) -> None:
+        existing = route.pending_interactions.get(form.id)
+        if existing is not None:
+            return
+
+        route.pending_interactions[form.id] = hitl.make_pending(
+            "form",
+            owner=route.active_turn_sender,
+            scope=self.config.group.hitl_scope if route.conversation.is_group else "initiator",
+            request_id=form.id,
+            form=asdict(form),
+        )
+        await self.router.save(route)
+
+        connector = self._connector_for(
+            route.conversation.channel, route.conversation.account
+        )
+        if connector is not None:
+            await self._notice(connector, route.conversation, hitl.form_text(form))
+
+    async def _maybe_answer_form(
+        self, route: Route, msg: InboundMessage, connector: IMConnector
+    ) -> bool:
+        pending_forms = [
+            (rid, pending)
+            for rid, pending in route.pending_interactions.items()
+            if pending.kind == "form"
+            and hitl.is_authorized(
+                pending,
+                msg.sender,
+                route.conversation,
+                self.config,
+                active_turn_sender=route.active_turn_sender,
+            )
+        ]
+        if not pending_forms:
+            return False
+
+        text = msg.text.strip()
+        for rid, pending in pending_forms:
+            values: dict[str, Any] | None = _form_choice_answer(pending.form, text)
+            if values is None and text.startswith("{"):
+                try:
+                    parsed = json.loads(text)
+                except ValueError:
+                    parsed = None
+                if isinstance(parsed, dict):
+                    values = dict(parsed)
+            elif values is None and isinstance(pending.form, dict):
+                fields = pending.form.get("fields") or []
+                if len(fields) == 1 and isinstance(fields[0], dict):
+                    field = fields[0]
+                    key = str(field.get("key") or "value")
+                    if field.get("type") == "multiselect":
+                        values = {key: [text]}
+                    elif field.get("type") == "boolean":
+                        values = {key: text.lower() in {"1", "true", "yes", "y", "是"}}
+                    else:
+                        values = {key: text}
+
+            if values is None:
+                return False
+
+            client = self.router.client_for(route)
+            await client.reply_form(route.session_id, rid, FormAnswer(values=values))
+            route.pending_interactions.pop(rid, None)
+            await self.router.save(route)
+            await self._notice(connector, route.conversation, "✅ Form submitted.")
+            return True
+
+        return False
+
     async def _maybe_answer_pending(
         self, route: Route, msg: InboundMessage, connector: IMConnector
     ) -> bool:
@@ -1176,6 +1316,8 @@ class TetherApp:
         client = self.router.client_for(route)
 
         for rid, pending in list(route.pending_interactions.items()):
+            if pending.kind == "form":
+                continue
             if not hitl.is_authorized(
                 pending,
                 msg.sender,
@@ -1223,7 +1365,7 @@ class TetherApp:
         return accepted
 
     # -- SSE consumption + reconciliation ----------------------------------
-    async def _consume_events(self, base_url: str, client: HttpAgentClient) -> None:
+    async def _consume_events(self, base_url: str, client: AgentBackend) -> None:
         backoff = self.config.server.sse_reconnect_ms / 1000.0
         failures = 0
 
@@ -1257,6 +1399,7 @@ class TetherApp:
             await asyncio.sleep(backoff)
 
             backoff = min(backoff * 2, 30.0)
+
             try:
                 await self._reconcile(base_url, client)
             except Exception:  # noqa: BLE001 - reconnect/reconcile must not kill the stream loop
@@ -1266,6 +1409,16 @@ class TetherApp:
         sid = event.session_id
         if not sid:
             return
+
+        if event.type == FORM_ASKED:
+            await self._handle_form_event(event)
+
+        if event.type == TITLE_UPDATED:
+            title = getattr(event.data, "title", None)
+            route = await self.router.get_by_session(sid)
+            if route is not None and title and route.conversation.name != title:
+                route.conversation = replace(route.conversation, name=str(title))
+                await self.router.save(route)
 
         engine = self._turns.get(sid)
         if engine is not None:
@@ -1284,7 +1437,7 @@ class TetherApp:
             return
 
         if event.type == SESSION_STATUS:
-            status = (event.data or {}).get("status") or {}
+            status = getattr(event.data, "status", None)
             log.debug("status_without_turn", session=sid, status=status)
 
     async def _watchdog_loop(self) -> None:
@@ -1344,7 +1497,7 @@ class TetherApp:
                     # transcript before closing the turn; finishing without it
                     # would flush an empty or half-written answer.
                     text, media = await self._read_turn_snapshot(
-                        self.router.client_for_base(base), engine.route.session_id
+                        self.router.client_for(engine.route), engine.route.session_id
                     )
                     self._seed_engine_snapshot(engine, text, media)
                     await engine.finish()
@@ -1358,14 +1511,14 @@ class TetherApp:
             engine.route.last_seq = seq
             engine.cursor_dirty = True
 
-    async def _replay_engine(self, client: HttpAgentClient, engine: TurnEngine) -> bool:
+    async def _replay_engine(self, client: AgentBackend, engine: TurnEngine) -> bool:
         """Replay durable events missed while the global SSE was disconnected.
 
         Returns True when the replay itself ended the turn.
         """
         try:
             events = await client.session_replay(
-                engine.route.session_id, after=engine.last_seq
+                engine.route.session_id, after_seq=engine.last_seq
             )
         except AgentError as exc:
             log.warning(
@@ -1389,7 +1542,7 @@ class TetherApp:
 
         return False
 
-    async def _reconcile(self, base_url: str, client: HttpAgentClient) -> None:
+    async def _reconcile(self, base_url: str, client: AgentBackend) -> None:
         """Recover live state after the event stream reconnects."""
         base = base_url.rstrip("/")
         finished: set[str] = set()
@@ -1398,7 +1551,9 @@ class TetherApp:
                 continue
 
             try:
-                ended = await self._replay_engine(client, engine)
+                ended = await self._replay_engine(
+                    self.router.client_for(engine.route), engine
+                )
             except Exception:  # noqa: BLE001 - one bad turn must not stop reconcile
                 log.exception("session_replay_handler_failed", session=engine.route.session_id)
                 continue
@@ -1421,7 +1576,7 @@ class TetherApp:
             if route is None:
                 continue
 
-            await self._recover_active(client, sid, route)
+            await self._recover_active(self.router.client_for(route), sid, route)
 
         # A turn can finish while the bridge is disconnected, so it no longer
         # appears in active_sessions. Recover the durable final transcript for
@@ -1440,30 +1595,32 @@ class TetherApp:
             if not engine.activated_at or now - engine.activated_at < _WATCHDOG_GRACE_S:
                 continue
 
-            await self._recover_active(client, sid, engine.route)
+            await self._recover_active(
+                self.router.client_for(engine.route), sid, engine.route
+            )
 
             try:
                 await engine.finish()
             except Exception:  # noqa: BLE001 - one bad turn must not stop reconcile
                 log.exception("reconcile_finish_failed", session=sid)
 
-        await self._restore_hitl(client, clear_stale=True)
+        await self._restore_hitl(
+            client,
+            locations=self.router.locations_for_base(base),
+            clear_stale=True,
+        )
 
     async def _read_turn_snapshot(
-        self, client: HttpAgentClient, sid: str
+        self, client: AgentBackend, sid: str
     ) -> tuple[str | None, list[RichMedia]]:
-        """Read the durable transcript for a session, or ``(None, [])`` on failure."""
+        """Read the backend's current-turn snapshot, or ``(None, [])`` on failure."""
         try:
-            messages = await client.messages(sid)
+            snapshot = await client.turn_snapshot(sid)
         except AgentError as exc:
-            log.warning("reconcile_message_failed", session=sid, error=exc.code)
+            log.warning("reconcile_snapshot_failed", session=sid, error=exc.code)
             return None, []
 
-        # Recover only the current turn. Using the whole transcript would
-        # re-send text/media from earlier turns when this turn is tool-only or
-        # has no text of its own.
-        current = _current_turn_messages(messages)
-        return assistant_text(current), tool_media(current)
+        return snapshot.text, snapshot.media
 
     def _seed_engine_snapshot(
         self, engine: TurnEngine, text: str | None, media: list[RichMedia]
@@ -1479,7 +1636,7 @@ class TetherApp:
                 engine.media.append(item)
                 known.add(key)
 
-    async def _recover_active(self, client: HttpAgentClient, sid: str, route: Route) -> None:
+    async def _recover_active(self, client: AgentBackend, sid: str, route: Route) -> None:
         """Recover text/media of an in-flight turn (live deltas were lost)."""
         text, media = await self._read_turn_snapshot(client, sid)
         engine = self._turns.get(sid)
@@ -1496,20 +1653,27 @@ class TetherApp:
             await self._notice(connector, route.conversation, text)
 
     async def _restore_hitl(
-        self, client: HttpAgentClient, *, clear_stale: bool = True
+        self,
+        client: AgentBackend,
+        *,
+        locations: list[str] | None = None,
+        clear_stale: bool = True,
     ) -> None:
         """Restore pending interactions and surface any we never saw."""
-        perms, questions = [], []
+        perms, questions, forms = [], [], []
 
         try:
-            perms = await client.list_permissions()
-            questions = await client.list_questions()
+            perms = await client.list_permissions(locations=locations)
+            questions = await client.list_questions(locations=locations)
+            list_forms = getattr(client, "list_forms", None)
+            if self.config.permissions.rich_forms != "off" and callable(list_forms):
+                forms = await list_forms(locations=locations)
         except AgentError as exc:
             log.warning("reconcile_hitl_failed", error=exc.code)
             return
 
         if clear_stale:
-            await self._clear_stale_pending(client, perms, questions)
+            await self._clear_stale_pending(client, perms, questions, forms)
 
         for perm in perms:
             route = await self.router.get_by_session(perm.session_id)
@@ -1550,6 +1714,14 @@ class TetherApp:
                 else:
                     await self._notice(connector, route.conversation, text)
 
+        for form in forms:
+            if form.metadata.get("kind") == "question":
+                continue
+            route = await self.router.get_by_session(form.session_id)
+            if route is None or not self._rich_form_allowed(route):
+                continue
+            await self._register_form(route, form)
+
     async def _flush_cursors(self) -> None:
         """Periodically persist active-turn replay cursors.
 
@@ -1569,17 +1741,22 @@ class TetherApp:
 
     async def _clear_stale_pending(
         self,
-        client: HttpAgentClient,
+        client: AgentBackend,
         perms: list,
         questions: list,
+        forms: list | None = None,
     ) -> None:
         """Remove Route pending entries the backend no longer has.
 
         Only called on an explicit reconnect/startup reconcile, never on a
         single transient poll.
         """
-        backend_ids = {perm.id for perm in perms} | {question.id for question in questions}
-        base = client.base_url.rstrip("/")
+        backend_ids = (
+            {perm.id for perm in perms}
+            | {question.id for question in questions}
+            | {form.id for form in (forms or [])}
+        )
+        base = str(getattr(client, "base_url", client.endpoint_id)).rstrip("/")
 
         for stored_route in await self.store.all():
             if stored_route.server_base.rstrip("/") != base:
@@ -1646,7 +1823,11 @@ class TetherApp:
                         # Periodic polling only adds/surfaces interactions. A
                         # destructive stale-clear runs on reconnect, not on a
                         # single empty poll (backend startup can be transient).
-                        await self._restore_hitl(client, clear_stale=False)
+                        await self._restore_hitl(
+                            client,
+                            locations=self.router.locations_for_base(_base),
+                            clear_stale=False,
+                        )
                     except Exception:  # noqa: BLE001
                         log.exception("hitl_poll_failed")
 
@@ -1821,10 +2002,19 @@ class TetherApp:
             except Exception:  # noqa: BLE001
                 agentd[base] = False
 
+        backends = {}
+        for endpoint in self.config.server_endpoints():
+            try:
+                client = self.router.client_for_endpoint(endpoint)
+                backends[endpoint.id] = await client.health()
+            except Exception:  # noqa: BLE001
+                backends[endpoint.id] = False
+
         connectors = {name: c.connected for name, c in self.connectors.items()}
         ok = (
             bool(self.connectors)
             and all(agentd.values())
+            and all(backends.values())
             and all(state is not False for state in connectors.values())
         )
 
@@ -1833,6 +2023,7 @@ class TetherApp:
             "uptime_s": round(metrics.uptime_s(), 1),
             "connectors": connectors,
             "agentd": agentd,
+            "backends": backends,
             "active_turns": len(self._turns),
             "leases": self.router.leases.count,
         }
@@ -1840,6 +2031,34 @@ class TetherApp:
 
 def _ms_since(started: float) -> int:
     return int((time.monotonic() - started) * 1000)
+
+
+def _form_choice_answer(form: Any, text: str) -> dict[str, Any] | None:
+    if not isinstance(form, dict):
+        return None
+    fields = form.get("fields") or []
+    if len(fields) != 1 or not isinstance(fields[0], dict):
+        return None
+    field = fields[0]
+    options = field.get("options") or []
+    if not options:
+        return None
+    key = str(field.get("key") or "value")
+    indexes = [part.strip() for part in text.replace("，", ",").split(",") if part.strip()]
+    if not indexes or not all(part.isdigit() for part in indexes):
+        return None
+    chosen: list[str] = []
+    for part in indexes:
+        index = int(part) - 1
+        if not 0 <= index < len(options):
+            return None
+        option = options[index]
+        if not isinstance(option, dict):
+            return None
+        chosen.append(str(option.get("value") or option.get("label") or ""))
+    if field.get("type") == "multiselect":
+        return {key: chosen}
+    return {key: chosen[0]} if chosen else None
 
 
 def _interaction_label(value: dict[str, Any]) -> str:
@@ -2011,17 +2230,17 @@ def _conn_state(state: bool | str | None) -> str:
     return "up" if state else "down"
 
 
-def _agentd_line(base: str, info: dict[str, Any] | None) -> str:
-    """The `/status` ``agentd:`` line, with version/pid when reachable."""
+def _agentd_line(base: str, info: BackendDescription | None) -> str:
+    """The `/status` backend line, with version/pid when reachable."""
     if info is None:
         return f"agentd: {base} (unreachable)"
 
     bits: list[str] = []
-    if info.get("version"):
-        bits.append(f"v{info['version']}")
+    if info.version:
+        bits.append(f"v{info.version}")
 
-    if info.get("pid"):
-        bits.append(f"pid {info['pid']}")
+    if info.pid:
+        bits.append(f"pid {info.pid}")
 
     suffix = f" · {' · '.join(bits)}" if bits else ""
 
@@ -2068,69 +2287,6 @@ def _media_key(media: RichMedia) -> tuple:
         len(media.data or b""),
         hashlib.sha1(media.data).hexdigest() if media.data else None,
     )
-
-
-def _current_turn_messages(messages: list[dict]) -> list[dict]:
-    """Messages after the latest user message (or the whole list if none)."""
-    last_user = -1
-    for index, message in enumerate(messages):
-        if message.get("type") == "user":
-            last_user = index
-
-    return messages[last_user + 1 :] if last_user >= 0 else messages
-
-
-def _durable_seq(event: Event) -> int | None:
-    durable = event.durable if isinstance(event.durable, dict) else None
-    if durable is None:
-        return None
-
-    value = durable.get("seq")
-    if isinstance(value, bool) or not isinstance(value, (int, str)):
-        return None
-
-    try:
-        return int(value)
-    except ValueError:
-        return None
-
-
-def assistant_text(messages: list[dict]) -> str | None:
-    """Final text of the latest assistant message in a transcript."""
-    for message in reversed(messages):
-        if message.get("type") != "assistant":
-            continue
-
-        parts = [
-            str(part.get("text", ""))
-            for part in (message.get("content") or [])
-            if part.get("type") == "text"
-        ]
-
-        text = "".join(parts)
-        if text:
-            return text
-
-    return None
-
-
-def tool_media(messages: list[dict]) -> list[RichMedia]:
-    """File parts produced by tool calls within a transcript."""
-    from tether.engine.media_egress import extract_file_parts
-
-    out: list[RichMedia] = []
-    for message in messages:
-        if message.get("type") != "assistant":
-            continue
-
-        for part in message.get("content") or []:
-            if part.get("type") != "tool":
-                continue
-            state = part.get("state") or {}
-            out.extend(extract_file_parts(state.get("content")))
-            out.extend(extract_file_parts(state.get("attachments")))
-
-    return out
 
 
 def _title(msg: InboundMessage) -> str | None:

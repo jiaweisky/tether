@@ -116,11 +116,11 @@ def test_events_parse_sse():
     events = asyncio.run(run())
     assert [e.type for e in events] == [
         "server.connected",
-        "session.next.text.delta",
-        "session.status",
+        "text.delta",
+        "turn.status",
     ]
     assert events[1].session_id == "ses_1"
-    assert events[1].data["delta"] == "hi"
+    assert events[1].data.delta == "hi"
 
 
 def test_create_session_parses_model_reference():
@@ -202,7 +202,8 @@ def test_discovery_endpoints_and_shapes():
         assert await client.get_config(section="servers", server="s1") == {
             "config": {"x": 1}
         }
-        assert await client.get_info() == {"version": "1.2", "pid": 7}
+        description = await client.describe()
+        assert (description.version, description.pid) == ("1.2", 7)
         agents = await client.list_agents()
         assert [(a.id, a.description, a.mode, a.hidden, a.model, a.backend) for a in agents] == [
             ("build", "builder", "primary", False, "m", "go"),
@@ -218,7 +219,7 @@ def test_discovery_endpoints_and_shapes():
         ]
         tools = await client.agent_tools("build")
         assert [(t.name, t.description) for t in tools] == [("read", "r")]
-        assert await client.active_sessions() == {"ses_1": {"type": "running"}}
+        assert await client.active_sessions() == {"ses_1"}
 
     asyncio.run(run())
     assert seen["config"] == {"section": "servers", "server": "s1"}
@@ -307,7 +308,7 @@ def test_prompt_payload_minimal_and_full():
         return await client.prompt("ses_1", prompt="ignored", files=[], id="")
 
     result = asyncio.run(run())
-    assert result == {"queued": True}
+    assert result is None
     assert payloads == [
         {"prompt": "hi", "delivery": "queue"},
         {
@@ -421,6 +422,8 @@ def test_interaction_lists_and_replies():
         assert len(await client.session_permissions("ses_1")) == 1
         qs = await client.list_questions()
         assert qs[0].id == "q1" and qs[0].questions[0].multiple is True
+        assert qs[0].questions[0].key == "H"
+        assert qs[0].questions[0].options[0].value == "A"
         assert len(await client.session_questions("ses_1")) == 1
         await client.reply_permission("ses_1", "p1", reply="always", message="ok")
         await client.reply_question("ses_1", "q1", [["A", "B"]])
@@ -471,7 +474,7 @@ def test_error_mapping_uses_error_object_and_plain_body():
 
     client = make(plain_error)
     with pytest.raises(AgentError) as exc:
-        asyncio.run(client.get_info())
+        asyncio.run(client.describe())
     assert (exc.value.code, exc.value.status) == ("internal", 500)
 
 
@@ -495,7 +498,7 @@ def test_events_support_durable_session_fallback_and_error_frame():
 
     events = asyncio.run(run())
     assert [event.type for event in events] == [
-        "session.next.tool.progress",
+        "tool.progress",
         "server.connected",
     ]
     assert events[0].session_id == "ses_durable"
@@ -564,13 +567,98 @@ def test_session_replay_pages_durable_history_and_parses_events():
         return httpx.Response(200, json={"data": rows})
 
     client = make_client(handler)
-    events = asyncio.run(client.session_replay("ses_1", after=-1, limit=2))
+    events = asyncio.run(client.session_replay("ses_1", after_seq=-1, limit=2))
     assert [event.type for event in events] == [
         "session.created",
-        "session.next.text.delta",
-        "session.next.text.ended",
+        "text.delta",
+        "text.ended",
     ]
     assert pages == [
         {"after": "-1", "limit": "2"},
         {"after": "1", "limit": "2"},
     ]
+
+
+def test_turn_snapshot_scopes_to_current_turn():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"type": "user", "content": [{"type": "text", "text": "old"}]},
+                    {"type": "assistant", "content": [{"type": "text", "text": "old answer"}]},
+                    {"type": "user", "content": [{"type": "text", "text": "new"}]},
+                    {
+                        "type": "assistant",
+                        "content": [
+                            {"type": "text", "text": "new answer"},
+                            {
+                                "type": "tool",
+                                "state": {
+                                    "content": [
+                                        {
+                                            "type": "file",
+                                            "uri": "data:image/png;base64,AA",
+                                            "mime": "image/png",
+                                            "name": "x.png",
+                                        }
+                                    ]
+                                },
+                            },
+                        ],
+                    },
+                ]
+            },
+        )
+
+    client = make_client(handler)
+    snapshot = asyncio.run(client.turn_snapshot("ses_1"))
+    assert snapshot.text == "new answer"
+    assert [item.name for item in snapshot.media] == ["x.png"]
+
+
+def test_backend_profile_and_registry():
+    from tether.agent.registry import create_backend
+    from tether.config import AuthConfig, ServerEndpoint
+
+    endpoint = ServerEndpoint(
+        id="main",
+        name="main",
+        backend="agentd",
+        base_url="http://test",
+        auth=AuthConfig(type="bearer", token="tok"),
+        working_directory=None,
+        default_agent=None,
+        default_model=None,
+    )
+    backend = create_backend(endpoint)
+    assert backend.profile.backend_id == "agentd"
+    assert backend.profile.supports_session_replay is True
+    assert backend.endpoint_id == "main"
+
+
+def test_describe_and_config_summary():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/info":
+            return httpx.Response(200, json={"data": {"version": "1", "pid": 2}})
+        if request.url.path == "/api/config":
+            return httpx.Response(
+                200,
+                json={"data": {"config": {"default_agent": "build", "default_model": "m"}}},
+            )
+        return httpx.Response(404)
+
+    client = make_client(handler)
+
+    async def run():
+        description = await client.describe()
+        summary = await client.config_summary()
+        return description, summary
+
+    description, summary = asyncio.run(run())
+    assert (description.backend_id, description.version, description.pid) == (
+        "agentd",
+        "1",
+        2,
+    )
+    assert (summary.default_agent, summary.default_model) == ("build", "m")

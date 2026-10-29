@@ -7,7 +7,7 @@ import pytest
 from tether.app import TetherApp
 from tether.config import Config
 from tether.connectors.fake import FakeConnector
-from tether.connectors.wechat.login import WeChatLoginRejected
+from tether.connectors.wechat.login import WeChatLoginRejected, WeChatQRExpired
 from tether.connectors.wechat.storage import WeChatCredential
 from tether.models import Conversation, InboundMessage, Sender
 
@@ -15,10 +15,11 @@ from tether.models import Conversation, InboundMessage, Sender
 class DummyWeChat:
     name = "wechat"
 
-    def __init__(self, account: str, result) -> None:
+    def __init__(self, account: str, result, *, connected: bool = False) -> None:
         self.account = account
         self.instance_id = f"wechat@{account}"
         self.result = result
+        self.connected = connected
 
     async def login(self, *, on_qr):
         await on_qr(b"png-bytes", "qr-content")
@@ -86,6 +87,54 @@ async def test_run_wechat_login_reports_rejection_with_platform_id(tmp_path):
     text = initiator.last_text()
     assert "already bound" in text
     assert "bot-x" in text
+
+
+@pytest.mark.asyncio
+async def test_run_wechat_login_reports_expired_qr_in_english(tmp_path):
+    app = _app(tmp_path)
+    initiator = FakeConnector()
+    conv, _ = _msg("")
+    target = DummyWeChat("assistant", WeChatQRExpired("expired"))
+    await app._run_wechat_login(target, target.login, initiator, conv)
+    text = initiator.last_text()
+    assert "QR code has expired" in text
+    assert "/login wechat" in text
+    assert "still logged in" not in text
+
+
+@pytest.mark.asyncio
+async def test_run_wechat_login_ignores_expiry_when_already_connected(tmp_path):
+    app = _app(tmp_path)
+    initiator = FakeConnector()
+    conv, _ = _msg("")
+    target = DummyWeChat("assistant", WeChatQRExpired("expired"), connected=True)
+    await app._run_wechat_login(
+        target, target.login, initiator, conv, already_connected=True
+    )
+    texts = [message["text"] for message in initiator.messages if message["kind"] == "text"]
+    assert not any("QR code has expired" in text for text in texts)
+
+
+@pytest.mark.asyncio
+async def test_login_command_still_shows_qr_when_already_connected(tmp_path):
+    app = _app(tmp_path)
+    initiator = FakeConnector()
+    app.connectors["wechat@assistant"] = DummyWeChat(
+        "assistant",
+        WeChatCredential(token="t", base_url="https://api", bot_id="bot-a"),
+        connected=True,
+    )
+
+    conv, sender = _msg("/login wechat", sender="admin")
+    await app._handle_login(_inbound(conv, sender, "wechat"), initiator, "wechat")
+    text = initiator.last_text()
+    assert "already logged in" in text
+    assert "reopens the existing WeChat conversation" in text
+
+    tasks = list(app._login_tasks)
+    await asyncio.gather(*tasks)
+    assert any(message["kind"] == "media" for message in initiator.messages)
+    assert "bot-a" in initiator.last_text()
 
 
 @pytest.mark.asyncio

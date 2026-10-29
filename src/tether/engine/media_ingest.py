@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass, field
-from typing import Any
 
+from tether.agent.base import PromptFile
 from tether.config import Config
 from tether.connector import IMConnector
 from tether.models import Attachment, MediaBytes, normalize_media_kind
@@ -24,7 +24,7 @@ log = get_logger("tether.media")
 
 @dataclass
 class IngestResult:
-    files: list[dict[str, Any]] = field(default_factory=list)
+    files: list[PromptFile] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
     def note_text(self) -> str:
@@ -83,6 +83,6 @@ class MediaIngest:
             return None
 
 
-def _inline_file(data: bytes, mime: str, name: str | None) -> dict[str, Any]:
+def _inline_file(data: bytes, mime: str, name: str | None) -> PromptFile:
     uri = f"data:{mime};base64,{base64.b64encode(data).decode()}"
-    return {"uri": uri, "mime": mime, "name": name}
+    return PromptFile(uri=uri, mime=mime, name=name)

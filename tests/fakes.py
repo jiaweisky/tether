@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from tether.agent.agentd.messages import snapshot_messages
+from tether.agent.base import BackendDescription, ConfigSummary, TurnSnapshot
 from tether.agent.errors import AgentError
 from tether.agent.events import (
     AgentInfo,
@@ -20,6 +22,7 @@ from tether.agent.events import (
 class FakeAgentClient:
     def __init__(self, base_url: str = "http://127.0.0.1:8787", token: str | None = None) -> None:
         self.base_url = base_url
+        self.endpoint_id = base_url
         self.token = token
         self.sessions: dict[str, SessionInfo] = {}
         self.prompts: list[dict[str, Any]] = []
@@ -27,6 +30,8 @@ class FakeAgentClient:
         self.deleted: list[str] = []
         self.permission_replies: list[tuple[str, str, str]] = []
         self.question_replies: list[tuple[str, str, list[list[str]]]] = []
+        self.form_replies: list[tuple[str, str, dict]] = []
+        self.created_permissions: list[list] = []
         self.rejected_questions: list[tuple[str, str]] = []
         self._counter = 0
         self._permissions: list[PendingPermission] = []
@@ -46,28 +51,56 @@ class FakeAgentClient:
         return None
 
     # discovery
-    async def list_agents(self):
+    async def health(self):
+        return True
+
+    async def list_agents(self, *, location=None):
         return list(self.agents)
 
-    async def list_models(self):
+    async def list_models(self, *, location=None):
         return self.models
 
-    async def agent_tools(self, agent: str):
+    async def agent_tools(self, agent: str, *, location=None):
         return self.tools
 
     async def get_config(self, *, section=None, server=None):
         return {"schemaVersion": 1, "sources": [], "config": {"models": [], "servers": []}}
 
-    async def get_info(self):
-        return {"version": "test", "pid": 1, "servers": ["fake"]}
+    async def describe(self):
+        return BackendDescription(
+            backend_id="agentd",
+            endpoint_id=self.base_url,
+            version="test",
+            pid=1,
+            urls=["fake"],
+        )
+
+    async def config_summary(self, *, location=None):
+        return ConfigSummary(
+            default_agent="build",
+            default_model="m",
+            providers=[],
+            agents=len(self.agents),
+            models=len(self.models),
+            locations=[self.base_url],
+        )
 
     async def active_sessions(self):
-        return {sid: {"type": "running"} for sid in self.active}
+        return set(self.active)
 
     # sessions
-    async def create_session(self, *, agent, model=None, title=None):
+    async def create_session(
+        self, *, agent, model=None, title=None, location=None, permissions=None
+    ):
         self._counter += 1
-        info = SessionInfo(id=f"ses_{self._counter}", agent=agent, model=model, title=title)
+        self.created_permissions.append(list(permissions or []))
+        info = SessionInfo(
+            id=f"ses_{self._counter}",
+            agent=agent,
+            model=model,
+            title=title,
+            location=location,
+        )
         self.sessions[info.id] = info
         return info
 
@@ -113,8 +146,14 @@ class FakeAgentClient:
     async def history(self, sid, *, after=0, limit=200):
         return []
 
-    async def session_replay(self, sid, *, after=-1, limit=100):
-        self.replay_requests.append((sid, after))
+    async def turn_snapshot(self, sid, *, after_message_id=None):
+        text, media = snapshot_messages(
+            self.message_store.get(sid, []), after_message_id=after_message_id
+        )
+        return TurnSnapshot(text=text, media=media)
+
+    async def session_replay(self, sid, *, after_seq=-1, limit=100):
+        self.replay_requests.append((sid, after_seq))
         events = self.replay_events.get(sid, [])
         out = []
         for event in events:
@@ -123,7 +162,7 @@ class FakeAgentClient:
                 seq = int(durable.get("seq"))
             except (TypeError, ValueError):
                 seq = None
-            if seq is None or seq > after:
+            if seq is None or seq > after_seq:
                 out.append(event)
         return out
 
@@ -140,17 +179,20 @@ class FakeAgentClient:
         self.question_replies.append((sid, rid, answers))
         self._questions = [q for q in self._questions if q.id != rid]
 
+    async def reply_form(self, sid, rid, answer):
+        self.form_replies.append((sid, rid, answer.values))
+
     async def reject_question(self, sid, rid):
         self.rejected_questions.append((sid, rid))
         self._questions = [q for q in self._questions if q.id != rid]
 
-    async def list_permissions(self):
+    async def list_permissions(self, *, locations=None):
         return list(self._permissions)
 
     async def session_permissions(self, sid):
         return [p for p in self._permissions if p.session_id == sid]
 
-    async def list_questions(self):
+    async def list_questions(self, *, locations=None):
         return list(self._questions)
 
     async def session_questions(self, sid):

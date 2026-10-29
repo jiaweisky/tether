@@ -21,7 +21,7 @@ async def _app(tmp_path) -> TetherApp:
         config,
         db_path=str(tmp_path / "t.db"),
         connectors=[conn],
-        client_factory=lambda base, token: FakeAgentClient(),
+        client_factory=lambda _endpoint: FakeAgentClient(),
     )
     await app.store.connect()
     app.connectors[conn.name] = conn
@@ -39,6 +39,7 @@ async def test_metrics_endpoint_serves_health_and_metrics(tmp_path):
             assert health.status_code in (200, 503)
             body = health.json()
             assert "connectors" in body and "uptime_s" in body and "agentd" in body
+            assert body["backends"] == {"default": True}
 
             metrics = await client.get(f"http://127.0.0.1:{app.metrics_port}/metrics")
             assert metrics.status_code == 200
@@ -65,7 +66,7 @@ async def test_prolonged_sse_disconnect_raises_alert(tmp_path):
         config,
         db_path=str(tmp_path / "t.db"),
         connectors=[conn],
-        client_factory=lambda base, token: _FailingEvents(),
+        client_factory=lambda _endpoint: _FailingEvents(),
     )
     await app.store.connect()
     app._running = True

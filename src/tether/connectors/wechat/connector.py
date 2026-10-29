@@ -666,7 +666,6 @@ class WeChatConnector(BaseConnector):
             raise
         credential = await service.wait(
             session,
-            on_refresh=show,
             request_verify_code=request_verify_code,
         )
         await self._apply_credential(credential, start_polling=self.enabled)

@@ -36,8 +36,8 @@ async def test_attachment_becomes_an_inline_file_part():
     result = await ingest.ingest([att])
     assert result.files
     part = result.files[0]
-    assert part["uri"].startswith("data:image/png;base64,")
-    assert part["name"] == "a.png" and part["mime"] == "image/png"
+    assert part.uri.startswith("data:image/png;base64,")
+    assert part.name == "a.png" and part.mime == "image/png"
 
 
 @pytest.mark.asyncio
@@ -66,4 +66,4 @@ async def test_downloaded_filename_is_used():
     ingest = _ingest(FakeConnector(b"x", download_name="季度报表.xlsx"))
     att = Attachment(kind="file", name=None, handle={"url": "x"})
     result = await ingest.ingest([att])
-    assert result.files[0]["name"] == "季度报表.xlsx"
+    assert result.files[0].name == "季度报表.xlsx"

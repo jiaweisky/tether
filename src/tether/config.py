@@ -36,18 +36,42 @@ CowMode = Literal["auto", "reflink", "clonefile"]
 PermissionAction = Literal["once", "always", "reject", "ask"]
 
 
+class AuthConfig(BaseModel):
+    type: Literal["bearer", "basic"] = "bearer"
+    token: str | None = None
+    username: str | None = None
+    password: str | None = None
+
+
 class ServerPoolEntry(BaseModel):
+    id: str | None = None
     name: str
+    backend: Literal["agentd", "opencode"] | None = None
     base_url: str
     token: str | None = None
+    auth: AuthConfig | None = None
     working_directory: str | None = None
     default_agent: str | None = None
     default_model: str | None = None
 
 
+@dataclass(frozen=True)
+class ServerEndpoint:
+    id: str
+    name: str
+    backend: str
+    base_url: str
+    auth: AuthConfig | None
+    working_directory: str | None
+    default_agent: str | None
+    default_model: str | None
+
+
 class ServerConfig(BaseModel):
+    backend: Literal["agentd", "opencode"] = "agentd"
     base_url: str = "http://127.0.0.1:8787"
     token: str | None = None
+    auth: AuthConfig | None = None
     request_timeout_s: float = 30.0
     sse_reconnect_ms: int = 1000
     # The single base's working directory, when it is known (used for the media
@@ -100,6 +124,10 @@ class ProjectsConfig(BaseModel):
     # Either everyone shares one project, or each conversation leases its own
     # view of the source project.
     mode: Isolation = "shared"
+    # Isolated-project backend. agentd uses its control API; opencode uses
+    # per-conversation worktrees on the endpoint below.
+    backend: Literal["agentd", "opencode"] = "agentd"
+    endpoint: str | None = None
     # Isolation implementation, used when mode=isolated (agentd's control API).
     isolation: IsolationImpl = "worktree"
     # Parent directory for created views and per-instance state roots.
@@ -247,6 +275,9 @@ class PermissionsConfig(BaseModel):
     timeout_s: int = 300
     fallback: Literal["reject", "allow"] = "reject"
     poll_interval_s: int = 30
+    # Non-question OpenCode forms (provider auth, MCP elicitation, ...).
+    # off: never surface; admins: only direct chats started by an admin; all: any.
+    rich_forms: Literal["off", "admins", "all"] = "off"
 
     def action_for(self, action: str) -> PermissionAction:
         return self.auto.get(action, self.default)
@@ -489,12 +520,57 @@ class Config(BaseModel):
 
         return list(self.group.admins)
 
+    def server_endpoints(self) -> list[ServerEndpoint]:
+        """Resolved endpoints, preserving legacy single-base behaviour."""
+        if self.server.pool:
+            endpoints: list[ServerEndpoint] = []
+            for entry in self.server.pool:
+                auth = entry.auth
+                if auth is None and entry.token:
+                    auth = AuthConfig(type="bearer", token=entry.token)
+                endpoints.append(
+                    ServerEndpoint(
+                        id=entry.id or entry.name,
+                        name=entry.name,
+                        backend=entry.backend or self.server.backend,
+                        base_url=entry.base_url.rstrip("/"),
+                        auth=auth,
+                        working_directory=entry.working_directory,
+                        default_agent=entry.default_agent,
+                        default_model=entry.default_model,
+                    )
+                )
+            return endpoints
+
+        auth = self.server.auth
+        if auth is None and self.server.token:
+            auth = AuthConfig(type="bearer", token=self.server.token)
+        return [
+            ServerEndpoint(
+                id="default",
+                name="default",
+                backend=self.server.backend,
+                base_url=self.server.base_url.rstrip("/"),
+                auth=auth,
+                working_directory=self.server.working_directory,
+                default_agent=None,
+                default_model=None,
+            )
+        ]
+
+    def endpoint_for_base(self, base_url: str) -> ServerEndpoint | None:
+        base = base_url.rstrip("/")
+        for endpoint in self.server_endpoints():
+            if endpoint.base_url.rstrip("/") == base:
+                return endpoint
+        return None
+
     def server_bases(self) -> list[tuple[str, str, str | None]]:
         """(name, base_url, working_directory) tuples for the pool (or single base)."""
-        if self.server.pool:
-            return [(e.name, e.base_url, e.working_directory) for e in self.server.pool]
-
-        return [("default", self.server.base_url, None)]
+        return [
+            (endpoint.name, endpoint.base_url, endpoint.working_directory)
+            for endpoint in self.server_endpoints()
+        ]
 
     def server_token(self, base_url: str) -> str | None:
         """Bearer token for a base URL (pool entry, else the top-level token)."""
@@ -565,12 +641,8 @@ def load_config(path: str | Path | None) -> Config:
 
 def validate_startup(config: Config) -> None:
     """Reject configurations that are unsafe or unusable at startup."""
-    if config.projects.mode == "isolated" and not (
-        config.projects.control_url and config.projects.source_directory
-    ):
-        raise ValueError(
-            "projects.mode=isolated requires projects.control_url and projects.source_directory"
-        )
+    if config.projects.mode == "isolated":
+        _validate_isolated_projects(config)
 
     if config.channels.wecom.enabled:
         wecom = config.channels.wecom.identity
@@ -583,9 +655,84 @@ def validate_startup(config: Config) -> None:
                 "not expose the bot's name or description"
             )
 
+    _validate_server_endpoints(config)
     _validate_wechat(config.channels.wechat)
     _validate_wechat_logins(config)
     _validate_admins(config)
+
+
+def _validate_isolated_projects(config: Config) -> None:
+    projects = config.projects
+    if not projects.source_directory:
+        raise ValueError("projects.mode=isolated requires projects.source_directory")
+
+    source = Path(projects.source_directory)
+    base = Path(projects.base_dir)
+    if not source.is_absolute() or not base.is_absolute():
+        raise ValueError("projects.source_directory and projects.base_dir must be absolute")
+
+    source_resolved = source.resolve()
+    base_resolved = base.resolve()
+    if source_resolved == base_resolved:
+        raise ValueError("projects.base_dir must not be the source project directory")
+    if base_resolved.is_relative_to(source_resolved):
+        raise ValueError("projects.base_dir must not be inside projects.source_directory")
+    if source_resolved.is_relative_to(base_resolved):
+        raise ValueError("projects.source_directory must not be inside projects.base_dir")
+
+    if projects.backend == "agentd":
+        if not projects.control_url:
+            raise ValueError(
+                "projects.mode=isolated with backend=agentd requires projects.control_url"
+            )
+        return
+
+    endpoint = next(
+        (item for item in config.server_endpoints() if item.id == projects.endpoint),
+        None,
+    )
+    if endpoint is None:
+        raise ValueError(
+            "projects.mode=isolated with backend=opencode requires projects.endpoint "
+            "to name a configured endpoint"
+        )
+    if endpoint.backend != "opencode":
+        raise ValueError("projects.endpoint must reference an opencode endpoint")
+    if projects.isolation != "worktree":
+        raise ValueError("projects.backend=opencode only supports isolation=worktree")
+    if projects.sandbox is not None and projects.sandbox.process != "none":
+        raise ValueError("projects.backend=opencode does not support sandbox.process")
+
+
+def _validate_server_endpoints(config: Config) -> None:
+    endpoints = config.server_endpoints()
+    seen_ids: set[str] = set()
+    by_base: dict[str, list[ServerEndpoint]] = {}
+
+    for endpoint in endpoints:
+        if not endpoint.id.strip():
+            raise ValueError("server endpoint id must not be empty")
+        if endpoint.id in seen_ids:
+            raise ValueError(f"duplicate server endpoint id: {endpoint.id!r}")
+        seen_ids.add(endpoint.id)
+
+        if endpoint.working_directory is not None and not Path(
+            endpoint.working_directory
+        ).is_absolute():
+            raise ValueError(
+                f"server endpoint {endpoint.id!r} working_directory must be absolute"
+            )
+
+        by_base.setdefault(endpoint.base_url, []).append(endpoint)
+
+    for base_url, matches in by_base.items():
+        if len(matches) < 2:
+            continue
+        if any(endpoint.backend != "opencode" for endpoint in matches):
+            raise ValueError(
+                f"multiple server endpoints share {base_url!r}; only opencode endpoints "
+                "may share a base_url"
+            )
 
 
 def _validate_wechat_logins(config: Config) -> None:
