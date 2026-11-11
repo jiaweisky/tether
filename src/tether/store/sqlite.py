@@ -8,7 +8,12 @@ survive a bridge restart.
 
 from __future__ import annotations
 
-import fcntl
+try:  # POSIX advisory locking
+    import fcntl
+except ImportError:  # pragma: no cover - Windows has no fcntl
+    fcntl = None  # type: ignore[assignment]
+    import msvcrt  # type: ignore[import-untyped]
+
 import json
 import os
 import time
@@ -80,8 +85,14 @@ class _DbLock:
         fh = self.path.open("a+")
 
         try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
+            if fcntl is not None:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            else:  # pragma: no cover - Windows
+                # Lock 1 byte at offset 0; raises OSError when already held,
+                # and the lock is released automatically if the process dies.
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as exc:
             fh.close()
             raise DatabaseInUseError(
                 f"state database is already in use by another tether process: {self.path}"
@@ -101,7 +112,11 @@ class _DbLock:
         fh, self._fh = self._fh, None
 
         try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            else:  # pragma: no cover - Windows
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
         finally:
             fh.close()
 

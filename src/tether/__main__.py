@@ -39,7 +39,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 async def _run(config_path: str, db_path: str | None) -> None:
-    # Load secrets from .env (does not override already-set environment).
+    # Load secrets from the .env next to the config file, then fall back to
+    # python-dotenv's default discovery (does not override already-set env).
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(config_path)), ".env"))
     load_dotenv()
 
     config = load_config(config_path)

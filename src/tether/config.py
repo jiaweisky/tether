@@ -632,7 +632,7 @@ def load_config(path: str | Path | None) -> Config:
     if path is None:
         return Config()
 
-    raw = yaml.safe_load(Path(path).read_text()) or {}
+    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
         raise ValueError("config root must be a mapping")
 

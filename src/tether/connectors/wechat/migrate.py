@@ -68,7 +68,7 @@ async def _migrate_one(bot: WeChatBotConfig, store: RouteStore) -> None:
 
 def _read_credential(bot: WeChatBotConfig, path: Path) -> WeChatCredential | None:
     try:
-        raw = json.loads(path.read_text())
+        raw = json.loads(path.read_text(encoding="utf-8"))
         credential = (
             WeChatCredential.from_dict(raw) if isinstance(raw, dict) else None
         )
@@ -106,7 +106,7 @@ async def _import_state(store: RouteStore, slot: str, state_path: Path) -> None:
     if not state_path.is_file():  # noqa: ASYNC240
         return
     try:
-        raw = json.loads(state_path.read_text())  # noqa: ASYNC240
+        raw = json.loads(state_path.read_text(encoding="utf-8"))  # noqa: ASYNC240
         state = WeChatState.from_dict(raw) if isinstance(raw, dict) else WeChatState()
     except (OSError, ValueError):
         return
