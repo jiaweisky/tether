@@ -33,6 +33,7 @@ async def test_route_round_trips_all_persisted_fields(tmp_path):
         location="/work",
         agent="build",
         model={"id": "m1", "providerID": "p"},
+        configured_model="p/m1#high",
         context_limit=4096,
         project_id="project-1",
         participants={"u1": "Alice"},
@@ -77,6 +78,7 @@ async def test_route_round_trips_all_persisted_fields(tmp_path):
     assert loaded.location == "/work"
     assert loaded.agent == "build"
     assert loaded.model == "m1"
+    assert loaded.configured_model == "p/m1#high"
     assert loaded.context_limit == 4096
     assert loaded.project_id == "project-1"
     assert loaded.participants == {"u1": "Alice"}

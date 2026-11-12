@@ -277,6 +277,10 @@ class Route:
     backend: str | None = None
     location: str | None = None
     model: str | None = None
+    # The model the deployment configuration asked for when the session was last
+    # created or re-synced. ``model`` is what the session actually reports and may
+    # differ (a model switched from the agent UI, or an agent-side default).
+    configured_model: str | None = None
     context_limit: int | None = None
     project_id: str | None = None
     # Multi-user group-chat state.
@@ -306,3 +310,20 @@ class Route:
     @property
     def key(self) -> str:
         return self.conversation.key
+
+
+def model_ref(value: str | None) -> str | None:
+    """A trimmed model reference, or ``None`` when unset.
+
+    A ``#variant`` suffix is part of the reference because it selects behaviour:
+    ``provider/model`` and ``provider/model#high`` are not interchangeable.
+    """
+    if not value:
+        return None
+
+    return value.strip() or None
+
+
+def same_model(left: str | None, right: str | None) -> bool:
+    """Whether two model references are identical, variant included."""
+    return model_ref(left) == model_ref(right)

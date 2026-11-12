@@ -155,6 +155,7 @@ def _route_to_json(route: Route) -> str:
         "location": route.location,
         "agent": route.agent,
         "model": route.model,
+        "configured_model": route.configured_model,
         "context_limit": route.context_limit,
         "project_id": route.project_id,
         "participants": route.participants,
@@ -200,6 +201,8 @@ def _route_from_json(raw: str) -> Route:
         location=d.get("location"),
         agent=d["agent"],
         model=d.get("model"),
+        # `model_config` is the name this field used while it was unreleased.
+        configured_model=d.get("configured_model") or d.get("model_config"),
         context_limit=d.get("context_limit"),
         project_id=d.get("project_id"),
         participants=dict(d.get("participants") or {}),

@@ -40,8 +40,11 @@ model, so the two adapters are interchangeable.
 
 Set `server.backend` for the single-base form, or list `server.pool` entries with
 their own `backend`, `auth`, `working_directory`, `default_agent` and
-`default_model`. Legacy `server.base_url` / `server.token` configurations keep
-working (and default to `agentd`). See
+`default_model`. A changed `default_model` is applied to existing conversations
+on their next message; a model switched in the backend UI is reflected in
+`/status` and is not reverted unless the configured value changes. Legacy
+`server.base_url` / `server.token` configurations keep working (and default to
+`agentd`). See
 [`docs/DESIGN-OPENCODE-BACKEND.md`](./docs/DESIGN-OPENCODE-BACKEND.md) for the
 full design.
 

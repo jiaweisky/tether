@@ -33,6 +33,9 @@ class FakeAgentClient:
         self.form_replies: list[tuple[str, str, dict]] = []
         self.created_permissions: list[list] = []
         self.rejected_questions: list[tuple[str, str]] = []
+        self.set_models: list[tuple[str, str]] = []
+        self.fail_set_model_with: str | None = None
+        self.fail_list_models_with: str | None = None
         self._counter = 0
         self._permissions: list[PendingPermission] = []
         self._questions: list[PendingQuestion] = []
@@ -58,6 +61,8 @@ class FakeAgentClient:
         return list(self.agents)
 
     async def list_models(self, *, location=None):
+        if self.fail_list_models_with is not None:
+            raise AgentError(self.fail_list_models_with)
         return self.models
 
     async def agent_tools(self, agent: str, *, location=None):
@@ -111,7 +116,13 @@ class FakeAgentClient:
         return info
 
     async def set_agent(self, sid, agent): ...
-    async def set_model(self, sid, model_ref): ...
+    async def set_model(self, sid, model_ref):
+        if self.fail_set_model_with is not None:
+            code = self.fail_set_model_with
+            self.fail_set_model_with = None
+            raise AgentError(code)
+        self.set_models.append((sid, str(model_ref)))
+
     async def set_title(self, sid, title): ...
     async def delete_session(self, sid):
         self.deleted.append(sid)

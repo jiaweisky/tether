@@ -377,6 +377,7 @@ permission.asked / permission.replied
 question.asked / question.replied / question.rejected
 attachment.omitted          # 可选事件；OpenCode 不产生
 title.updated               # 可选事件
+model.selected              # 可选事件；后端 UI/其他客户端切换了会话模型
 ```
 
 `Event` 必须显式携带 `session_id`，不允许再从后端 `data` 字段推导：
@@ -391,7 +392,7 @@ EventType = Literal[
     "compaction.started", "compaction.delta", "compaction.ended",
     "permission.asked", "permission.replied",
     "question.asked", "question.replied", "question.rejected",
-    "attachment.omitted", "title.updated",
+    "attachment.omitted", "title.updated", "model.selected",
 ]
 
 @dataclass(frozen=True)
@@ -432,6 +433,7 @@ class Event:
 | `question.rejected` | `request_id: str` | |
 | `attachment.omitted` | `name: str`, `reason: str`, `detail: str \| None` | 可选 |
 | `title.updated` | `title: str` | 可选 |
+| `model.selected` | `model: str \| None` | 可选；`provider/model#variant`，供 Tether 同步 `Route.model` |
 
 `ToolPart` 至少支持：
 
@@ -694,6 +696,7 @@ OpenCode 事件定义见：
 | `session.retry.scheduled` | `TURN_STATUS` | `data=TurnStatus(retry, attempt, next)` |
 | `session.compaction.started/ended` | `COMPACTION_*` | typed payload |
 | `session.compaction.delta` | `COMPACTION_DELTA` | 目前内核不消费，可忽略 |
+| `session.model.selected` | `MODEL_SELECTED` | `session_id` 显式填写；`data=ModelSelected(model=format_model_ref(data.model))` |
 | `permission.asked` | `PERMISSION_ASKED` | `data=PermissionAsked(request)` |
 | `permission.replied` | `PERMISSION_REPLIED` | `data=PermissionReplied(request_id, reply)` |
 | `form.created` | `QUESTION_ASKED` | `session_id=form.sessionID`，`data=QuestionAsked(request)`；仅映射 `metadata.kind == "question"` 或可安全转换的表单 |
@@ -1395,6 +1398,8 @@ Phase 2 的“高级能力”是明确列出的，不是泛泛的 TODO：
 4. **模型与 agent 选择**：
    - OpenCode model variant；
    - `default_model` / `default_agent` 的发现与展示；
+   - `default_model` 变更在下一条消息时同步到既有 session（失败保留旧模型并重试）；`session.model.selected` 同步 `Route.model`，外部切换不会被未变更的配置覆盖；
+   - 不同步 `default_agent`：agent 发现总会落到某个具体 agent，重放会覆盖后端 UI 的选择；
    - 不在 Phase 2 做自动 agent 路由。
 5. **可选 OpenCode command/skill 转发**：
    - `POST /api/session/:sid/command`；

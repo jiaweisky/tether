@@ -9,6 +9,7 @@ from tether.agent.events import (
     COMPACTION_ENDED,
     COMPACTION_STARTED,
     FORM_ASKED,
+    MODEL_SELECTED,
     PERMISSION_ASKED,
     PERMISSION_REPLIED,
     QUESTION_ASKED,
@@ -33,6 +34,7 @@ from tether.agent.events import (
     Event,
 )
 from tether.agent.opencode.forms import form_to_question, form_to_spec
+from tether.agent.opencode.models import format_model_ref
 
 OPENCODE_V2_EVENT_MAP: dict[str, str] = {
     "server.connected": SERVER_CONNECTED,
@@ -61,6 +63,7 @@ OPENCODE_V2_EVENT_MAP: dict[str, str] = {
     "session.compaction.delta": COMPACTION_DELTA,
     "session.compaction.ended": COMPACTION_ENDED,
     "session.renamed": TITLE_UPDATED,
+    "session.model.selected": MODEL_SELECTED,
     "permission.asked": PERMISSION_ASKED,
     "permission.replied": PERMISSION_REPLIED,
     "form.created": QUESTION_ASKED,
@@ -206,6 +209,8 @@ class OpenCodeEventMapper:
             payload = {}
         elif event_type == TITLE_UPDATED:
             payload = {"title": data.get("title") or ""}
+        elif event_type == MODEL_SELECTED:
+            payload = {"model": format_model_ref(data.get("model"))}
         else:
             payload = dict(data)
 

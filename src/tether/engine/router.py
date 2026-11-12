@@ -17,7 +17,7 @@ from tether.agent.registry import create_backend
 from tether.config import Config, ServerEndpoint
 from tether.connector import IMConnector
 from tether.engine.projects import LeaseManager, ProjectProvider
-from tether.models import BotIdentity, Conversation, Route
+from tether.models import BotIdentity, Conversation, Route, same_model
 from tether.store.sqlite import RouteStore
 from tether.util.logging import get_logger
 
@@ -131,17 +131,29 @@ class Router:
         self, base_url: str, model_id: str | None, *, location: str | None = None
     ) -> int | None:
         """The model's context window as reported by agentd, for the usage line."""
+        _, limit = await self.lookup_context_limit(base_url, model_id, location=location)
+        return limit
+
+    async def lookup_context_limit(
+        self, base_url: str, model_id: str | None, *, location: str | None = None
+    ) -> tuple[bool, int | None]:
+        """``(discovery_succeeded, context_limit)`` for a model.
+
+        A failed discovery (backend unreachable) is distinguished from a model
+        that simply reports no limit, so callers can keep a previously known
+        value on a transient failure instead of clearing it.
+        """
         if not model_id:
-            return None
+            return True, None
 
         try:
             models = await self._model_map(base_url, location)
-            model = models.get(model_id) or models.get(model_id.split("#", 1)[0])
         except Exception as exc:  # noqa: BLE001 - the limit is optional
             log.warning("model_lookup_failed", model=model_id, error=str(exc))
-            return None
+            return False, None
 
-        return model.context_limit if model is not None else None
+        model = models.get(model_id) or models.get(model_id.split("#", 1)[0])
+        return True, (model.context_limit if model is not None else None)
 
     async def warm_base(self, base_url: str) -> None:
         """Best-effort discovery so the first message does not pay for it."""
@@ -399,6 +411,7 @@ class Router:
         if existing is not None:
             await self._ensure_lease(existing, agent=agent)
             await self._validate_session(existing)
+            await self._sync_model(existing)
 
             if existing.context_limit is None:
                 # Backfill routes persisted before the limit was discovered, so
@@ -445,6 +458,7 @@ class Router:
             location=info.location or location,
             agent=info.agent or agent_id,
             model=info.model or model,
+            configured_model=model,
             project_id=lease.project_id,
             created_at=now,
             last_active=now,
@@ -510,6 +524,66 @@ class Router:
 
         await self.recreate_session(route)
 
+    async def _sync_model(self, route: Route) -> None:
+        """Apply a changed ``default_model`` to an already-bound session.
+
+        The deployment configuration is the ops-level switch for the model, but
+        it is only read when a session is created. Without this, changing the
+        config leaves every existing conversation on its old model until someone
+        starts a new session (``/new``), which silently keeps using a stale —
+        possibly unavailable — model.
+
+        Only the model is synced here. ``default_agent`` is deliberately left
+        alone: agent discovery always resolves to *some* agent rather than an
+        "unset" value, so re-applying it would override an agent picked in the
+        backend UI instead of only acting when the configuration asks for one.
+        """
+        endpoint = self._endpoint_for_route(route)
+        desired = self.resolve_model(route.server_base, route.location, endpoint=endpoint)
+
+        # No configured model: the agent's own default stays authoritative, and
+        # a model selected from the agent UI is not fought over.
+        if desired is None or same_model(desired, route.configured_model):
+            return
+
+        # Routes persisted before ``configured_model`` existed have no baseline.
+        # The session's current model is the only evidence we have: if it already
+        # matches the configuration, adopt that baseline without a redundant
+        # switch; otherwise fall through and sync to the configured model.
+        if route.configured_model is None and same_model(desired, route.model):
+            route.configured_model = route.model
+            await self.store.put(route)
+            return
+
+        try:
+            await self.client_for(route).set_model(route.session_id, desired)
+        except AgentError as exc:
+            # A bad/unknown model name must not take the conversation down: keep
+            # serving with the old model and retry on the next message.
+            log.warning(
+                "model_sync_failed",
+                conversation=route.key,
+                session=route.session_id,
+                model=desired,
+                error=exc.code,
+            )
+            return
+
+        route.model = desired
+        route.configured_model = desired
+        known, limit = await self.lookup_context_limit(
+            route.server_base, desired, location=route.location
+        )
+        if known:
+            route.context_limit = limit
+        await self.store.put(route)
+        log.info(
+            "model_synced",
+            conversation=route.key,
+            session=route.session_id,
+            model=desired,
+        )
+
     async def recreate_session(self, route: Route) -> None:
         """Rebuild the agent session for an existing route.
 
@@ -531,6 +605,7 @@ class Router:
 
         route.session_id = info.id
         route.model = info.model or model
+        route.configured_model = model
         route.location = info.location or route.location
         route.context_limit = await self.resolve_context_limit(
             route.server_base, route.model, location=route.location
@@ -548,9 +623,15 @@ class Router:
 
         log.info("session_recreated", conversation=route.key, session=info.id)
 
-    async def save(self, route: Route) -> None:
-        route.last_active = time.time()
-        self.leases.touch(route.key)
+    async def save(self, route: Route, *, touch: bool = True) -> None:
+        """Persist ``route``, optionally recording activity and touching its lease.
+
+        Pure observation (for example a model switch made in the agent UI) should
+        pass ``touch=False`` so it does not extend an idle conversation's lease.
+        """
+        if touch:
+            route.last_active = time.time()
+            self.leases.touch(route.key)
         await self.store.put(route)
 
     def _lease_permissions(self) -> list[PermissionRule] | None:

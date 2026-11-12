@@ -10,6 +10,8 @@ import pytest
 from tether.agent.base import FormAnswer, PermissionRule, PromptFile, QuestionAnswer
 from tether.agent.errors import AgentError
 from tether.agent.events import (
+    MODEL_SELECTED,
+    ModelSelectedData,
     QuestionAskedData,
     TextData,
     ToolCalledData,
@@ -716,3 +718,22 @@ def test_v1_event_mapper():
     )
     assert [event.type for event in stepped] == ["step.ended", "turn.status"]
     assert stepped[1].data.status.type == "idle"
+
+
+def test_model_selected_event_maps_to_a_neutral_model_ref():
+    mapped = OpenCodeEventMapper().map(
+        {
+            "id": "ev1",
+            "type": "session.model.selected",
+            "data": {
+                "sessionID": "ses_1",
+                "model": {"id": "deepseek-flash", "providerID": "deepseek-official"},
+            },
+        }
+    )
+
+    assert mapped is not None
+    assert mapped.type == MODEL_SELECTED
+    assert mapped.session_id == "ses_1"
+    assert isinstance(mapped.data, ModelSelectedData)
+    assert mapped.data.model == "deepseek-official/deepseek-flash"

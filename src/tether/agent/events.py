@@ -21,6 +21,7 @@ STEP_ENDED = "step.ended"
 STEP_FAILED = "step.failed"
 ATTACHMENT_OMITTED = "attachment.omitted"
 TITLE_UPDATED = "title.updated"
+MODEL_SELECTED = "model.selected"
 COMPACTION_STARTED = "compaction.started"
 COMPACTION_ENDED = "compaction.ended"
 COMPACTION_DELTA = "compaction.delta"
@@ -303,6 +304,11 @@ class TitleUpdatedData:
     title: str = ""
 
 
+@dataclass(frozen=True)
+class ModelSelectedData:
+    model: str | None = None
+
+
 EventData = (
     EmptyData
     | RawData
@@ -350,6 +356,7 @@ def coerce_event_data(event_type: str, raw: Any, session_id: str | None = None) 
             FormAskedData,
             AttachmentOmittedData,
             TitleUpdatedData,
+            ModelSelectedData,
         ),
     ):
         return raw
@@ -426,6 +433,8 @@ def coerce_event_data(event_type: str, raw: Any, session_id: str | None = None) 
         )
     if event_type == TITLE_UPDATED:
         return TitleUpdatedData(title=str(data.get("title") or ""))
+    if event_type == MODEL_SELECTED:
+        return ModelSelectedData(model=_optional_str(data.get("model")))
     if event_type in (SERVER_CONNECTED, STEP_STARTED, COMPACTION_STARTED, COMPACTION_ENDED):
         return EmptyData()
     return RawData(values=dict(data))
@@ -514,6 +523,7 @@ __all__ = [
     "EventData",
     "FilePart",
     "FormAskedData",
+    "ModelSelectedData",
     "PermissionAskedData",
     "PermissionRepliedData",
     "QuestionAskedData",

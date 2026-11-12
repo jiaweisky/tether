@@ -181,6 +181,7 @@
 | `form.created/replied/cancelled` | question/form |
 | `session.compaction.*` | 压缩 |
 | `session.retry.scheduled` | 重试 |
+| `session.model.selected` | 会话模型切换；`data.model` 为 `Model.Ref`（`{providerID,id,variant?}`），Tether 用它同步 `Route.model` |
 
 关键实测结论：
 

@@ -23,6 +23,7 @@ from tether.agent.base import AgentBackend, BackendDescription, FormAnswer, Form
 from tether.agent.errors import AgentError, user_message
 from tether.agent.events import (
     FORM_ASKED,
+    MODEL_SELECTED,
     PERMISSION_ASKED,
     PERMISSION_REPLIED,
     QUESTION_ASKED,
@@ -65,6 +66,7 @@ from tether.models import (
     Route,
     Sender,
     TextSegment,
+    same_model,
 )
 from tether.render.markdown import render_markdown
 from tether.render.renderer import DefaultRenderer
@@ -1420,6 +1422,9 @@ class TetherApp:
                 route.conversation = replace(route.conversation, name=str(title))
                 await self.router.save(route)
 
+        if event.type == MODEL_SELECTED:
+            await self._observe_model_selected(event, sid)
+
         engine = self._turns.get(sid)
         if engine is not None:
             self._observe_event_seq(engine, event)
@@ -1439,6 +1444,31 @@ class TetherApp:
         if event.type == SESSION_STATUS:
             status = getattr(event.data, "status", None)
             log.debug("status_without_turn", session=sid, status=status)
+
+    async def _observe_model_selected(self, event: Event, sid: str) -> None:
+        """Keep ``Route.model`` in step with a model switched outside tether.
+
+        The agent lets a session's model change (its UI or another client); the
+        bridge only learns about it from this event. ``Route.model`` feeds
+        ``/status`` and the context-window usage line, so refresh both.
+        """
+        model = getattr(event.data, "model", None)
+        if not model:
+            return
+
+        route = await self.router.get_by_session(sid)
+        if route is None or same_model(route.model, model):
+            return
+
+        route.model = str(model)
+        known, limit = await self.router.lookup_context_limit(
+            route.server_base, route.model, location=route.location
+        )
+        if known:
+            route.context_limit = limit
+        # An observation is not user activity: do not extend the lease.
+        await self.router.save(route, touch=False)
+        log.info("route_model_observed", conversation=route.key, model=route.model)
 
     async def _watchdog_loop(self) -> None:
         interval = self.config.sessions.turn_watchdog_s

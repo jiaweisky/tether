@@ -283,6 +283,57 @@ async def test_opencode_live_api_surface(tmp_path_factory):
         switch = await client.post(f"/api/session/{session_id}/agent", json={"agent": "build"})
         assert switch.status_code == 204
 
+        # switching the model publishes session.model.selected with a Model.Ref
+        raw_models = (await client.get("/api/model", params=location_params)).json()
+        models = raw_models if isinstance(raw_models, list) else raw_models.get("data") or []
+        target = next((item for item in models if isinstance(item, dict)), None)
+        if target and target.get("providerID") and (target.get("modelID") or target.get("id")):
+            selected: list[dict] = []
+
+            async def listen_model() -> None:
+                async with aconnect_sse(
+                    client,
+                    "GET",
+                    "/api/event",
+                    headers={"Accept": "text/event-stream"},
+                    timeout=None,
+                ) as source:
+                    async for sse in source.aiter_sse():
+                        if not sse.data:
+                            continue
+                        try:
+                            envelope = json.loads(sse.data)
+                        except ValueError:
+                            continue
+                        data = envelope.get("data") or {}
+                        if (
+                            envelope.get("type") == "session.model.selected"
+                            and data.get("sessionID") == session_id
+                        ):
+                            selected.append(data)
+                            return
+
+            task = asyncio.create_task(listen_model())
+            await asyncio.sleep(1)
+            switched = await client.post(
+                f"/api/session/{session_id}/model",
+                json={
+                    "model": {
+                        "providerID": target["providerID"],
+                        "id": target.get("modelID") or target["id"],
+                    }
+                },
+            )
+            assert switched.status_code == 204
+            try:
+                await asyncio.wait_for(task, timeout=15)
+            finally:
+                task.cancel()
+            event = selected[-1]
+            assert event.get("sessionID") == session_id
+            assert event.get("model", {}).get("providerID") == target["providerID"]
+            assert event.get("model", {}).get("id") == (target.get("modelID") or target["id"])
+
         # prompt resume=false: durable inbox admission without execution
         prompt = await client.post(
             f"/api/session/{session_id}/prompt",

@@ -8,6 +8,7 @@ from fakes import FakeAgentClient
 from tether.agent.errors import AgentError
 from tether.agent.events import (
     ATTACHMENT_OMITTED,
+    MODEL_SELECTED,
     PERMISSION_ASKED,
     QUESTION_ASKED,
     QUESTION_REPLIED,
@@ -20,6 +21,8 @@ from tether.agent.events import (
     TOOL_FAILED,
     TOOL_SUCCESS,
     Event,
+    ModelInfo,
+    SessionInfo,
 )
 from tether.app import TetherApp
 from tether.config import Config
@@ -40,11 +43,11 @@ def ask_bash_config() -> Config:
     return config
 
 
-async def make_app(tmp_path, config: Config | None = None, connector=None):
+async def make_app(tmp_path, config: Config | None = None, connector=None, client=None):
     metrics.reset()  # the registry is process-global; isolate counter assertions
     config = config or Config()
     conn = connector or FakeConnector()
-    client = FakeAgentClient()
+    client = client or FakeAgentClient()
     app = TetherApp(
         config,
         db_path=str(tmp_path / "t.db"),
@@ -506,6 +509,148 @@ def test_route_normalizes_dict_model():
         model={"id": "deepseek-flash", "providerID": "", "variant": "default"},
     )
     assert route.model == "deepseek-flash"
+
+
+@pytest.mark.asyncio
+async def test_model_follows_config_change_on_next_message(tmp_path):
+    config = Config()
+    config.agent.default_model = "openai/one"
+    app, _conn, client = await make_app(tmp_path, config=config)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+    route = await app.router.get_by_session(sid)
+    assert route.model == "openai/one"
+    assert route.configured_model == "openai/one"
+
+    config.agent.default_model = "openai/two"
+    await app._on_message(inbound("again", message_id="m2"))
+
+    assert client.set_models == [(sid, "openai/two")]
+    assert route.model == "openai/two"
+    assert route.configured_model == "openai/two"
+
+
+@pytest.mark.asyncio
+async def test_model_is_resynced_when_the_variant_changes(tmp_path):
+    config = Config()
+    config.agent.default_model = "openai/one"
+    app, _conn, client = await make_app(tmp_path, config=config)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+    route = await app.router.get_by_session(sid)
+
+    # A variant selects behaviour, so it is a real model change.
+    config.agent.default_model = "openai/one#high"
+    await app._on_message(inbound("again", message_id="m2"))
+
+    assert client.set_models == [(sid, "openai/one#high")]
+    assert route.model == "openai/one#high"
+    assert route.configured_model == "openai/one#high"
+
+
+@pytest.mark.asyncio
+async def test_legacy_route_adopts_its_current_model_as_the_config_baseline(tmp_path):
+    config = Config()
+    config.agent.default_model = "openai/one"
+    app, _conn, client = await make_app(tmp_path, config=config)
+    await app._on_message(inbound("hi"))
+
+    route = await app.router.get_by_session(client.prompts[0]["sid"])
+    route.configured_model = None  # route persisted before the field existed
+    await app.store.put(route)
+
+    await app._on_message(inbound("again", message_id="m2"))
+
+    # The session already matches the config: adopt the baseline without a call.
+    assert client.set_models == []
+    assert route.configured_model == "openai/one"
+
+
+@pytest.mark.asyncio
+async def test_model_sync_keeps_the_context_limit_when_discovery_fails(tmp_path):
+    config = Config()
+    config.agent.default_model = "openai/one"
+    app, _conn, client = await make_app(tmp_path, config=config)
+    client.models = [ModelInfo("openai/one", "openai", [], [], context_limit=4096)]
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+    route = await app.router.get_by_session(sid)
+    assert route.context_limit == 4096
+    await app.store.close()
+
+    # A fresh process starts with an empty model cache. A discovery failure must
+    # not erase the limit persisted by the previous one.
+    config2 = Config()
+    config2.agent.default_model = "openai/two"
+    other = FakeAgentClient()
+    other.models = [ModelInfo("openai/two", "openai", [], [], context_limit=8192)]
+    other.sessions[sid] = SessionInfo(id=sid, agent="build", model="openai/one")
+    other.fail_list_models_with = "unavailable"
+    app2, _conn2, _client2 = await make_app(tmp_path, config=config2, client=other)
+
+    await app2._on_message(inbound("again", message_id="m2"))
+
+    reloaded = await app2.router.get_by_session(sid)
+    assert other.set_models == [(sid, "openai/two")]
+    assert reloaded.model == "openai/two"
+    assert reloaded.context_limit == 4096
+
+
+@pytest.mark.asyncio
+async def test_model_sync_failure_keeps_the_old_model_and_the_turn_alive(tmp_path):
+    config = Config()
+    config.agent.default_model = "openai/one"
+    app, _conn, client = await make_app(tmp_path, config=config)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+    route = await app.router.get_by_session(sid)
+
+    client.fail_set_model_with = "unknown_model"
+    config.agent.default_model = "openai/two"
+    await app._on_message(inbound("again", message_id="m2"))
+
+    assert len(client.prompts) == 2  # the message still reached the session
+    assert route.model == "openai/one"
+    assert route.configured_model == "openai/one"
+
+
+@pytest.mark.asyncio
+async def test_external_model_selection_updates_the_route_and_is_not_reverted(tmp_path):
+    config = Config()
+    config.agent.default_model = "openai/one"
+    app, _conn, client = await make_app(tmp_path, config=config)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+    route = await app.router.get_by_session(sid)
+
+    await app._route_event(Event("ev1", MODEL_SELECTED, {"sessionID": sid, "model": "openai/two"}))
+    assert route.model == "openai/two"
+
+    # A selection made outside tether is not the config's business; the next
+    # message must not drag the session back to the configured default.
+    await app._on_message(inbound("again", message_id="m2"))
+    assert client.set_models == []
+    assert route.model == "openai/two"
+
+
+@pytest.mark.asyncio
+async def test_model_selected_event_records_the_variant(tmp_path):
+    config = Config()
+    config.agent.default_model = "openai/one"
+    app, _conn, client = await make_app(tmp_path, config=config)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+    route = await app.router.get_by_session(sid)
+
+    await app._route_event(
+        Event("ev1", MODEL_SELECTED, {"sessionID": sid, "model": "openai/one#high"})
+    )
+    assert route.model == "openai/one#high"
+
+    # The config itself did not change, so the variant is not reverted.
+    await app._on_message(inbound("again", message_id="m2"))
+    assert client.set_models == []
+    assert route.model == "openai/one#high"
 
 
 @pytest.mark.asyncio
