@@ -66,7 +66,10 @@ def compile_glob(pattern: str) -> re.Pattern[str]:
             i += 1
 
     out.append("$")
-    return re.compile("".join(out))
+    # Windows paths are case-insensitive; the pattern and the subject are both
+    # normalised to forward slashes before matching.
+    flags = re.IGNORECASE if os.name == "nt" else 0
+    return re.compile("".join(out), flags)
 
 
 def compile_rules(
@@ -77,7 +80,7 @@ def compile_rules(
     Expands ``{working_dir}`` to the resolved root so a rule can be anchored inside
     the project; rules without it are independent of the conversation.
     """
-    root = str(Path(working_dir or ".").resolve())
+    root = Path(working_dir or ".").resolve().as_posix()
     rules: list[tuple[bool, re.Pattern[str]]] = []
 
     for raw in patterns:
@@ -86,7 +89,10 @@ def compile_rules(
 
         negate = raw.startswith("!")
         body = raw[1:] if negate else raw
-        rules.append((negate, compile_glob(body.replace(_WORKING_DIR, root))))
+        # Normalise Windows separators so a pattern built from a native path
+        # (``C:\project/**``) matches the POSIX-style subject below.
+        pattern = body.replace(_WORKING_DIR, root).replace("\\", "/")
+        rules.append((negate, compile_glob(pattern)))
 
     return rules
 
@@ -100,7 +106,7 @@ class PathPolicy:
 
     def allowed(self, path: str | Path, *, working_dir: str | None) -> bool:
         """Whether ``path`` is allowed; default-deny, last matching rule wins."""
-        real = str(Path(path).resolve())
+        real = Path(path).resolve().as_posix()
         allowed = False
 
         for negate, regex in self._rules(working_dir):

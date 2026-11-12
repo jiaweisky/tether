@@ -21,12 +21,19 @@ def test_context_limit_positive():
         Config.model_validate({"model": {"context_limit": 0}})
 
 
-def test_isolated_mode_requires_control_and_source():
+def test_isolated_mode_requires_control_and_source(tmp_path):
     config = Config.model_validate({"projects": {"mode": "isolated"}})
     with pytest.raises(ValueError):
         validate_startup(config)
     ok = Config.model_validate(
-        {"projects": {"mode": "isolated", "control_url": "http://x", "source_directory": "/src"}}
+        {
+            "projects": {
+                "mode": "isolated",
+                "control_url": "http://x",
+                "source_directory": str(tmp_path / "src"),
+                "base_dir": str(tmp_path / "workspaces"),
+            }
+        }
     )
     validate_startup(ok)  # no raise
 

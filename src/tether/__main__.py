@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import os
 import signal
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -38,12 +39,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-async def _run(config_path: str, db_path: str | None) -> None:
-    # Load secrets from the .env next to the config file, then fall back to
-    # python-dotenv's default discovery (does not override already-set env).
-    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(config_path)), ".env"))
+def _load_env(config_path: str) -> None:
+    """Load the .env next to the config, then python-dotenv's default discovery.
+
+    Neither source overrides an already-set environment variable. This runs
+    before the event loop starts, so the blocking filesystem work is harmless.
+    """
+    load_dotenv(Path(config_path).resolve().parent / ".env")
     load_dotenv()
 
+
+async def _run(config_path: str, db_path: str | None) -> None:
     config = load_config(config_path)
     if db_path is None:
         db_path = str(default_db_path(config_path))
@@ -97,6 +103,7 @@ async def _run(config_path: str, db_path: str | None) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
+    _load_env(args.config)
 
     try:
         asyncio.run(_run(args.config, args.db))
