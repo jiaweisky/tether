@@ -679,7 +679,7 @@ class TurnEngine:
             reasoning=self.controller.reasoning if self.config.streaming.show_reasoning else None,
             usage=self.usage if final and self.config.streaming.show_usage else None,
         )
-        plan = self.renderer.render(doc, self.connector.capabilities)
+        plan = self.renderer.render(doc, self.connector.capabilities, final=final)
         plan.final = final
 
         if self.conv.is_group and self.config.group.reply_with_mention:
@@ -688,16 +688,30 @@ class TurnEngine:
         return plan
 
     async def _update_or_send(self, plan: OutboundPlan) -> None:
-        """Replace the streamed text and emit any non-text segments separately."""
+        """Replace the streamed text and emit any non-text segments separately.
+
+        Only the first text segment can be patched into the existing message.
+        Remaining text chunks and non-text segments are sent as follow-up
+        messages, and only on the final frame so interim refreshes never
+        duplicate them.
+        """
         text_segments: list[Segment] = [s for s in plan.segments if isinstance(s, TextSegment)]
         other_segments: list[Segment] = [s for s in plan.segments if not isinstance(s, TextSegment)]
         if text_segments:
+            head, tail = text_segments[0], text_segments[1:]
             await self._replace_text(
-                OutboundPlan(segments=text_segments, reply_to=plan.reply_to, final=plan.final)
+                OutboundPlan(segments=[head], reply_to=plan.reply_to, final=plan.final)
             )
 
-        for segment in other_segments:
-            await self.connector.send(self.conv, OutboundPlan(segments=[segment], final=True))
+            if plan.final and tail:
+                await self.connector.send(
+                    self.conv,
+                    OutboundPlan(segments=tail, reply_to=plan.reply_to, final=True),
+                )
+
+        if plan.final:
+            for segment in other_segments:
+                await self.connector.send(self.conv, OutboundPlan(segments=[segment], final=True))
 
     async def _replace_text(self, plan: OutboundPlan) -> None:
         assert self._sent_ref is not None

@@ -28,6 +28,37 @@ def test_long_text_chunked_with_sequence_numbers():
     texts = [s.text for s in plan.segments if isinstance(s, TextSegment)]
     assert len(texts) > 1
     assert texts[0].endswith(f"(1/{len(texts)})")
+    assert all(len(text) <= 200 for text in texts)
+
+
+def test_chunk_count_grows_with_paragraphs():
+    for parts in (1, 2, 3):
+        doc = RichDoc(markdown="\n\n".join(["x" * 150] * parts))
+        plan = DefaultRenderer().render(doc, caps(max_chars=200))
+        texts = [s.text for s in plan.segments if isinstance(s, TextSegment)]
+
+        assert len(texts) == parts
+        if parts > 1:
+            assert all(text.endswith(f"({i + 1}/{parts})") for i, text in enumerate(texts))
+
+
+def test_live_render_keeps_one_segment():
+    doc = RichDoc(markdown=("word " * 300).strip())
+    plan = DefaultRenderer().render(doc, caps(max_chars=200), final=False)
+    texts = [s.text for s in plan.segments if isinstance(s, TextSegment)]
+
+    assert len(texts) == 1
+    assert len(texts[0]) <= 200
+    assert texts[0].endswith("…")
+
+
+def test_live_render_respects_single_char_limit():
+    doc = RichDoc(markdown="hello")
+    plan = DefaultRenderer().render(doc, caps(max_chars=1), final=False)
+    texts = [s.text for s in plan.segments if isinstance(s, TextSegment)]
+
+    assert len(texts) == 1
+    assert len(texts[0]) == 1
 
 
 def test_usage_line_appended():

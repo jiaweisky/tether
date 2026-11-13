@@ -77,6 +77,33 @@ class NonStreamingConnector(FakeConnector):
         return False
 
 
+class FailingUpdateConnector(FakeConnector):
+    """A streaming channel whose first in-place update fails."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.fail_updates = 1
+
+    async def _update_text(self, ref, text, *, final=True) -> None:  # noqa: ANN001
+        if self.fail_updates:
+            self.fail_updates -= 1
+            raise RuntimeError("update failed")
+
+        await super()._update_text(ref, text, final=final)
+
+
+class ReplyRecordingConnector(FakeConnector):
+    """Records the reply target of every outbound text message."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.reply_targets: list[str | None] = []
+
+    async def _send_text(self, conv, text, reply_to, *, final=True) -> str:  # noqa: ANN001
+        self.reply_targets.append(reply_to)
+        return await super()._send_text(conv, text, reply_to, final=final)
+
+
 def inbound(
     text: str,
     *,
@@ -115,6 +142,130 @@ async def test_direct_turn_streams_and_finishes(tmp_path):
     assert conn.last_text() == "Hello"
     assert app.metrics.get("turns") == 1
     assert sid not in app._turns
+
+
+@pytest.mark.asyncio
+async def test_long_final_answer_updates_streamed_message_then_sends_tail(tmp_path):
+    app, conn, client = await make_app(tmp_path)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+
+    answer = "\n\n".join(["first " + "x" * 3000, "second " + "y" * 3000])
+    await app._route_event(Event("e1", TEXT_DELTA, {"delta": answer, "sessionID": sid}))
+    await app._route_event(
+        Event("e2", SESSION_STATUS, {"sessionID": sid, "status": {"type": "idle"}})
+    )
+
+    texts = [m for m in conn.messages if m["kind"] == "text"]
+    assert len(texts) == 2
+    # The original streamed message is patched to the first chunk, not replaced
+    # by a brand-new message that leaves the old answer behind.
+    assert texts[0]["id"] == "m1"
+    assert texts[0]["text"].endswith("(1/2)")
+    assert texts[1]["text"].endswith("(2/2)")
+    assert all("Thinking" not in m["text"] for m in texts)
+
+
+@pytest.mark.asyncio
+async def test_long_answer_tail_is_sent_only_on_final(tmp_path):
+    config = Config()
+    config.streaming.min_interval_ms = 1
+    config.streaming.max_live_chars = 10_000
+    app, conn, client = await make_app(tmp_path, config=config)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+
+    await app._route_event(
+        Event("e1", TEXT_DELTA, {"delta": "first " + "x" * 3000, "sessionID": sid})
+    )
+    await asyncio.sleep(0.05)
+    await app._route_event(
+        Event("e2", TEXT_DELTA, {"delta": "\n\nsecond " + "y" * 3000, "sessionID": sid})
+    )
+    await asyncio.sleep(0.05)
+
+    interim = [m for m in conn.messages if m["kind"] == "text"]
+    assert len(interim) == 1
+    assert "(2/" not in interim[0]["text"]
+
+    await app._route_event(
+        Event("e3", SESSION_STATUS, {"sessionID": sid, "status": {"type": "idle"}})
+    )
+
+    texts = [m for m in conn.messages if m["kind"] == "text"]
+    assert len(texts) == 2
+    assert texts[0]["text"].endswith("(1/2)")
+    assert texts[1]["text"].endswith("(2/2)")
+
+
+@pytest.mark.asyncio
+async def test_media_is_sent_once_on_final(tmp_path):
+    config = Config()
+    config.streaming.min_interval_ms = 1
+    config.streaming.max_live_chars = 10_000
+    app, conn, client = await make_app(tmp_path, config=config)
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+
+    await app._route_event(
+        Event(
+            "e1",
+            TEXT_DELTA,
+            {"delta": "intro\n\n![x](http://i/x.png)\n\n", "sessionID": sid},
+        )
+    )
+    await asyncio.sleep(0.05)
+    await app._route_event(
+        Event("e2", TEXT_DELTA, {"delta": "a" * 2500 + "\n\n" + "b" * 2500, "sessionID": sid})
+    )
+    await asyncio.sleep(0.05)
+
+    assert not [m for m in conn.messages if m["kind"] == "media"]
+
+    await app._route_event(
+        Event("e3", SESSION_STATUS, {"sessionID": sid, "status": {"type": "idle"}})
+    )
+
+    assert len([m for m in conn.messages if m["kind"] == "media"]) == 1
+    assert len([m for m in conn.messages if m["kind"] == "text"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_update_failure_falls_back_and_still_sends_tail(tmp_path):
+    config = Config()
+    config.streaming.max_live_chars = 1
+    app, conn, client = await make_app(
+        tmp_path, config=config, connector=FailingUpdateConnector()
+    )
+    await app._on_message(inbound("hi"))
+    sid = client.prompts[0]["sid"]
+
+    answer = "first " + "x" * 3000 + "\n\n" + "second " + "y" * 3000
+    await app._route_event(Event("e1", TEXT_DELTA, {"delta": answer, "sessionID": sid}))
+    await app._route_event(
+        Event("e2", SESSION_STATUS, {"sessionID": sid, "status": {"type": "idle"}})
+    )
+
+    texts = [m for m in conn.messages if m["kind"] == "text"]
+    assert len(texts) == 3
+    assert texts[1]["text"].endswith("(1/2)")
+    assert texts[2]["text"].endswith("(2/2)")
+
+
+@pytest.mark.asyncio
+async def test_long_answer_tail_keeps_group_reply_target(tmp_path):
+    app, conn, client = await make_app(tmp_path, connector=ReplyRecordingConnector())
+    await app._on_message(inbound("hi", kind="group", conv_id="g1", message_id="m1"))
+    sid = client.prompts[0]["sid"]
+
+    answer = "first " + "x" * 3000 + "\n\n" + "second " + "y" * 3000
+    await app._route_event(Event("e1", TEXT_DELTA, {"delta": answer, "sessionID": sid}))
+    await app._route_event(
+        Event("e2", SESSION_STATUS, {"sessionID": sid, "status": {"type": "idle"}})
+    )
+
+    assert conn.reply_targets[-1] == "m1"
+    assert conn.reply_targets.count("m1") == 1
 
 
 @pytest.mark.asyncio

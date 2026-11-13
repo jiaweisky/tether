@@ -33,11 +33,23 @@ class DefaultRenderer:
         self.reasoning_style = reasoning_style
         self.max_chars_override = max_chars_override
 
-    def render(self, doc: RichDoc, caps: Capabilities) -> OutboundPlan:
+    def render(
+        self, doc: RichDoc, caps: Capabilities, *, final: bool = True
+    ) -> OutboundPlan:
         limit = self.max_chars_override or caps.max_text_chars
         body, images = render_markdown(doc.markdown, caps.markdown)
         body = self._decorate(body, doc)
-        segments: list[Segment] = [TextSegment(text=c) for c in self._chunk(body, limit)]
+
+        if final:
+            chunks = self._chunk(body, limit)
+        elif limit > 0 and len(body) > limit:
+            # An interim frame patches exactly one message, so it cannot be split
+            # into a follow-up message yet; show a truncated preview until final.
+            chunks = [body[: max(0, limit - 1)] + "…"]
+        else:
+            chunks = [body] if body else []
+
+        segments: list[Segment] = [TextSegment(text=c) for c in chunks]
         segments += [MediaSegment(media=media) for media in [*doc.media, *images]]
 
         return OutboundPlan(segments=segments)
@@ -108,18 +120,35 @@ class DefaultRenderer:
         if limit <= 0 or len(text) <= limit:
             return [text] if text else []
 
-        chunks: list[str] = []
-        for paragraph in text.split("\n\n"):
-            if len(paragraph) <= limit:
-                _append_paragraph(chunks, paragraph, limit)
-            else:
-                chunks.extend(_split_semantic(paragraph, limit))
-
-        chunks = [c for c in chunks if c]
+        chunks = _split_body(text, limit)
         if len(chunks) <= 1:
             return chunks
 
-        return [f"{c}\n\n({i + 1}/{len(chunks)})" for i, c in enumerate(chunks)]
+        # The sequence suffix counts toward the platform limit, so reserve room
+        # for it and re-split if a decorated chunk would overflow.
+        while True:
+            suffix = len(f"\n\n({len(chunks)}/{len(chunks)})")
+            budget = limit - suffix
+            if budget <= 0:
+                return [text[i : i + limit] for i in range(0, len(text), limit)]
+
+            if all(len(chunk) <= budget for chunk in chunks):
+                break
+
+            chunks = _split_body(text, budget)
+
+        return [f"{chunk}\n\n({i + 1}/{len(chunks)})" for i, chunk in enumerate(chunks)]
+
+
+def _split_body(text: str, limit: int) -> list[str]:
+    chunks: list[str] = []
+    for paragraph in text.split("\n\n"):
+        if len(paragraph) <= limit:
+            _append_paragraph(chunks, paragraph, limit)
+        else:
+            chunks.extend(_split_semantic(paragraph, limit))
+
+    return [c for c in chunks if c]
 
 
 def _append_paragraph(chunks: list[str], paragraph: str, limit: int) -> None:
