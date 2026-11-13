@@ -720,6 +720,72 @@ def test_v1_event_mapper():
     assert stepped[1].data.status.type == "idle"
 
 
+def _v1_text_ended(mapper, message_id: str, text: str):
+    started = mapper.map(
+        {
+            "id": f"{message_id}:start",
+            "type": "session.next.text.started",
+            "data": {"sessionID": "ses_1", "assistantMessageID": message_id, "textID": "0"},
+        }
+    )
+    assert started is not None and started.type == "text.started"
+    ended = mapper.map(
+        {
+            "id": f"{message_id}:end",
+            "type": "session.next.text.ended",
+            "data": {
+                "sessionID": "ses_1",
+                "assistantMessageID": message_id,
+                "textID": "0",
+                "text": text,
+            },
+        }
+    )
+    assert ended is not None and ended.type == "text.ended"
+    return ended.data.text
+
+
+def test_v1_text_accumulator_resets_between_turns():
+    """A new turn must not repeat the text of earlier turns.
+
+    v1 ends turns through the synthetic idle emitted on ``step.ended``; if that
+    path does not clear the per-session accumulator, every answer grows by all
+    previous answers.
+    """
+    from tether.agent.opencode.events import OpenCodeV1EventMapper
+
+    mapper = OpenCodeV1EventMapper()
+
+    assert _v1_text_ended(mapper, "msg_1", "first answer") == "first answer"
+    mapper.map_many(
+        {
+            "id": "step1",
+            "type": "session.next.step.ended",
+            "data": {"sessionID": "ses_1", "finish": "stop", "tokens": {}},
+        }
+    )
+
+    assert _v1_text_ended(mapper, "msg_2", "second answer") == "second answer"
+
+
+def test_v1_text_accumulator_resets_when_prompt_starts():
+    from tether.agent.opencode.events import OpenCodeV1EventMapper
+
+    mapper = OpenCodeV1EventMapper()
+
+    assert _v1_text_ended(mapper, "msg_1", "first answer") == "first answer"
+    # Even if the idle event was lost, the next turn's prompt resets the store.
+    mapper.map(
+        {
+            "id": "prompt2",
+            "type": "session.next.prompt.admitted",
+            "data": {"sessionID": "ses_1", "messageID": "msg_u2"},
+        }
+    )
+
+    assert _v1_text_ended(mapper, "msg_2", "second answer") == "second answer"
+
+
 def test_model_selected_event_maps_to_a_neutral_model_ref():
     mapped = OpenCodeEventMapper().map(
         {

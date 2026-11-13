@@ -115,6 +115,17 @@ _TEXT_EVENTS = {
     REASONING_ENDED,
 }
 
+# Native events that mark the beginning of a new user turn. The per-turn text
+# accumulation must start empty here, otherwise a missed idle event makes every
+# later answer repeat all earlier answers (the aggregator keeps text parts for
+# the whole session).
+_TURN_START_NATIVE = {
+    "session.next.prompt.admitted",
+    "session.next.prompted",
+    "session.prompt.admitted",
+    "session.prompted",
+}
+
 
 class OpenCodeEventMapper:
     """Stateful mapper for text-part aggregation and tool name completion."""
@@ -143,11 +154,15 @@ class OpenCodeEventMapper:
         data = data if isinstance(data, dict) else {}
 
         if self.synthesize_idle_on_step_end and event.type == STEP_FAILED:
+            # The synthetic idle replaces the native session.idle event, so it
+            # must also reset the per-turn text/reasoning accumulators.
+            self._clear_turn(event.session_id)
             events.append(_idle_event(event, raw))
         elif self.synthesize_idle_on_step_end and event.type == STEP_ENDED:
             # v1 does not publish session.status on every deployment. A step
             # ending with tool calls continues the turn; any other finish ends it.
             if str(data.get("finish") or "") != "tool-calls":
+                self._clear_turn(event.session_id)
                 events.append(_idle_event(event, raw))
 
         return events
@@ -163,6 +178,8 @@ class OpenCodeEventMapper:
 
         event_type = self.event_map.get(native_type, native_type)
         session_id = self._session_id(native_type, data)
+        if native_type in _TURN_START_NATIVE:
+            self._clear_turn(session_id)
         payload: dict[str, Any]
 
         if event_type in (TEXT_STARTED, TEXT_DELTA, TEXT_ENDED):
